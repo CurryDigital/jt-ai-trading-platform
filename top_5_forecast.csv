@@ -1,0 +1,6 @@
+Ticker,Price,Technical_Score,Sentiment,Final_Score,Reason
+9988.HK,161.0,1.0,0.5,0.75,"The technical indicators are neutral with an RSI around 50 and a stable SMA, while recent news headlines are predominantly positive about Alibaba's growth and strategic developments, suggesting a cautiously optimistic sentiment."
+2318.HK,71.3,1.0,0.5,0.75,"The technical indicators show a neutral to slightly bullish momentum with RSI near 60 and a below-average SMA, while recent news highlights a positive market environment and strong gains in related stocks, supporting a moderately bullish sentiment."
+0700.HK,581.0,0.0,-0.2,-0.1,"The technical indicator RSI suggests oversold conditions, but recent news headlines highlight declines and cautious sentiment regarding Tencent, indicating a slightly bearish outlook."
+3690.HK,93.2,0.0,-0.2,-0.1,"The technical indicators suggest a bearish momentum with RSI below 30 and recent negative news highlighting declines and increased competition, indicating a somewhat bearish sentiment."
+1211.HK,90.0,0.0,-0.2,-0.1,"The technical indicators show a relatively low RSI near oversold levels and a SMA indicating recent weakness, while recent news highlights sales declines and stock price drops, suggesting a somewhat bearish sentiment."
