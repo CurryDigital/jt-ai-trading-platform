@@ -52,15 +52,15 @@ class ModelOrchestrator:
         return pd.DataFrame(results)
 
     def _get_time_series_signal(self, ticker):
-        from src.analysis.time_series.prophet_forecast import run_analysis
+        from app.core_logic.analysis.time_series.prophet_forecast import run_analysis
         return run_analysis(ticker)
 
     def _get_sentiment_signal(self, ticker):
-        from src.analysis.sentiment.analyze_sentiment import run_analysis
+        from app.core_logic.analysis.sentiment.analyze_sentiment import run_analysis
         return run_analysis(ticker)
 
     def _get_alpha_signal(self, ticker):
-        from src.analysis.alpha_metrics.enhance_alpha import run_analysis
+        from app.core_logic.analysis.alpha_metrics.enhance_alpha import run_analysis
         return run_analysis(ticker)
 
 if __name__ == "__main__":

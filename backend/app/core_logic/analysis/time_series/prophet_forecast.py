@@ -41,7 +41,7 @@ def get_prophet_prediction(ticker):
         "P_6m": round((p_6m / last_price - 1) * 100, 2)
     }
 
-def run_analysis(ticker, data_path="data/processed/hk_stocks_features.csv"):
+def run_analysis(ticker, data_path="/home/ubuntu/.openclaw/workspace/data/processed/hk_stocks_features.csv"):
     """
     Analyzes trend using Prophet. Returns a signal from -1 to 1.
     """

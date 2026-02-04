@@ -1,0 +1,47 @@
+INFO:     Started server process [24446]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     74.80.182.88:22781 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:22781 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:22781 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:22781 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:25327 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:25327 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:25327 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:25327 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:25327 - "GET /api/analyze/0700.HK HTTP/1.1" 200 OK
+Importing plotly failed. Interactive plots will not work.
+09:41:47 - cmdstanpy - INFO - Chain [1] start processing
+09:41:47 - cmdstanpy - INFO - Chain [1] done processing
+INFO:app.core_logic.analysis.sentiment.analyze_sentiment:Running LLM Sentiment Analysis for 0700.HK...
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:     74.80.182.88:23103 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:23103 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:9559 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:9559 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:22077 - "GET /api/analyze/0700.HK HTTP/1.1" 200 OK
+INFO:app.core_logic.models.orchestrator:Processing 0700.HK...
+DEBUG:cmdstanpy:input tempfile: /tmp/tmpgwc_mr4s/ejuwgv5n.json
+DEBUG:cmdstanpy:input tempfile: /tmp/tmpgwc_mr4s/n3rxu031.json
+DEBUG:cmdstanpy:idx 0
+DEBUG:cmdstanpy:running CmdStan, num_threads: None
+DEBUG:cmdstanpy:CmdStan args: ['/home/ubuntu/.openclaw/workspace/backend/.venv/lib/python3.12/site-packages/prophet/stan_model/prophet_model.bin', 'random', 'seed=62487', 'data', 'file=/tmp/tmpgwc_mr4s/ejuwgv5n.json', 'init=/tmp/tmpgwc_mr4s/n3rxu031.json', 'output', 'file=/tmp/tmpgwc_mr4s/prophet_modelotxzarin/prophet_model-20260204094241.csv', 'method=optimize', 'algorithm=lbfgs', 'iter=10000']
+09:42:41 - cmdstanpy - INFO - Chain [1] start processing
+INFO:cmdstanpy:Chain [1] start processing
+09:42:41 - cmdstanpy - INFO - Chain [1] done processing
+INFO:cmdstanpy:Chain [1] done processing
+INFO:app.core_logic.analysis.sentiment.analyze_sentiment:Running LLM Sentiment Analysis for 0700.HK...
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:     74.80.182.88:21113 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:21113 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:21113 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:21113 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:15103 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:15103 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:15103 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:15103 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:31459 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:31459 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     74.80.182.88:31459 - "GET /api/signals/1 HTTP/1.1" 404 Not Found
+INFO:     74.80.182.88:31459 - "GET /api/signals/1 HTTP/1.1" 404 Not Found

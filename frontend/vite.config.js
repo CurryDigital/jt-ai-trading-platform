@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     allowedHosts: [
-      'modern-things-happen.loca.lt'
+      '47.129.86.69'
     ]
   }
 })
