@@ -23,32 +23,31 @@ class ModelOrchestrator:
     def run_full_pipeline(self, tickers):
         results = []
         for ticker in tickers:
-            self.logger.info(f"Processing {ticker}...")
+            scores = {
+                'ts': self._get_time_series_signal(ticker),
+                'sent': self._get_sentiment_signal(ticker),
+                'alpha': self._get_alpha_signal(ticker),
+                'macro': 0.5 # Placeholder for macro logic
+            }
             
-            # 1. Run Time Series Analysis
-            ts_signal = self._get_time_series_signal(ticker)
+            # Calculate Discord (Standard Deviation of scores)
+            import numpy as np
+            discord = np.std(list(scores.values()))
             
-            # 2. Run Sentiment Analysis
-            sent_signal = self._get_sentiment_signal(ticker)
-            
-            # 3. Run Alpha Metrics
-            alpha_signal = self._get_alpha_signal(ticker)
-            
-            # 4. Aggregate
             final_score = (
-                ts_signal * self.config['weights']['time_series'] +
-                sent_signal * self.config['weights']['sentiment'] +
-                alpha_signal * self.config['weights']['alpha']
+                scores['ts'] * self.config['weights']['time_series'] +
+                scores['sent'] * self.config['weights']['sentiment'] +
+                scores['alpha'] * self.config['weights']['alpha']
             )
             
             results.append({
                 'ticker': ticker,
-                'ts_signal': ts_signal,
-                'sent_signal': sent_signal,
-                'alpha_signal': alpha_signal,
-                'final_score': final_score
+                'ts_signal': scores['ts'],
+                'sent_signal': scores['sent'],
+                'alpha_signal': scores['alpha'],
+                'final_score': final_score,
+                'discord_index': float(discord)
             })
-            
         return pd.DataFrame(results)
 
     def _get_time_series_signal(self, ticker):

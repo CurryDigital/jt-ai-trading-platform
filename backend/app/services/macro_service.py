@@ -13,7 +13,8 @@ class MacroService:
             "HSI": "^HSI",
             "GOLD": "GC=F",
             "BTC": "BTC-USD",
-            "SPX": "^GSPC"
+            "NASDAQ": "^IXIC",
+            "DOW": "^DJI"
         }
 
     def get_market_pulse(self):

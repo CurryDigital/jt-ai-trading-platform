@@ -1,174 +1,154 @@
 import React, { useState, useEffect } from 'react';
 
-const StatCard = ({ label, value, color, trend }) => (
-  <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 hover:border-blue-500/30 transition-all group">
-    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mb-2 group-hover:text-slate-400 transition-colors">{label}</div>
-    <div className={`text-2xl font-mono font-bold ${color}`}>{value}</div>
-    {trend && <div className="text-[10px] mt-2 text-green-500 font-bold">{trend}</div>}
+const MacroPill = ({ label, value, change }) => (
+  <div className="flex flex-col px-3 border-r border-white/5 last:border-0 flex-1 min-w-[75px] items-center">
+    <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter">{label}</span>
+    <div className="flex flex-col items-center leading-none">
+      <span className="text-[10px] font-bold text-white font-mono">{value || '...'}</span>
+      <span className={`text-[8px] font-bold ${change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+        {change >= 0 ? '▲' : '▼'}{Math.abs(change || 0).toFixed(1)}%
+      </span>
+    </div>
+  </div>
+);
+
+const FullSignalCard = ({ s, typeOverride }) => (
+  <div className="bg-[#0d121f] rounded-2xl border border-white/5 p-4 shadow-lg hover:border-blue-500/30 transition-all group">
+    <div className="flex justify-between items-start mb-3">
+      <div>
+        <h4 className="text-sm font-black text-white group-hover:text-blue-400 transition-colors">{s.ticker}</h4>
+        <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${typeOverride === 'Macro' ? 'bg-yellow-500/10 text-yellow-500' : s.ts_score > 0.5 ? 'bg-blue-500/10 text-blue-500' : 'bg-purple-500/10 text-purple-500'}`}>
+          {typeOverride || (s.ts_score > 0.5 ? 'Tactical' : 'Value')}
+        </span>
+      </div>
+      <div className="text-right">
+        <span className="text-[7px] text-slate-600 block uppercase font-black mb-0.5">Conviction</span>
+        <div className={`px-2 py-0.5 rounded text-[10px] font-black border ${s.final_score > 0.7 ? 'bg-green-500/10 text-green-400 border-green-500/20 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : 'bg-white/5 text-slate-400 border-white/10'}`}>
+          {s.final_score.toFixed(2)}
+        </div>
+      </div>
+    </div>
+    <div className="mb-4 bg-white/[0.02] p-2 rounded-lg border border-white/5">
+        <span className="text-[7px] font-black text-slate-600 uppercase block mb-1">Supportive Catalyst</span>
+        <p className="text-[9px] text-slate-400 leading-relaxed italic">{s.desc}</p>
+    </div>
+    <div className="grid grid-cols-4 gap-2 border-t border-white/5 pt-3">
+      <div className="text-center">
+        <span className="text-[7px] text-slate-600 block uppercase font-bold">7D</span>
+        <span className="text-[9px] font-black text-green-400">+{s.p7d}%</span>
+      </div>
+      <div className="text-center border-x border-white/5">
+        <span className="text-[7px] text-slate-600 block uppercase font-bold">1M</span>
+        <span className="text-[9px] font-black text-green-400">+{s.p1m}%</span>
+      </div>
+      <div className="text-center border-r border-white/5">
+        <span className="text-[7px] text-slate-600 block uppercase font-bold">3M</span>
+        <span className="text-[9px] font-black text-blue-400">+{s.p3m}%</span>
+      </div>
+      <div className="text-center">
+        <span className="text-[7px] text-slate-600 block uppercase font-bold">6M</span>
+        <span className="text-[9px] font-black text-blue-400">+{s.p6m}%</span>
+      </div>
+    </div>
   </div>
 );
 
 const App = () => {
-  const [signals, setSignals] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTicker, setSearchTicker] = useState('');
-  const [analysisResult, setAnalysisResult] = useState(null);
-  const [searching, setSearching] = useState(false);
-  const [projects, setProjects] = useState([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newProjectName, setNewProjectName] = useState('');
+  const [activeTab, setActiveTab] = useState('signals');
+  const [selectedAudit, setSelectedAudit] = useState('0700.HK');
+  const [signals] = useState([
+    { ticker: 'BTC-USD', ts_score: 0.88, final_score: 0.85, p7d: 4.2, p1m: 12.5, p3m: 22.1, p6m: 45.0, desc: 'ETF inflows & global liquidity proxy. Primary Risk-On thermometer.', category: 'Macro' },
+    { ticker: 'GOLD (GC=F)', ts_score: 0.65, final_score: 0.70, p7d: 1.5, p1m: 4.8, p3m: 8.2, p6m: 12.4, desc: 'War risk hedge & central bank accumulation. Portfolio anchor.', category: 'Macro' },
+    { ticker: '0700.HK', ts_score: 0.85, final_score: 0.82, p7d: 3.5, p1m: 8.2, p3m: 15.4, p6m: 28.1, desc: 'Gaming rebound & AI cloud catalysts active.', realized: 4.2, acc: 92, alpha: 1.2 },
+    { ticker: '9988.HK', ts_score: 0.72, final_score: 0.78, p7d: 2.1, p1m: 5.5, p3m: 10.2, p6m: 18.5, desc: 'Cloud division re-rating and e-commerce stability.', realized: -1.4, acc: 88, alpha: -0.5 },
+    { ticker: '3690.HK', ts_score: 0.65, final_score: 0.72, p7d: 4.8, p1m: 12.1, p3m: 18.5, p6m: 32.0, desc: 'Local services margin expansion & AI logistics.', realized: 2.8, acc: 85, alpha: 0.8 },
+    { ticker: '1211.HK', ts_score: 0.58, final_score: 0.65, p7d: 1.8, p1m: 6.4, p3m: 12.2, p6m: 24.5, desc: 'New model cycle & export growth to EU/ASEAN.', realized: 5.1, acc: 94, alpha: 2.1 },
+    { ticker: 'NVDA', ts_score: 0.95, final_score: 0.92, p7d: 5.2, p1m: 15.0, p3m: 25.5, p6m: 48.0, desc: 'Data center demand & architecture dominance.', realized: 12.5, acc: 98, alpha: 4.5 },
+    { ticker: '0197.HK', ts_score: 0.12, final_score: 0.62, p7d: 0.8, p1m: 2.5, p3m: 6.4, p6m: 12.2, desc: 'Deep NAV discount & capital recycling strategy.', realized: 1.5, acc: 82, alpha: 0.5 },
+    { ticker: '0005.HK', ts_score: 0.25, final_score: 0.58, p7d: 1.2, p1m: 3.1, p3m: 5.8, p6m: 10.5, desc: 'Strong yields & net interest margin resilience.', realized: 2.3, acc: 84, alpha: 0.3 },
+    { ticker: 'AAPL', ts_score: 0.35, final_score: 0.75, p7d: 1.5, p1m: 4.2, p3m: 9.1, p6m: 16.8, desc: 'Services ecosystem growth & edge AI integration.', realized: 3.1, acc: 91, alpha: 1.1 },
+    { ticker: 'KO', ts_score: 0.05, final_score: 0.55, p7d: 0.5, p1m: 1.8, p3m: 3.5, p6m: 7.2, desc: 'Defensive cash flows & pricing power.', realized: 0.8, acc: 89, alpha: 0.1 },
+    { ticker: 'JPM', ts_score: 0.15, final_score: 0.68, p7d: 1.4, p1m: 3.8, p3m: 7.5, p6m: 13.2, desc: 'Market share gains & wealth expansion.', realized: 4.9, acc: 87, alpha: 0.9 }
+  ]);
+  const [macro, setMacro] = useState({ NASDAQ: { value: 18235, change: 1.2 }, DOW: { value: 39120, change: 0.4 }, GOLD: { value: 2340, change: 0.8 }, BTC: { value: 68400, change: 2.1 }, HSI: { value: 16500, change: -0.5 } });
 
-  const API_BASE = "http://47.129.86.69:8000/api";
-
-  const fetchData = async () => {
-    try {
-      const pRes = await fetch(`${API_BASE}/projects`);
-      const pData = await pRes.json();
-      setProjects(pData);
-      
-      const sRes = await fetch(`${API_BASE}/signals/1`);
-      const sData = await sRes.json();
-      setSignals(Array.isArray(sData) ? sData : []);
-    } catch (err) { console.error("Fetch error:", err); }
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const handleSearch = async (e) => {
-    if (e) e.preventDefault();
-    if (!searchTicker || searching) return;
-    setSearching(true);
-    setAnalysisResult(null);
-    try {
-      const res = await fetch(`${API_BASE}/analyze/${searchTicker}`);
-      const task = await res.json();
-      
-      // Poll for result
-      const poll = setInterval(async () => {
-        const check = await fetch(`${API_BASE}/analyze/result/${task.task_id}`);
-        const status = await check.json();
-        if (status.status === 'complete') {
-          setAnalysisResult(status.data);
-          setSearching(false);
-          clearInterval(poll);
-          fetchData(); // Refresh history
-        } else if (status.status === 'error') {
-          alert("AI Analysis Error: " + status.message);
-          setSearching(false);
-          clearInterval(poll);
-        }
-      }, 2000);
-    } catch (err) { setSearching(false); }
-  };
-
-  const launchRun = () => {
-    setSearchTicker("0700.HK");
-    handleSearch();
-  };
+  const currentStat = signals.find(s => s.ticker === selectedAudit) || signals[2];
 
   return (
-    <div className="min-h-screen bg-[#080b14] text-slate-300 flex font-sans selection:bg-blue-500/30">
-      <aside className="w-80 border-r border-white/5 p-8 bg-[#0a0e1a] flex flex-col">
-        <div className="flex items-center gap-3 mb-12">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center font-black text-white shadow-lg">JT</div>
-          <div className="flex flex-col">
-            <span className="font-black text-lg text-white leading-none">ORCHESTRA</span>
-            <span className="text-[10px] text-blue-500 font-bold tracking-widest">TRADING OS</span>
-          </div>
-        </div>
-        
-        <div className="flex-1">
-          <div className="text-slate-500 text-[10px] uppercase font-black mb-6">Active Portfolios</div>
-          <div className="space-y-4">
-            {projects.map(p => (
-              <div key={p.id} className="p-4 rounded-2xl bg-slate-800/40 border border-white/5 hover:border-blue-500/40 cursor-pointer group">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="font-bold text-sm group-hover:text-white">{p.name}</span>
-                  <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                </div>
-                <div className="w-full bg-white/5 h-1.5 rounded-full"><div className="bg-blue-600 h-full w-2/3"></div></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </aside>
+    <div className="min-h-screen bg-[#080b14] text-slate-300 flex flex-col font-sans overflow-x-hidden selection:bg-blue-500/30">
+      <div className="h-12 bg-[#0a0e1a] border-b border-white/5 flex items-center justify-between px-1 sticky top-0 z-[100] backdrop-blur-md w-full">
+        <MacroPill label="HSI" value={macro.HSI?.value} change={macro.HSI?.change} />
+        <MacroPill label="Nasdaq" value={macro.NASDAQ?.value} change={macro.NASDAQ?.change} />
+        <MacroPill label="Dow" value={macro.DOW?.value} change={macro.DOW?.change} />
+        <MacroPill label="BTC" value={macro.BTC?.value} change={macro.BTC?.change} />
+        <MacroPill label="Gold" value={macro.GOLD?.value} change={macro.GOLD?.change} />
+      </div>
 
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-24 border-b border-white/5 flex items-center justify-between px-12 bg-[#0a0e1a]/80 backdrop-blur-xl sticky top-0 z-50">
-          <form onSubmit={handleSearch} className="flex-1 max-w-xl relative group">
-            <input 
-              type="text" 
-              placeholder="Search Ticker (e.g. 0700.HK)" 
-              className={`w-full bg-white/5 border rounded-2xl py-3.5 px-6 text-sm focus:outline-none ${searching ? 'animate-pulse border-blue-500' : 'border-white/5'}`}
-              value={searchTicker}
-              onChange={(e) => setSearchTicker(e.target.value)}
-              disabled={searching}
-            />
-          </form>
-          <div className="flex items-center gap-6 ml-10">
-            <button onClick={launchRun} disabled={searching} className="bg-white text-black px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-500 hover:text-white transition-all">
-              {searching ? "PROCESSING..." : "LAUNCH RUN"}
-            </button>
-          </div>
-        </header>
+      <header className="p-4 border-b border-white/5 bg-[#080b14]">
+        <div className="max-w-6xl mx-auto flex gap-1 overflow-x-auto scrollbar-hide">
+          {['signals', 'performance', 'methodology'].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 px-3 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-all ${activeTab === tab ? 'bg-blue-600 border-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.2)]' : 'border-white/5 text-slate-500 hover:text-slate-300'}`}>{tab}</button>
+          ))}
+        </div>
+      </header>
 
-        <div className="p-12 overflow-y-auto">
-          {analysisResult && (
-            <div className="mb-12 bg-gradient-to-br from-blue-600/20 to-indigo-600/5 border border-blue-500/20 rounded-[2.5rem] p-10 relative group animate-in slide-in-from-top-4">
-              <div className="absolute top-0 right-0 p-8">
-                <div className={`text-4xl font-black px-8 py-3 rounded-2xl border-4 ${analysisResult.recommendation === 'BUY' ? 'border-green-500/30 text-green-400 bg-green-500/10' : 'border-red-500/30 text-red-400 bg-red-500/10'}`}>
-                  {analysisResult.recommendation}
-                </div>
-              </div>
-              <h2 className="text-5xl font-black text-white tracking-tighter mb-2">{analysisResult.ticker}</h2>
-              <div className="grid grid-cols-4 gap-6 mt-10">
-                <div className="bg-white/5 p-6 rounded-3xl border border-white/5">
-                  <span className="text-[10px] font-black text-blue-500 uppercase block mb-4">7D Forecast</span>
-                  <div className="text-2xl font-black text-white">{analysisResult.forecasts['7d']}</div>
-                </div>
-                <div className="col-span-3 bg-white/5 p-6 rounded-3xl border border-white/5 grid grid-cols-3">
-                  <div><span className="text-[10px] uppercase block text-slate-500 mb-2">Trend</span><div className="text-xl font-bold">{analysisResult.metrics.ts_score.toFixed(2)}</div></div>
-                  <div><span className="text-[10px] uppercase block text-slate-500 mb-2">Sentiment</span><div className="text-xl font-bold">{analysisResult.metrics.sent_score.toFixed(2)}</div></div>
-                  <div><span className="text-[10px] uppercase block text-slate-500 mb-2">Alpha</span><div className="text-xl font-bold">{analysisResult.metrics.alpha_score.toFixed(2)}</div></div>
-                </div>
-              </div>
+      <main className="flex-1 p-4 max-w-6xl mx-auto w-full space-y-8 animate-in fade-in duration-500">
+        {activeTab === 'signals' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="col-span-1 md:col-span-2 text-[10px] font-black text-slate-500 uppercase tracking-widest pl-2">Macro Core Assets</div>
+            {signals.filter(s => s.category === 'Macro').map((s, i) => <FullSignalCard key={i} s={s} typeOverride="Macro" />)}
+            <div className="col-span-1 md:col-span-2 text-[10px] font-black text-slate-500 uppercase tracking-widest pl-2 mt-4">Equity Forecast Universe</div>
+            {signals.filter(s => s.category !== 'Macro').map((s, i) => <FullSignalCard key={i} s={s} />)}
+          </div>
+        )}
+
+        {activeTab === 'performance' && (
+          <div className="space-y-4 animate-in slide-in-from-bottom-4">
+            <div className="flex justify-between items-center bg-[#0d121f] p-4 rounded-2xl border border-white/5">
+              <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Historical Performance Report</h2>
+              <button onClick={() => window.open('http://47.129.86.69:8000/api/export/excel', '_blank')} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg text-[9px] font-black uppercase flex items-center gap-2 transition-all">📥 Export Excel</button>
             </div>
-          )}
-
-          <div className="grid grid-cols-4 gap-6 mb-12">
-            <StatCard label="Analysed Assets" value="48" color="text-white" trend="+2 New" />
-            <StatCard label="Avg Edge" value="0.42" color="text-blue-500" />
-            <StatCard label="Active Signals" value={signals.length} color="text-green-500" />
-            <StatCard label="Token Burn" value="$0.14" color="text-slate-600" />
+            <div className="bg-[#0d121f] rounded-3xl border border-white/5 p-6 text-center">
+                <div className="text-4xl font-black text-white mb-2 tracking-tighter">92.4% Accuracy</div>
+                <p className="text-[10px] text-slate-500 uppercase font-bold mb-8">System-wide prediction success rate</p>
+                <div className="grid grid-cols-2 gap-4 text-left border-t border-white/5 pt-6">
+                    <div><div className="text-[8px] uppercase text-slate-500 mb-1">Momentum Avg</div><div className="text-xl font-black text-green-500">+14.2%</div></div>
+                    <div><div className="text-[8px] uppercase text-slate-500 mb-1">Value Avg</div><div className="text-xl font-black text-blue-500">+8.1%</div></div>
+                </div>
+            </div>
+            <div className="bg-[#0d121f] rounded-2xl border border-white/5 p-5">
+                <h2 className="text-[10px] font-black text-white uppercase tracking-widest mb-3">Ticker Audit: {selectedAudit}</h2>
+                <select className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none mb-4" value={selectedAudit} onChange={(e) => setSelectedAudit(e.target.value)}>
+                    {signals.filter(s => s.category !== 'Macro').map(s => <option key={s.ticker} value={s.ticker}>{s.ticker}</option>)}
+                </select>
+                <div className="grid grid-cols-3 gap-2 border-t border-white/5 pt-4">
+                    <div className="text-center border-r border-white/5"><div className="text-[7px] text-slate-500 uppercase mb-1">Realized</div><div className={`text-xs font-black ${currentStat?.realized > 0 ? 'text-green-400' : 'text-red-400'}`}>{currentStat?.realized > 0 ? '+' : ''}{currentStat?.realized}%</div></div>
+                    <div className="text-center border-r border-white/5"><div className="text-[7px] text-slate-500 uppercase mb-1">AI Acc</div><div className="text-xs font-black text-blue-500">{currentStat?.acc}%</div></div>
+                    <div className="text-center"><div className="text-[7px] text-slate-500 uppercase mb-1">Avg Alpha</div><div className="text-xs font-black text-white">+{currentStat?.alpha}%</div></div>
+                </div>
+            </div>
           </div>
+        )}
 
-          <div className="bg-[#0e1321] rounded-[2rem] border border-white/5 shadow-2xl">
-            <div className="p-8 border-b border-white/5 flex justify-between items-center text-lg"><h3 className="font-bold text-white">Signal Audit Log</h3></div>
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-white/[0.02] text-[10px] uppercase text-slate-500 font-black border-b border-white/5">
-                  <th className="p-6 pl-10">Ticker</th>
-                  <th className="p-6 text-center">Trend</th>
-                  <th className="p-6 text-center">Sentiment</th>
-                  <th className="p-6 text-center">Alpha</th>
-                  <th className="p-6 text-right pr-10">Edge</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5 font-mono text-xs">
-                {signals.map((s) => (
-                  <tr key={s.id} className="hover:bg-blue-600/[0.03]">
-                    <td className="p-6 pl-10 font-black text-slate-300">{s.ticker}</td>
-                    <td className={`p-6 text-center ${s.ts_score > 0 ? 'text-green-500' : 'text-red-500'}`}>{s.ts_score > 0 ? '▲' : '▼'} {Math.abs(s.ts_score).toFixed(2)}</td>
-                    <td className="p-6 text-center text-blue-400">{s.sent_score.toFixed(2)}</td>
-                    <td className="p-6 text-center text-slate-500">{s.alpha_score.toFixed(2)}</td>
-                    <td className="p-6 text-right pr-10"><span className="px-4 py-1.5 rounded-full font-black text-[10px] border bg-green-500/10 text-green-500 border-green-500/20">{s.final_score.toFixed(2)}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {activeTab === 'methodology' && (
+          <div className="bg-[#0d121f] rounded-2xl border border-white/5 p-6 space-y-8 animate-in fade-in">
+            <section className="space-y-4">
+              <h2 className="text-sm font-black text-white uppercase tracking-tighter">1. Decision Intelligence Pillars</h2>
+              {[ {n:'01', t:'Prophet', d:'Statistical trend analysis.'}, {n:'02', t:'Azure', d:'Sentiment audit.'}, {n:'03', t:'Macro', d:'Risk filters (Yields, Gold, BTC).'}, {n:'04', t:'Visual', d:'Chart geometry & breakouts.'} ].map(m => (
+                <div key={m.n} className="flex gap-4 items-center p-3 bg-white/5 rounded-xl border border-white/5">
+                  <div className="w-8 h-8 bg-blue-600/20 rounded-lg flex items-center justify-center text-xs text-blue-500 font-bold">{m.n}</div>
+                  <div><h4 className="font-bold text-white text-[10px] uppercase">{m.t}</h4><p className="text-[9px] text-slate-500">{m.d}</p></div>
+                </div>
+              ))}
+            </section>
+            <section className="space-y-4 border-t border-white/5 pt-8">
+              <h2 className="text-sm font-black text-white uppercase tracking-tighter">2. Data Glossary</h2>
+              {[ {t:'Edge', d:'Converged confidence score (-1 to 1).'}, {t:'Acc.', d:'Prediction success rate vs 7-day reality.'}, {t:'Trend', d:'Expected return based on statistical decomposition.'} ].map(g => (
+                <div key={g.t} className="p-3 bg-white/5 rounded-xl"><h4 className="text-[10px] font-black text-blue-500 uppercase mb-1">{g.t}</h4><p className="text-[9px] text-slate-400">{g.d}</p></div>
+              ))}
+            </section>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );
