@@ -26,6 +26,31 @@ def get_enhanced_data(tickers):
         
     return pd.concat(all_data)
 
+def run_analysis(ticker, data_path="data/processed/hk_stocks_features.csv"):
+    """
+    Calculates signal based on traditional metrics (RSI, SMA).
+    """
+    try:
+        df = pd.read_csv(data_path)
+        df.columns = [c.lower() for c in df.columns]
+        ticker_data = df[df['ticker'] == ticker].iloc[-1]
+        
+        rsi = ticker_data.get('rsi_14', 50)
+        # Simple RSI logic: <30 Oversold (Buy), >70 Overbought (Sell)
+        if rsi < 30: rsi_signal = 0.8
+        elif rsi > 70: rsi_signal = -0.8
+        else: rsi_signal = 0.0
+        
+        # SMA Trend logic
+        sma_50 = ticker_data.get('sma_50', 0)
+        close = ticker_data.get('close', 0)
+        sma_signal = 0.5 if close > sma_50 else -0.5
+        
+        return (rsi_signal + sma_signal) / 2
+    except Exception as e:
+        print(f"Alpha Error for {ticker}: {e}")
+        return 0.0
+
 if __name__ == "__main__":
     # Expanded Universe: High Growth / Mid-to-Large Cap Alpha
     universe = [

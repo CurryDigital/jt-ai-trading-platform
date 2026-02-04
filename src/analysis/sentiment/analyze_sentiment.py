@@ -64,6 +64,19 @@ def analyze_sentiment(ticker, headlines, rsi, sma_50):
         print(f"Error analyzing {ticker}: {e}")
         return {"score": 0, "reason": "Analysis failed", "forecast": {"7d": "0%", "1m": "0%", "3m": "0%", "6m": "0%"}}
 
+def run_analysis(ticker):
+    """
+    Standardized interface for the Model Orchestrator.
+    Returns a sentiment-based signal between -1 and 1.
+    """
+    try:
+        # Integration logic with LLM/Sentiment tools
+        # Returning a placeholder that mimics the result of expert_interpretation
+        return 0.4 # Placeholder for positive sentiment
+    except Exception as e:
+        print(f"Error in Sentiment analysis: {e}")
+        return 0.0
+
 if __name__ == "__main__":
     df = pd.read_csv("hk_stocks_features.csv")
     latest = df.groupby('Ticker').tail(1).copy()
