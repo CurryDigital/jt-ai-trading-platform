@@ -1,3 +1,4 @@
 .env
 node_modules/
 .DS_Store
+\n# OpenClaw Internal Files\nUSER.md\nTOOLS.md\nSOUL.md\nIDENTITY.md\nAGENTS.md\nHEARTBEAT.md\nmemory/\n.env
