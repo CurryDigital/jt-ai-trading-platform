@@ -58,8 +58,11 @@ def startup_event():
 @app.get("/api/status")
 def status(): return {"status": "online"}
 
-@app.get("/api/macro/pulse")
-def get_macro_pulse(): return macro_service.get_market_pulse()
+from app.services.quant_service import quant_service
+
+@app.get("/api/quants/volatility")
+def get_fx_volatility():
+    return quant_service.calculate_volatility_signals()
 
 @app.get("/api/signals/{project_id}")
 def get_signals(db: Session = Depends(get_db)):

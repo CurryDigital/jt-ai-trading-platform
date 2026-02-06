@@ -22,3 +22,8 @@ INFO:     204.76.203.18:55364 - "GET /bins/ HTTP/1.1" 404 Not Found
 INFO:     204.76.203.18:50246 - "GET /bin/ HTTP/1.1" 404 Not Found
 INFO:     204.76.203.18:55984 - "GET /backup/ HTTP/1.1" 404 Not Found
 INFO:     109.105.210.99:35369 - "GET /helpdesk/WebObjects/Helpdesk.woa HTTP/1.1" 404 Not Found
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+WARNING:  Invalid HTTP request received.
+INFO:     205.210.31.138:59314 - "GET / HTTP/1.1" 404 Not Found
+INFO:     205.210.31.158:58760 - "GET /metrics HTTP/1.1" 404 Not Found
