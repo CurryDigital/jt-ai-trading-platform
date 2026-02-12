@@ -401,14 +401,19 @@ const EquityCurve = ({ data }) => {
   );
 };
 
-// --- REMOVED OBSOLETE COMPONENTS (StrategyMatrix, QuantStrategyCard, MiniEquityCurve, StrategyDeployModal) ---
-
 const StrategyMatrix = ({ matrix, onDeploy, activeStrategies }) => {
-  if (!matrix || !matrix.discovery) return null;
+  console.log("Rendering StrategyMatrix:", matrix);
+  if (!matrix || !matrix.discovery) {
+      console.warn("StrategyMatrix: Data missing", matrix);
+      return <div className="text-red-500">Matrix Data Unavailable</div>;
+  }
   
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Strategy Intelligence Matrix (Backtest Accuracy)</h3>
+        <div className="flex items-center gap-4">
+            <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Strategy Intelligence Matrix</h3>
+            <span className="px-2 py-1 rounded bg-blue-500/10 text-blue-400 text-[9px] font-black border border-blue-500/20 uppercase tracking-widest">Deployment Console</span>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {Object.entries(matrix.discovery).map(([tid, pairs]) => {
                 const template = matrix.active[tid]; // Get metadata
@@ -1045,6 +1050,8 @@ const App = () => {
                       )}
                    </div>
                 </div>
+
+                <StrategyMatrix matrix={quantMatrix} onDeploy={initiateDeploy} activeStrategies={quantStrategies} />
 
                 {/* HFT Matrix - Displayed in Grid Format */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
