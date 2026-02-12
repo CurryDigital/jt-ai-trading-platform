@@ -914,8 +914,6 @@ const App = () => {
                            </div>
                        ))}
                    </div>
-                </div>
-
                 <div className="grid lg:grid-cols-12 gap-10">
 
                 <div className="grid lg:grid-cols-12 gap-10">
