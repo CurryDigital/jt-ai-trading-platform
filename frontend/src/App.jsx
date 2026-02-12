@@ -1024,6 +1024,50 @@ const App = () => {
                            </div>
                        ))}
                    </div>
+
+                {/* QUANT PERFORMANCE SUMMARY */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Inventory Value</span>
+                        <div className="text-2xl font-black text-white font-mono">
+                            {ibPositions.length > 0 ? 
+                                `$${ibPositions.reduce((acc, pos) => acc + (pos.mktValue || 0), 0).toLocaleString()}` : 
+                                `$${velocitySummary.inventory_value?.toLocaleString() || '0.00'}`}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
+                            {ibPositions.length || velocitySummary.active_positions} Active Positions
+                        </div>
+                    </div>
+                    <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Today's P&L</span>
+                        <div className={`text-2xl font-black font-mono ${velocitySummary.today_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {velocitySummary.today_pnl >= 0 ? '+' : ''}${velocitySummary.today_pnl?.toLocaleString() || '0.00'}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{velocitySummary.executions_today} Executions Today</div>
+                    </div>
+                    {activeAccount && (
+                        <>
+                            <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
+                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR Net Liq</span>
+                                <div className="text-2xl font-black text-emerald-400 font-mono">
+                                    ${activeAccount.netLiquidation?.toLocaleString(undefined, {minimumFractionDigits: 2}) || '---'}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
+                                    Buying Power: ${activeAccount.buyingPower?.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                </div>
+                            </div>
+                            <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
+                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Real-Time P&L</span>
+                                <div className={`text-2xl font-black font-mono ${ibPositions.reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {ibPositions.reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0) >= 0 ? '+' : ''}
+                                    ${ibPositions.reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Unrealized Across Cluster</div>
+                            </div>
+                        </>
+                    )}
+                </div>
+
                 <div className="grid lg:grid-cols-12 gap-10">
                     {/* EXECUTION LOG */}
                     <div className="lg:col-span-8 space-y-6">
