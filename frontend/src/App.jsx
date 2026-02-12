@@ -403,6 +403,55 @@ const EquityCurve = ({ data }) => {
 
 // --- REMOVED OBSOLETE COMPONENTS (StrategyMatrix, QuantStrategyCard, MiniEquityCurve, StrategyDeployModal) ---
 
+const StrategyMatrix = ({ matrix, onDeploy, activeStrategies }) => {
+  if (!matrix || !matrix.discovery) return null;
+  
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Strategy Intelligence Matrix (Backtest Accuracy)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {Object.entries(matrix.discovery).map(([tid, pairs]) => {
+                const template = matrix.active[tid]; // Get metadata
+                return (
+                    <div key={tid} className="glass rounded-[2rem] p-6 border-white/10 flex flex-col gap-6">
+                        <div className="space-y-2 border-b border-white/5 pb-4">
+                             <h4 className="text-xl font-black text-white font-outfit italic uppercase">{template.name}</h4>
+                             <p className="text-[10px] text-slate-400 font-medium leading-relaxed line-clamp-2">{template.description}</p>
+                        </div>
+                        <div className="space-y-3">
+                            {Object.entries(pairs).map(([pair, stats]) => {
+                                const isActive = activeStrategies.some(s => s.target_ticker === pair && s.params?.template_id === tid);
+                                return (
+                                    <div key={pair} className="flex items-center justify-between group">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`h-1.5 w-1.5 rounded-full ${stats.accuracy > 65 ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-amber-400'}`} />
+                                            <span className="text-sm font-bold text-white font-mono">{pair.replace('=X','')}</span>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex flex-col text-right">
+                                                <span className={`text-xs font-black font-mono ${stats.accuracy > 65 ? 'text-emerald-400' : 'text-amber-400'}`}>{stats.accuracy}%</span>
+                                                <span className="text-[7px] text-slate-600 uppercase font-bold tracking-widest">Accuracy</span>
+                                            </div>
+                                            <button 
+                                                disabled={isActive}
+                                                onClick={() => onDeploy(pair, tid)}
+                                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all font-outfit ${isActive ? 'border-white/5 text-slate-600 cursor-not-allowed' : 'bg-blue-600 border-blue-600 text-white hover:bg-blue-500 shadow-lg'}`}
+                                            >
+                                                {isActive ? 'Active' : 'Deploy'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    </div>
+  );
+};
+
 const App = () => {
   const [activeTab, setActiveTab] = useState('quant');
   const [analysisStatus, setAnalysisStatus] = useState({});
@@ -440,7 +489,10 @@ const App = () => {
         if (resp.ok) setQuantStrategies(await resp.json());
         
         const matrixResp = await fetch(`${API_BASE}/quant/performance/matrix`);
-        if (matrixResp.ok) setQuantMatrix(await matrixResp.json());
+        if (matrixResp.ok) {
+            const data = await matrixResp.json();
+            setQuantMatrix(data);
+        }
     } catch (e) { console.error(e); }
   };
 

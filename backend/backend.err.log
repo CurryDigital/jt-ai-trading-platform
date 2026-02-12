@@ -60173,3 +60173,29 @@ INFO:     Waiting for application startup.
 INFO:botocore.credentials:Found credentials from IAM Role: openclaw_ec2
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=1)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
