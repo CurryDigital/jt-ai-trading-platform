@@ -77,7 +77,11 @@ async def scheduler_loop():
                     elif comp == 'fx': await refresh_fx_layer()
                     elif comp == 'commodities': await refresh_commodity_layer()
                     elif comp == 'crypto': await refresh_crypto_layer()
-                    elif comp == 'hft': await refresh_hft_layer()
+                    elif comp == 'hft': 
+                        await refresh_hft_layer()
+                        # Iteration 65: Trigger Quant Strategy execution tick
+                        print("Scheduler: Running Quant Strategy Tick...")
+                        strategy_manager.run_tick()
                     
         except Exception as e:
             print(f"Scheduler Error: {e}")
@@ -478,13 +482,19 @@ def get_strategy_templates():
 @app.get("/api/quant/strategies")
 def get_quant_strategies(db: Session = Depends(get_db)):
     try:
-        # Trigger a performance update for simulation purposes
-        strategy_manager.update_live_performance()
+        # Iteration 65: Performance update moved to background scheduler to support real trading
+        # strategy_manager.update_live_performance()
         strats = db.query(QuantStrategy).all()
         return strats
     except Exception as e:
         print(f"Quant Strategy API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/quant/strategies/mode")
+def set_strategy_mode(payload: dict, db: Session = Depends(get_db)):
+    # payload: { id: int, mode: "SIMULATION" | "PAPER" }
+    success = strategy_manager.toggle_mode(payload.get("id"), payload.get("mode"))
+    return {"status": "success" if success else "failed"}
 
 @app.post("/api/quant/strategies/create")
 def create_strategy(payload: dict, db: Session = Depends(get_db)):
