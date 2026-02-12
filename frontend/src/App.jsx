@@ -1072,13 +1072,13 @@ const App = () => {
                     {/* EXECUTION LOG */}
                     <div className="lg:col-span-8 space-y-6">
                         <div className="flex justify-between items-center">
-                            <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Execution Log</h3>
+                            <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Execution Log (Recent 50)</h3>
                             <button className="px-4 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-[10px] font-black uppercase border border-white/10 transition-all font-outfit">Export_Audit</button>
                         </div>
                         <div className="glass rounded-[2.5rem] overflow-hidden shadow-2xl border-white/10">
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left font-outfit uppercase">
-                                    <thead className="bg-white/[0.03] text-slate-500 text-[10px] font-black tracking-[0.2em]">
+                            <div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar">
+                                <table className="w-full text-left font-outfit uppercase relative">
+                                    <thead className="bg-black/80 backdrop-blur-md text-slate-500 text-[10px] font-black tracking-[0.2em] sticky top-0 z-10 border-b border-white/10">
                                         <tr>
                                             <th className="px-8 py-5">Time</th>
                                             <th className="px-8 py-5">Ticker</th>
@@ -1090,7 +1090,7 @@ const App = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-white/5">
-                                        {velocityTrades.length > 0 ? velocityTrades.map((t, i) => (
+                                        {velocityTrades.length > 0 ? velocityTrades.slice(0, 50).map((t, i) => (
                                             <tr key={i} className="hover:bg-white/[0.02] transition-colors group">
                                                 <td className="px-8 py-5 text-[10px] font-bold text-slate-500 font-mono">
                                                     {new Date(t.timestamp).toLocaleTimeString()}
