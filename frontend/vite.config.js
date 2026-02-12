@@ -5,9 +5,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    allowedHosts: [
-      '47.129.86.69',
-      'trade.jtcml.com'
-    ]
+    allowedHosts: true
   }
 })
