@@ -933,7 +933,7 @@ const App = () => {
             <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-700 text-left">
                 <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-8 border-b border-white/5 pb-8 font-outfit uppercase">
                    <div className="flex items-baseline gap-6 font-outfit">
-                      <h2 className="text-2xl md:text-3xl font-black text-white italic font-outfit leading-none uppercase tracking-tightest font-outfit">Velocity Control</h2>
+                      <h2 className="text-2xl md:text-3xl font-black text-white italic font-outfit leading-none uppercase tracking-tightest">Quant Strategies <span className="ml-4 text-[10px] bg-amber-500/10 text-amber-500 px-3 py-1 rounded-full border border-amber-500/20 tracking-widest">SIMULATION_MODE</span></h2>
                       <button onClick={() => setIsModalOpen(true)} className="h-10 w-10 rounded-full glass border-white/20 flex items-center justify-center text-lg font-black text-slate-400 hover:text-blue-400 transition-all shadow-xl">?</button>
                    </div>
                    <div className="flex items-center gap-4 font-outfit uppercase">
@@ -1092,8 +1092,17 @@ const App = () => {
                                     <tbody className="divide-y divide-white/5">
                                         {velocityTrades.length > 0 ? velocityTrades.map((t, i) => (
                                             <tr key={i} className="hover:bg-white/[0.02] transition-colors group">
-                                                <td className="px-8 py-5 text-[10px] font-bold text-slate-500 font-mono">{new Date(t.timestamp).toLocaleTimeString()}</td>
-                                                <td className="px-8 py-5 text-sm font-black text-white italic">{t.ticker}</td>
+                                                <td className="px-8 py-5 text-[10px] font-bold text-slate-500 font-mono">
+                                                    {new Date(t.timestamp).toLocaleTimeString()}
+                                                </td>
+                                                <td className="px-8 py-5 text-sm font-black text-white italic">
+                                                    {t.ticker}
+                                                    {t.strategy && t.strategy !== 'MANUAL_OVERRIDE' && (
+                                                        <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-500/10 text-[8px] font-black text-blue-400 border border-blue-500/20 uppercase tracking-widest">
+                                                            SIM
+                                                        </span>
+                                                    )}
+                                                </td>
                                                 <td className="px-8 py-5">
                                                     <span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.side === 'BUY' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
                                                         {t.side}
@@ -1119,7 +1128,7 @@ const App = () => {
 
                     {/* ACTIVE POSITIONS QUICK-VIEW */}
                     <div className="lg:col-span-4 space-y-6">
-                        <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Live Positions</h3>
+                        <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Live Positions (Avg Price)</h3>
                         <div className="space-y-4">
                             {ibPositions.map((pos, i) => (
                                 <div key={i} className="glass p-6 rounded-[2rem] border-white/10 hover:border-blue-500/30 transition-all group relative overflow-hidden">
