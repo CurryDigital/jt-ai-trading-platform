@@ -3,16 +3,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 // --- UTILS & HELPERS ---
 const parseRationale = (raw) => {
   if (!raw) return { mood: 'Neutral', highlights: [], body: '', industries: { short_term: [], long_term: [] } };
+  if (typeof raw !== 'string') raw = JSON.stringify(raw);
   try {
     const data = JSON.parse(raw);
     return {
       mood: data.market_mood || 'Neutral',
-      highlights: [data.conclusion],
+      highlights: [data.conclusion].filter(Boolean),
       body: data.rationale || '',
       industries: data.recommended_industries || { short_term: [], long_term: [] }
     };
   } catch {
-    return { mood: 'Neutral', highlights: [], body: raw.slice(0, 160) + '...', industries: { short_term: [], long_term: [] } };
+    const s = String(raw);
+    return { mood: 'Neutral', highlights: [], body: s.slice(0, 160) + '...', industries: { short_term: [], long_term: [] } };
   }
 };
 
@@ -208,6 +210,74 @@ const AlphaPill = ({ item }) => (
   </div>
 );
 
+const StrategyDeployModal = ({ isOpen, onClose, template, ticker, onConfirm }) => {
+  if (!isOpen || !template) return null;
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="glass max-w-2xl w-full rounded-[2.5rem] p-8 shadow-3xl border-white/10 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+            <span className="text-9xl font-black text-white font-outfit uppercase">?</span>
+        </div>
+        
+        <div className="relative z-10 space-y-8">
+            <div className="space-y-2">
+                <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] font-outfit">Strategy Configuration</span>
+                <h2 className="text-3xl md:text-4xl font-black text-white font-outfit italic tracking-tight uppercase leading-none">
+                    Deploy <span className="text-blue-400">{template.name}</span>
+                </h2>
+                <p className="text-slate-400 font-medium italic font-outfit text-sm max-w-md">{template.description}</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="glass p-5 rounded-3xl border-white/5 space-y-3">
+                    <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Logic Core</h3>
+                    <p className="text-xs text-white font-bold leading-relaxed font-outfit uppercase">"{template.logic}"</p>
+                    <div className="pt-2 border-t border-white/5 flex flex-wrap gap-2">
+                         <span className="px-2 py-1 rounded bg-white/5 text-[8px] font-black text-slate-400 uppercase tracking-widest">Freq: {template.frequency}</span>
+                    </div>
+                </div>
+                
+                <div className="glass p-5 rounded-3xl border-white/5 space-y-3">
+                     <h3 className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Backtest Audit (30D)</h3>
+                     <div className="grid grid-cols-2 gap-4">
+                         <div className="flex flex-col">
+                             <span className="text-[8px] text-slate-600 uppercase font-black">Accuracy</span>
+                             <span className="text-lg font-black text-emerald-400 font-mono">{template.backtest_metrics?.['1d_accuracy']}</span>
+                         </div>
+                         <div className="flex flex-col">
+                             <span className="text-[8px] text-slate-600 uppercase font-black">Return</span>
+                             <span className="text-lg font-black text-emerald-400 font-mono">{template.backtest_metrics?.['30d_return']}</span>
+                         </div>
+                         <div className="flex flex-col">
+                             <span className="text-[8px] text-slate-600 uppercase font-black">Drawdown</span>
+                             <span className="text-lg font-black text-rose-400 font-mono">{template.backtest_metrics?.['max_drawdown']}</span>
+                         </div>
+                         <div className="flex flex-col">
+                             <span className="text-[8px] text-slate-600 uppercase font-black">Sharpe</span>
+                             <span className="text-lg font-black text-blue-400 font-mono">{template.backtest_metrics?.['sharpe_ratio']}</span>
+                         </div>
+                     </div>
+                </div>
+            </div>
+
+            <div className="glass p-5 rounded-3xl border-white/5 space-y-2 bg-amber-500/5 border-amber-500/10">
+                 <h3 className="text-[9px] font-black text-amber-500 uppercase tracking-widest font-outfit">Risk Management Rules</h3>
+                 <p className="text-xs text-amber-100/80 font-mono font-bold">{template.risk_management}</p>
+            </div>
+
+            <div className="flex items-center gap-4 pt-4">
+                <button onClick={onClose} className="flex-1 py-4 rounded-2xl bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest transition-all font-outfit">Cancel</button>
+                <button onClick={() => onConfirm(ticker, template.id)} className="flex-[2] py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black uppercase tracking-widest transition-all shadow-xl glow-blue font-outfit flex items-center justify-center gap-2">
+                    <span>Confirm & Activate</span>
+                    <span className="opacity-50 text-[8px] font-mono">({ticker})</span>
+                </button>
+            </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const HighDensityCard = ({ item, type = "STOCK" }) => {
   const isUp = item.change >= 0;
   const metrics = type === 'STOCK' ? [
@@ -215,7 +285,7 @@ const HighDensityCard = ({ item, type = "STOCK" }) => {
     { label: 'FCF', value: item.metrics?.fcf || '---', color: 'text-emerald-400' },
     { label: 'Sharpe', value: item.metrics?.sharpe || '---', color: 'text-blue-400' },
     { label: 'MDD', value: item.metrics?.mdd || '---', color: 'text-rose-400' },
-    { label: 'Corr', value: item.metrics?.corr || '0.5', color: 'text-slate-400' }
+    { label: 'Corr', value: item.metrics?.corr ?? '0.5', color: 'text-slate-400' }
   ] : type === 'CRYPTO' ? [
     { label: 'MVRV Z', value: item.mvrv_z_score?.toFixed(2) || '---', color: 'text-blue-400' },
     { label: 'F&G', value: item.fear_greed_index || '---', color: 'text-amber-400' },
@@ -360,14 +430,45 @@ const App = () => {
   const [newAsset, setNewAsset] = useState({ ticker: '', asset_class: 'STOCK', quantity: 0, buy_price: 0 });
   const [quantStrategies, setQuantStrategies] = useState([]);
   const [quantMatrix, setQuantMatrix] = useState({});
+  const [strategyTemplates, setStrategyTemplates] = useState({});
+  const [deployModalData, setDeployModalData] = useState({ isOpen: false, templateId: null, ticker: null });
+  const [isDeploying, setIsDeploying] = useState(false);
 
   const fetchQuantStrategies = async () => {
     try {
         const resp = await fetch(`${API_BASE}/quant/strategies`);
         if (resp.ok) setQuantStrategies(await resp.json());
+        
+        const matrixResp = await fetch(`${API_BASE}/quant/performance/matrix`);
+        if (matrixResp.ok) setQuantMatrix(await matrixResp.json());
     } catch (e) { console.error(e); }
   };
-  
+
+  const fetchStrategyTemplates = async () => {
+    try {
+        const resp = await fetch(`${API_BASE}/quant/templates`);
+        if (resp.ok) setStrategyTemplates(await resp.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const initiateDeploy = (ticker, templateId) => {
+      setDeployModalData({ isOpen: true, templateId, ticker });
+  };
+
+  const confirmDeploy = async (pair, templateId) => {
+    setDeployModalData({ isOpen: false, templateId: null, ticker: null });
+    setIsDeploying(true);
+    try {
+        await fetch(`${API_BASE}/quant/strategies/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pair, lot_size: 1000, template_id: templateId })
+        });
+        await fetchQuantStrategies();
+    } catch (e) { console.error(e); } 
+    finally { setIsDeploying(false); }
+  };
+
   const toggleStrategy = async (id) => {
     await fetch(`${API_BASE}/quant/strategies/toggle/${id}`, { method: 'POST' });
     await fetchQuantStrategies();
@@ -377,7 +478,7 @@ const App = () => {
 
   const [selectedAccountId, setSelectedAccountId] = useState(null);
 
-  const fetchIbData = async () => {
+  const fetchIbData = async (accountIdOverride) => {
     try {
       console.log("IBKR: Starting session sync check...");
       
@@ -411,7 +512,7 @@ const App = () => {
             console.log("IBKR: Raw Portfolio Accounts:", accData);
             
             if (accData && accData.length > 0) {
-              const targetId = selectedAccountId || (accData.find(a => a.id.startsWith('DU')) || accData[0]).id;
+              const targetId = accountIdOverride || selectedAccountId || (accData.find(a => a.id.startsWith('DU')) || accData[0]).id;
               if (!selectedAccountId) setSelectedAccountId(targetId);
 
               // 4. Fetch specific account summary for high-fidelity balance data
@@ -556,7 +657,7 @@ const App = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 ticker, action, quantity,
-                account_id: ibAccount[0].id
+                account_id: selectedAccountId || ibAccount[0].id
             })
         });
         if (resp.ok) {
@@ -587,6 +688,7 @@ const App = () => {
     fetchNodeStatus();
     fetchIbData();
     fetchQuantStrategies();
+    fetchStrategyTemplates();
     const interval = setInterval(() => {
         fetchData();
         fetchNodeStatus();
@@ -610,6 +712,13 @@ const App = () => {
     <div className="min-h-screen bg-[#05070a] text-slate-300 flex flex-col font-sans selection:bg-blue-500/30 overflow-x-hidden">
       
       <StrategyInfoModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} tab={activeTab} />
+      <StrategyDeployModal 
+        isOpen={deployModalData.isOpen} 
+        onClose={() => setDeployModalData({ isOpen: false, templateId: null, ticker: null })} 
+        template={strategyTemplates[deployModalData.templateId]}
+        ticker={deployModalData.ticker}
+        onConfirm={confirmDeploy}
+      />
       
       <div className="md:h-24 glass border-b border-white/5 flex flex-wrap items-center px-4 md:px-8 sticky top-0 z-[100] backdrop-blur-2xl shadow-2xl">
         <div className="flex flex-wrap divide-x divide-white/5 shrink-0">
@@ -832,8 +941,9 @@ const App = () => {
                           <select 
                             value={selectedAccountId} 
                             onChange={(e) => {
-                                setSelectedAccountId(e.target.value);
-                                fetchIbData();
+                                const id = e.target.value;
+                                setSelectedAccountId(id);
+                                fetchIbData(id);
                             }}
                             className="bg-black/60 border border-blue-500/40 rounded-xl px-4 py-2 text-[10px] font-black text-white outline-none focus:border-blue-500 appearance-none pr-10 uppercase font-outfit shadow-[0_0_15px_rgba(59,130,246,0.1)]"
                           >
@@ -914,8 +1024,6 @@ const App = () => {
                            </div>
                        ))}
                    </div>
-                <div className="grid lg:grid-cols-12 gap-10">
-
                 <div className="grid lg:grid-cols-12 gap-10">
                     {/* EXECUTION LOG */}
                     <div className="lg:col-span-8 space-y-6">

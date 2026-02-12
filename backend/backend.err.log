@@ -59865,3 +59865,269 @@ INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/d
 INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
 INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
 INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [190236]
+Importing plotly failed. Interactive plots will not work.
+INFO:     Started server process [190949]
+INFO:     Waiting for application startup.
+INFO:botocore.credentials:Found credentials from IAM Role: openclaw_ec2
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [190949]
+Importing plotly failed. Interactive plots will not work.
+INFO:     Started server process [195217]
+INFO:     Waiting for application startup.
+INFO:botocore.credentials:Found credentials from IAM Role: openclaw_ec2
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:app.services.ib_service:IBKR: Attempting handshake on port 4001...
+INFO:ib_insync.client:Connecting to 127.0.0.1:4001 with clientId 1...
+INFO:ib_insync.client:Disconnecting
+ERROR:ib_insync.client:API connection failed: RuntimeError("Task <Task pending name='starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro' coro=<BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro() running at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/starlette/middleware/base.py:144> cb=[TaskGroup._spawn.<locals>.task_done() at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py:805]> got Future <Future pending cb=[BaseSelectorEventLoop._sock_write_done(44, handle=<Handle BaseS....0.1', 4001))>)()]> attached to a different loop")
+WARNING:app.services.ib_service:IBKR: Port 4001 refused connection.
+INFO:app.services.ib_service:IBKR: Attempting handshake on port 7497...
+INFO:ib_insync.client:Connecting to 127.0.0.1:7497 with clientId 1...
+INFO:ib_insync.client:Disconnecting
+ERROR:ib_insync.client:API connection failed: RuntimeError("Task <Task pending name='starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro' coro=<BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro() running at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/starlette/middleware/base.py:144> cb=[TaskGroup._spawn.<locals>.task_done() at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py:805]> got Future <Future pending cb=[BaseSelectorEventLoop._sock_write_done(44, handle=<Handle BaseS....0.1', 7497))>)()]> attached to a different loop")
+WARNING:app.services.ib_service:IBKR: Port 7497 refused connection.
+INFO:app.services.ib_service:IBKR: Attempting handshake on port 4002...
+INFO:ib_insync.client:Connecting to 127.0.0.1:4002 with clientId 1...
+INFO:ib_insync.client:Disconnecting
+ERROR:ib_insync.client:API connection failed: RuntimeError("Task <Task pending name='starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro' coro=<BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro() running at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/starlette/middleware/base.py:144> cb=[TaskGroup._spawn.<locals>.task_done() at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py:805]> got Future <Future pending cb=[BaseSelectorEventLoop._sock_write_done(44, handle=<Handle BaseS....0.1', 4002))>)()]> attached to a different loop")
+WARNING:app.services.ib_service:IBKR: Port 4002 refused connection.
+INFO:app.services.ib_service:IBKR: Attempting handshake on port 7496...
+INFO:ib_insync.client:Connecting to 127.0.0.1:7496 with clientId 1...
+INFO:ib_insync.client:Disconnecting
+ERROR:ib_insync.client:API connection failed: RuntimeError("Task <Task pending name='starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro' coro=<BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro() running at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/starlette/middleware/base.py:144> cb=[TaskGroup._spawn.<locals>.task_done() at /home/ubuntu/.openclaw/workspace/trading_platform_agent/repo/backend/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py:805]> got Future <Future pending cb=[BaseSelectorEventLoop._sock_write_done(44, handle=<Handle BaseS....0.1', 7496))>)()]> attached to a different loop")
+WARNING:app.services.ib_service:IBKR: Port 7496 refused connection.
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
