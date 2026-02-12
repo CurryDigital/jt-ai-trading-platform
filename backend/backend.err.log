@@ -62122,3 +62122,101 @@ INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
 INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
 INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
 INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2024-12-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [198039]
+Importing plotly failed. Interactive plots will not work.
+INFO:     Started server process [199359]
+INFO:     Waiting for application startup.
+INFO:botocore.credentials:Found credentials from IAM Role: openclaw_ec2
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (3 cookies).
