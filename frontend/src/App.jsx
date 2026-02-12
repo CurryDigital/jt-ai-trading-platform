@@ -331,247 +331,10 @@ const EquityCurve = ({ data }) => {
   );
 };
 
-const StrategyDeployModal = ({ isOpen, onClose, template, ticker, onConfirm }) => {
-  if (!isOpen || !template) return null;
-  
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 md:p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300 font-outfit">
-      <div className="glass max-w-2xl w-full rounded-[2.5rem] p-8 md:p-12 shadow-3xl border-white/10 relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 opacity-[0.03] text-9xl font-black italic select-none uppercase">DEPLOY</div>
-        
-        <button onClick={onClose} className="absolute top-8 right-8 p-2 rounded-full hover:bg-white/5 transition-colors text-slate-500">
-          <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
-        </button>
+// --- REMOVED OBSOLETE COMPONENTS (StrategyMatrix, QuantStrategyCard, MiniEquityCurve, StrategyDeployModal) ---
 
-        <div className="space-y-8 relative z-10">
-           <div>
-             <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em]">Strategy Configuration</span>
-             <h2 className="text-3xl md:text-4xl font-black text-white italic tracking-tight uppercase mt-1">{template.name}</h2>
-             <div className="flex items-center gap-3 mt-3">
-                <span className="px-3 py-1 rounded-lg bg-white/5 text-[10px] font-bold text-slate-300 uppercase tracking-widest border border-white/10">{ticker}</span>
-                <span className="px-3 py-1 rounded-lg bg-emerald-500/10 text-[10px] font-bold text-emerald-400 uppercase tracking-widest border border-emerald-500/20">Ready to Deploy</span>
-             </div>
-           </div>
-
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-               <div className="space-y-4">
-                   <div className="space-y-1">
-                       <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Logic Core</span>
-                       <p className="text-sm text-slate-200 font-medium leading-relaxed">"{template.description}"</p>
-                   </div>
-                   <div className="space-y-1">
-                       <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Execution Frequency</span>
-                       <p className="text-sm text-white font-mono font-bold">{template.frequency}</p>
-                   </div>
-                   <div className="space-y-1">
-                       <span className="text-[9px] text-slate-500 font-black uppercase tracking-widest">Risk Rules</span>
-                       <p className="text-xs text-slate-300 font-mono border-l-2 border-blue-500/30 pl-3">{template.risk_management}</p>
-                   </div>
-               </div>
-
-               <div className="glass bg-white/[0.02] p-6 rounded-3xl border-white/5 space-y-5">
-                   <span className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] border-b border-white/5 pb-2 block">Backtest Audit (30D)</span>
-                   <div className="space-y-3">
-                       <div className="flex justify-between items-center">
-                           <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Accuracy (1D)</span>
-                           <span className="text-base font-black text-white font-mono">{template.backtest_metrics["1d_accuracy"]}</span>
-                       </div>
-                       <div className="flex justify-between items-center">
-                           <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Accuracy (7D)</span>
-                           <span className="text-base font-black text-white font-mono">{template.backtest_metrics["7d_accuracy"]}</span>
-                       </div>
-                       <div className="flex justify-between items-center">
-                           <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Net Return</span>
-                           <span className="text-base font-black text-emerald-400 font-mono">{template.backtest_metrics["30d_return"]}</span>
-                       </div>
-                       <div className="flex justify-between items-center">
-                           <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Sharpe Ratio</span>
-                           <span className="text-base font-black text-blue-400 font-mono">{template.backtest_metrics["sharpe_ratio"]}</span>
-                       </div>
-                   </div>
-               </div>
-           </div>
-
-           <button onClick={() => onConfirm(ticker, template.id)} className="w-full py-5 rounded-2xl bg-blue-600 text-white text-xs font-black uppercase tracking-[0.25em] hover:bg-blue-500 transition-all shadow-2xl glow-blue mt-4">
-               Confirm & Activate Strategy
-           </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const StrategyMatrix = ({ matrix, onDeploy, onToggle, onDelete }) => {
-  const [selectedStrat, setSelectedStrat] = useState(null);
-
-  // Safely derive keys
-  const keys = useMemo(() => (matrix ? Object.keys(matrix) : []), [matrix]);
-
-  // Update selection if matrix loads later
-  useEffect(() => {
-      if (keys.length > 0 && !selectedStrat) {
-          setSelectedStrat(keys[0]);
-      }
-  }, [keys]); 
-
-  // If we have nothing to render, just return null, don't crash
-  if (!matrix || keys.length === 0) return null;
-
-  const activeData = selectedStrat ? matrix[selectedStrat] : null;
-  
-  // Extra safety: if selectedStrat points to non-existent key (race condition), fallback
-  if (!activeData && keys.length > 0) return null;
-  if (!activeData) return null;
-  
-  const commonPairs = ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "BTC-USD"];
-
-  return (
-    <div className="space-y-6">
-        <div className="flex gap-4 overflow-x-auto pb-2">
-            {Object.entries(matrix).map(([key, data]) => (
-                <button 
-                    key={key}
-                    onClick={() => setSelectedStrat(key)}
-                    className={`flex-1 min-w-[200px] glass p-4 rounded-2xl border text-left transition-all ${selectedStrat === key ? 'border-blue-500 bg-blue-500/10' : 'border-white/10 hover:bg-white/5'}`}
-                >
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{data.name}</span>
-                        <span className={`text-xs font-black font-mono ${data.total_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {data.total_pnl >= 0 ? '+' : ''}${data.total_pnl.toLocaleString()}
-                        </span>
-                    </div>
-                    <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">{data.total_trades} Trades // {data.win_rate.toFixed(1)}% WR</div>
-                </button>
-            ))}
-        </div>
-
-        <div className="glass p-6 md:p-8 rounded-[2.5rem] border-white/10 relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-8 opacity-[0.02] text-8xl font-black italic select-none uppercase">MATRIX</div>
-             <div className="relative z-10 space-y-6">
-                 <div>
-                     <h3 className="text-2xl font-black text-white italic tracking-tighter uppercase font-outfit">{activeData.name} // Performance</h3>
-                     <p className="text-sm text-slate-400 font-medium max-w-2xl mt-2">"{activeData.description}"</p>
-                 </div>
-
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                     {commonPairs.map(pair => {
-                         const pairData = activeData.pairs[pair];
-                         return (
-                             <div key={pair} className={`p-4 rounded-2xl border transition-all ${pairData ? 'bg-white/[0.02] border-white/10' : 'border-dashed border-white/5 opacity-60'}`}>
-                                 <div className="flex justify-between items-center mb-3">
-                                     <span className="text-sm font-black text-white font-outfit tracking-tight">{pair}</span>
-                                     {pairData ? (
-                                         <div className="flex gap-2">
-                                             <button onClick={() => onToggle(pairData.id)} className={`w-2 h-2 rounded-full ${pairData.is_active ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-slate-600'}`} title="Toggle Status" />
-                                             <button onClick={() => onDelete(pairData.id)} className="text-[10px] text-rose-500 hover:text-white transition-colors">×</button>
-                                         </div>
-                                     ) : (
-                                         <button onClick={() => onDeploy(pair, selectedStrat)} className="text-[9px] font-black uppercase tracking-widest text-blue-400 hover:text-white transition-colors">+ Deploy</button>
-                                     )}
-                                 </div>
-                                 {pairData ? (
-                                     <div className="space-y-1">
-                                         <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500">
-                                             <span>P&L</span>
-                                             <span className={`font-mono ${pairData.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>${pairData.pnl.toLocaleString()}</span>
-                                         </div>
-                                         <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500">
-                                             <span>Trades</span>
-                                             <span className="text-white font-mono">{pairData.trades}</span>
-                                         </div>
-                                     </div>
-                                 ) : (
-                                     <div className="h-8 flex items-center justify-center text-[9px] font-bold text-slate-600 uppercase tracking-widest">
-                                         Inactive
-                                     </div>
-                                 )}
-                             </div>
-                         );
-                     })}
-                 </div>
-             </div>
-        </div>
-    </div>
-  );
-};
-
-const MiniEquityCurve = ({ data, color = "#10b981", height = 40 }) => {
-  if (!data || data.length < 2) return <div style={{height}} className="w-full bg-white/5 animate-pulse rounded-lg" />;
-  const vals = data.map(d => d.val);
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const range = max - min || 1;
-  const width = 200;
-  const points = data.map((d, i) => 
-    `${(i / (data.length - 1)) * width},${height - ((d.val - min) / range) * height}`
-  ).join(' ');
-  
-  return (
-    <div className="w-full h-10 mt-2">
-      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="overflow-visible">
-        <polyline fill="none" stroke={color} strokeWidth="3" points={points} strokeLinejoin="round" strokeLinecap="round" className="drop-shadow-[0_0_8px_rgba(16,185,129,0.3)]" />
-      </svg>
-    </div>
-  );
-};
-
-const QuantStrategyCard = ({ strat, onToggle }) => {
-    const isWin = strat.current_pnl >= 0;
-    const deleteStrategy = async (id) => {
-        if (window.confirm("Terminate and Liquidate this strategy?")) {
-            await fetch(`${API_BASE}/quant/strategies/delete/${id}`, { method: 'DELETE' });
-            await fetchQuantStrategies();
-        }
-    };
-
-    return (
-        <div className={`glass p-6 rounded-[2.5rem] border-white/10 space-y-6 transition-all group hover:border-blue-500/30 relative overflow-hidden ${!strat.is_active ? 'opacity-50 grayscale' : ''}`}>
-            <div className="absolute top-0 right-0 p-6 opacity-[0.03] text-4xl font-black italic select-none font-outfit">QUANT</div>
-            <div className="flex justify-between items-start">
-                <div className="flex flex-col">
-                    <span className="text-xl font-black text-white italic font-outfit uppercase tracking-tighter">{strat.name}</span>
-                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest mt-1">{strat.target_ticker} // MR CORE</span>
-                </div>
-                <div className="flex gap-2">
-                    <button onClick={() => onToggle(strat.id)} className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${strat.is_active ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-white/5 text-slate-500 border-white/10'}`}>
-                        {strat.is_active ? 'Active' : 'Paused'}
-                    </button>
-                    <button onClick={() => deleteStrategy(strat.id)} className="h-7 w-7 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20 flex items-center justify-center text-xs hover:bg-rose-500 hover:text-white transition-all">×</button>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 py-4 border-y border-white/5">
-                <div className="flex flex-col">
-                    <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Total P&L</span>
-                    <span className={`text-xl font-black font-mono ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isWin ? '+' : ''}${strat.current_pnl?.toLocaleString()}
-                    </span>
-                </div>
-                <div className="flex flex-col text-right">
-                    <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Win Rate</span>
-                    <span className="text-xl font-black text-white font-mono italic">{(strat.winning_trades / (strat.total_trades || 1) * 100).toFixed(1)}%</span>
-                </div>
-            </div>
-
-            <div className="space-y-2">
-                <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Live Alpha Drift</span>
-                <MiniEquityCurve data={strat.equity_curve} color={isWin ? "#10b981" : "#f43f5e"} />
-            </div>
-
-            <div className="flex justify-between items-center pt-4 text-[9px] font-black uppercase font-outfit">
-                <div className="flex gap-3">
-                    <span className="text-slate-500">TP: <span className="text-white">{(strat.take_profit_pct * 100).toFixed(1)}%</span></span>
-                    <span className="text-slate-500">SL: <span className="text-white">{(strat.stop_loss_pct * 100).toFixed(1)}%</span></span>
-                </div>
-                <span className="text-blue-400 italic">Target: {(strat.win_rate_target * 100).toFixed(0)}%</span>
-            </div>
-        </div>
-    );
-};
-
-// --- MAIN APPLICATION ---
 const App = () => {
-  const [activeTab, setActiveTab] = useState('inventory');
+  const [activeTab, setActiveTab] = useState('quant');
   const [analysisStatus, setAnalysisStatus] = useState({});
   const [signals, setSignals] = useState([]);
   const [fx, setFx] = useState([]);
@@ -597,45 +360,14 @@ const App = () => {
   const [newAsset, setNewAsset] = useState({ ticker: '', asset_class: 'STOCK', quantity: 0, buy_price: 0 });
   const [quantStrategies, setQuantStrategies] = useState([]);
   const [quantMatrix, setQuantMatrix] = useState({});
-  const [strategyTemplates, setStrategyTemplates] = useState({});
-  const [deployModalData, setDeployModalData] = useState({ isOpen: false, templateId: null, ticker: null });
-  const [isDeploying, setIsDeploying] = useState(false);
 
   const fetchQuantStrategies = async () => {
     try {
         const resp = await fetch(`${API_BASE}/quant/strategies`);
         if (resp.ok) setQuantStrategies(await resp.json());
-        
-        const matrixResp = await fetch(`${API_BASE}/quant/performance/matrix`);
-        if (matrixResp.ok) setQuantMatrix(await matrixResp.json());
     } catch (e) { console.error(e); }
   };
-
-  const fetchStrategyTemplates = async () => {
-    try {
-        const resp = await fetch(`${API_BASE}/quant/templates`);
-        if (resp.ok) setStrategyTemplates(await resp.json());
-    } catch (e) { console.error(e); }
-  };
-
-  const initiateDeploy = (ticker, templateId) => {
-      setDeployModalData({ isOpen: true, templateId, ticker });
-  };
-
-  const confirmDeploy = async (pair, templateId) => {
-    setDeployModalData({ isOpen: false, templateId: null, ticker: null });
-    setIsDeploying(true);
-    try {
-        await fetch(`${API_BASE}/quant/strategies/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pair, lot_size: 1000, template_id: templateId })
-        });
-        await fetchQuantStrategies();
-    } catch (e) { console.error(e); } 
-    finally { setIsDeploying(false); }
-  };
-
+  
   const toggleStrategy = async (id) => {
     await fetch(`${API_BASE}/quant/strategies/toggle/${id}`, { method: 'POST' });
     await fetchQuantStrategies();
@@ -855,13 +587,12 @@ const App = () => {
     fetchNodeStatus();
     fetchIbData();
     fetchQuantStrategies();
-    fetchStrategyTemplates();
     const interval = setInterval(() => {
         fetchData();
         fetchNodeStatus();
         fetchIbData();
         fetchQuantStrategies();
-    }, 15000); // 15s for more reactive quant updates
+    }, 15000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -879,13 +610,6 @@ const App = () => {
     <div className="min-h-screen bg-[#05070a] text-slate-300 flex flex-col font-sans selection:bg-blue-500/30 overflow-x-hidden">
       
       <StrategyInfoModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} tab={activeTab} />
-      <StrategyDeployModal 
-        isOpen={deployModalData.isOpen} 
-        onClose={() => setDeployModalData({ isOpen: false, templateId: null, ticker: null })} 
-        template={strategyTemplates[deployModalData.templateId]}
-        ticker={deployModalData.ticker}
-        onConfirm={confirmDeploy}
-      />
       
       <div className="md:h-24 glass border-b border-white/5 flex flex-wrap items-center px-4 md:px-8 sticky top-0 z-[100] backdrop-blur-2xl shadow-2xl">
         <div className="flex flex-wrap divide-x divide-white/5 shrink-0">
@@ -929,7 +653,7 @@ const App = () => {
                 {[
                   {id: 'inventory', label: 'Command'}, {id: 'research', label: 'Intelligence'}, {id: 'signals', label: 'Alpha'}, 
                   {id: 'fx', label: 'Forex'}, {id: 'crypto', label: 'Digital'}, {id: 'commodities', label: 'Assets'},
-                  {id: 'hft', label: 'Velocity'}, {id: 'performance', label: 'Performance'}, {id: 'config', label: 'System'}
+                  {id: 'quant', label: 'Quant'}, {id: 'performance', label: 'Performance'}, {id: 'config', label: 'System'}
                 ].map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} 
                       className={`px-4 md:px-6 py-2 md:py-3 rounded-lg md:rounded-xl text-[10px] md:text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap font-outfit
@@ -1096,7 +820,7 @@ const App = () => {
             </div>
         )}
 
-        {activeTab === 'hft' && (
+        {activeTab === 'quant' && (
             <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-700 text-left">
                 <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-8 border-b border-white/5 pb-8 font-outfit uppercase">
                    <div className="flex items-baseline gap-6 font-outfit">
@@ -1160,85 +884,8 @@ const App = () => {
                    </div>
                 </div>
 
-                {/* QUANT STRATEGY UNIT */}
-                <div className="space-y-10">
-                    <div className="flex justify-between items-end">
-                        <div className="space-y-2">
-                            <span className="text-[11px] font-black text-blue-500 uppercase tracking-[0.3em]">Institutional Quant Intelligence</span>
-                            <h3 className="text-3xl font-black text-white italic tracking-tighter uppercase font-outfit">Active Quant Models</h3>
-                        </div>
-                    </div>
-                    
-                    {/* Iteration 5: Matrix View for Performance Comparison */}
-                    <StrategyMatrix 
-                        matrix={quantMatrix} 
-                        onDeploy={initiateDeploy} 
-                        onToggle={toggleStrategy}
-                        onDelete={deleteStrategy}
-                    />
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                        {quantStrategies.length > 0 ? quantStrategies.map((strat, i) => (
-                            <QuantStrategyCard key={i} strat={strat} onToggle={toggleStrategy} onDelete={deleteStrategy} />
-                        )) : (
-                            <div className="lg:col-span-4 glass p-16 rounded-[4rem] flex flex-col items-center justify-center border-dashed border-white/10 space-y-6">
-                                <div className="h-16 w-16 rounded-full bg-white/5 flex items-center justify-center"><span className="text-3xl opacity-20">🤖</span></div>
-                                <p className="text-slate-500 font-bold uppercase tracking-[0.3em] text-sm">Waiting for Model Deployment</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* QUANT PERFORMANCE SUMMARY */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Inventory Value</span>
-                        <div className="text-2xl font-black text-white font-mono">
-                            {ibPositions.length > 0 ? 
-                                `$${ibPositions.reduce((acc, pos) => acc + (pos.mktValue || 0), 0).toLocaleString()}` : 
-                                `$${velocitySummary.inventory_value?.toLocaleString() || '0.00'}`}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
-                            {ibPositions.length || velocitySummary.active_positions} Active Positions
-                        </div>
-                    </div>
-                    <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Today's P&L</span>
-                        <div className={`text-2xl font-black font-mono ${velocitySummary.today_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {velocitySummary.today_pnl >= 0 ? '+' : ''}${velocitySummary.today_pnl?.toLocaleString() || '0.00'}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{velocitySummary.executions_today} Executions Today</div>
-                    </div>
-                    {activeAccount && (
-                        <>
-                            <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
-                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR Net Liq</span>
-                                <div className="text-2xl font-black text-emerald-400 font-mono">
-                                    ${activeAccount.netLiquidation?.toLocaleString(undefined, {minimumFractionDigits: 2}) || '---'}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">
-                                    Buying Power: ${activeAccount.buyingPower?.toLocaleString(undefined, {minimumFractionDigits: 2})}
-                                </div>
-                            </div>
-                            <div className="glass p-6 rounded-[2rem] border-white/10 space-y-2">
-                                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Real-Time P&L</span>
-                                <div className={`text-2xl font-black font-mono ${ibPositions.reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                    {ibPositions.reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0) >= 0 ? '+' : ''}
-                                    ${ibPositions.reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Unrealized Across Cluster</div>
-                            </div>
-                        </>
-                    )}
-                </div>
-
-                {/* REAL-TIME LIQUIDITY MATRIX */}
-                <div className="space-y-6">
-                   <div className="flex justify-between items-center">
-                      <h3 className="text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Liquidity Velocity Matrix</h3>
-                      <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-black border border-blue-500/20 tracking-widest">REAL-TIME FEEDS</span>
-                   </div>
-                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+                {/* HFT Matrix - Displayed in Grid Format */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
                        {hft.map((h, i) => (
                            <div key={i} className="glass rounded-3xl p-6 border-white/10 shadow-2xl flex flex-col gap-6 group hover:border-blue-500/30 transition-all relative overflow-hidden font-outfit uppercase">
                                <div className="absolute top-0 right-0 p-4 opacity-[0.03] text-4xl font-black italic select-none font-outfit uppercase">{h.asset_class}</div>
@@ -1268,6 +915,8 @@ const App = () => {
                        ))}
                    </div>
                 </div>
+
+                <div className="grid lg:grid-cols-12 gap-10">
 
                 <div className="grid lg:grid-cols-12 gap-10">
                     {/* EXECUTION LOG */}
