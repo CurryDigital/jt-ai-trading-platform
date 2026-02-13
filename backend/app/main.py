@@ -82,6 +82,10 @@ async def scheduler_loop():
                         # Iteration 65: Trigger Quant Strategy execution tick
                         print("Scheduler: Running Quant Strategy Tick...")
                         strategy_manager.run_tick()
+            
+            # Force run tick every loop for testing responsiveness
+            print("Scheduler: Force Running Quant Strategy Tick...")
+            strategy_manager.run_tick()
                     
         except Exception as e:
             print(f"Scheduler Error: {e}")
@@ -490,6 +494,16 @@ def get_quant_strategies(db: Session = Depends(get_db)):
         print(f"Quant Strategy API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/quant/strategies/bulk-create")
+def bulk_create_strategies_api(payload: dict, db: Session = Depends(get_db)):
+    try:
+        selections = payload.get("selections", [])
+        strats = strategy_manager.bulk_create_strategies(selections)
+        return {"status": "success", "count": len(strats)}
+    except Exception as e:
+        print(f"Bulk Create Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/quant/strategies/mode")
 def set_strategy_mode(payload: dict, db: Session = Depends(get_db)):
     # payload: { id: int, mode: "SIMULATION" | "PAPER" }
@@ -501,10 +515,23 @@ def create_strategy(payload: dict, db: Session = Depends(get_db)):
     try:
         pair = payload.get("pair", "EURUSD=X")
         qty = payload.get("lot_size", 1000)
-        strat = strategy_manager.create_fx_strategy(pair, qty)
+        template_id = payload.get("template_id", "MR_FX")
+        strat = strategy_manager.create_fx_strategy(pair, qty, template_id)
         return strat
     except Exception as e:
         print(f"Quant Strategy Create Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/quant/strategies/clear-logs")
+def clear_trade_logs(db: Session = Depends(get_db)):
+    try:
+        # Clear the consumption.trades table
+        # Using DELETE instead of TRUNCATE for safer permission handling
+        db.execute(text("DELETE FROM consumption.trades"))
+        db.commit()
+        return {"status": "success", "message": "Simulation logs cleared from consumption layer."}
+    except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/quant/strategies/toggle/{strat_id}")

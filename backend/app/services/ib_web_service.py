@@ -25,6 +25,23 @@ class IBKRWebAPIService:
             self.session.cookies.set(name, value)
         logger.info(f"IBKR: Session cookies synchronized ({len(cookies)} cookies).")
 
+    def get_accounts(self):
+        """
+        Fetches the list of accessible account IDs.
+        """
+        try:
+            resp = self.session.get(f"{self.base_url}/iserver/accounts", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "accounts" in data:
+                    return data["accounts"] # List of account strings
+                if isinstance(data, list):
+                    # Some versions return just a list of strings or dicts
+                    return [d.get("id") if isinstance(d, dict) else d for d in data]
+        except Exception as e:
+            logger.error(f"IBKR Account Fetch Error: {e}")
+        return []
+
     def check_auth(self):
         try:
             # Iteration 65: Aggressive linkage trigger
@@ -51,15 +68,46 @@ class IBKRWebAPIService:
     def resolve_conid(self, ticker: str, sec_type="STK"):
         """
         Resolves a symbol to an IBKR Contract ID (conid).
+        Supports STK and CASH (FX).
         """
         try:
-            resp = self.session.get(f"{self.base_url}/iserver/secdef/search?symbol={ticker}")
+            # Simple heuristic: if ticker has '.', '=', or '/', likely FX (e.g. EUR.USD, EUR=X)
+            # Or if sec_type is explicitly passed as CASH
+            is_fx = sec_type == "CASH" or any(c in ticker for c in ['.', '=', '/'])
+            
+            search_term = ticker.replace('=X', '').replace('/', '').replace('.', '')
+            if is_fx and len(search_term) == 6:
+                # Format for search: "EUR" usually returns "EUR.USD"
+                # But safer to search the base currency
+                search_term = search_term[:3]
+            
+            resp = self.session.get(f"{self.base_url}/iserver/secdef/search?symbol={search_term}")
             if resp.ok:
                 results = resp.json()
+                
                 # Filter for exact match and secType
                 for res in results:
-                    if res.get('symbol') == ticker.upper():
+                    # Check secType match if available in response (some endpoints don't return it clearly in search)
+                    # But usually 'description' or 'name' helps.
+                    # IBKR search is messy.
+                    
+                    # If we want FX, look for secType 'CASH' or 'FUT' (but we want CASH)
+                    if is_fx:
+                        # For CASH, the search for "EUR" returns symbol="EUR", description="IDEALPRO"
+                        # It doesn't explicitly say "EUR.USD" in the search result top level.
+                        # However, conid 12087792 is the base EUR contract.
+                        # IBKR uses the same conid for the currency itself often?
+                        # Actually, for CASH execution, we often need the pair conid.
+                        # Let's search for "EUR.USD" explicitly first.
+                        
+                        # If we searched for "EUR" and got "EUR", and our ticker starts with "EUR", it's a candidate.
+                        if res.get('symbol') == search_term.upper() and 'CASH' in [s['secType'] for s in res.get('sections', [])]:
+                            return res.get('conid')
+
+                    # If STK, standard check
+                    elif res.get('symbol') == ticker.upper():
                         return res.get('conid')
+                        
                 if results: return results[0].get('conid')
         except Exception as e:
             logger.error(f"Conid Resolution Failed for {ticker}: {e}")
@@ -70,23 +118,47 @@ class IBKRWebAPIService:
         Iteration 52: Robust order execution with conid resolution and confirmation handling.
         """
         try:
-            conid = self.resolve_conid(ticker)
+            # Determine sec_type
+            is_fx = any(c in ticker for c in ['.', '=', '/'])
+            sec_type = "CASH" if is_fx else "STK"
+            
+            # Normalize ticker for FX (EUR.USD)
+            if is_fx:
+                ticker = ticker.replace('=X', '').replace('/', '.')
+                if '.' not in ticker and len(ticker) == 6:
+                    ticker = f"{ticker[:3]}.{ticker[3:]}"
+
+            conid = self.resolve_conid(ticker, sec_type)
             if not conid: return {"status": "error", "message": f"Could not resolve conid for {ticker}"}
             
+            # ensure conid is an integer
+            try:
+                conid = int(conid)
+            except:
+                pass
+            
+            # Format quantity
+            # IBKR API is picky.
+            # For STK, it often wants a number (int/float).
+            # For CASH, it definitely wants a number.
+            # We'll ensure it's a number, not a string.
+            qty_val = float(quantity) 
+
             payload = {
                 "orders": [
                     {
-                        "conid": conid,
-                        "secType": "STK",
+                        "conid": int(conid), # Ensure strict int
+                        "secType": sec_type,
                         "orderType": order_type,
                         "side": action.upper(), # BUY / SELL
-                        "quantity": float(quantity),
-                        "tif": "DAY"
+                        "quantity": qty_val,
+                        "tif": "GTC" # Changed from DAY to GTC to see if it helps, though DAY is usually fine.
                     }
                 ]
             }
             
             # Submit Order
+            logger.info(f"Submitting Order Payload: {payload}")
             resp = self.session.post(f"{self.base_url}/iserver/account/{account_id}/orders", json=payload)
             
             # Handle reply-required (IBKR Gateway sometimes asks for confirmation)

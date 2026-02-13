@@ -58,20 +58,27 @@ class StrategyManager:
         
         template = self.templates.get(template_id, self.templates["MR_FX"])
 
+        # allocated_capital is passed as lot_size in the payload for now, mapping it
+        allocated_capital = lot_size 
+        # Calculate actual lot size (units) based on allocated capital
+        # Assume leverage 1:1 for simplicity or calc units = capital / price
+        # For now, we store capital in params and calculate units in run_tick
+        
         new_strat = QuantStrategy(
             name=name_key,
             target_ticker=pair,
             is_active=True,
             params={
                 "template_id": template_id,
-                "lot_size": lot_size,
+                "lot_size": lot_size, # This is now treated as capital in logic
+                "allocated_capital": allocated_capital,
                 "risk_config": template["risk_management"],
-                "execution_mode": "SIMULATION" # Default to SIMULATION
+                "execution_mode": "SIMULATION" 
             },
             win_rate_target=0.65,
             stop_loss_pct=0.005, 
             take_profit_pct=0.012, 
-            equity_curve=[{"ts": datetime.datetime.now().isoformat(), "val": 10000}]
+            equity_curve=[{"ts": datetime.datetime.now().isoformat(), "val": allocated_capital}]
         )
         self.db.add(new_strat)
         self.db.commit()
@@ -94,6 +101,28 @@ class StrategyManager:
             return True
         return False
 
+    def bulk_create_strategies(self, selections: list):
+        """
+        selections: list of {"pair": str, "template_id": str, "capital": float}
+        """
+        created = []
+        for item in selections:
+            strat = self.create_fx_strategy(
+                pair=item["pair"], 
+                lot_size=item.get("capital", 10000), 
+                template_id=item["template_id"]
+            )
+            # Ensure it is set to Live mode immediately if deployed from the Live Tab
+            params = strat.params or {}
+            params['execution_mode'] = 'PAPER' # Default to Paper for Live Tab
+            strat.params = params
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(strat, "params")
+            created.append(strat)
+        
+        self.db.commit()
+        return created
+
     def get_performance_matrix(self):
         strategies = self.db.query(QuantStrategy).all()
         matrix = {}
@@ -108,6 +137,18 @@ class StrategyManager:
                 "pairs": {}
             }
 
+        # Iteration 72: High-Reliability Price Fetching
+        current_prices = {}
+        try:
+            from app.db.session import GlobalState
+            import yfinance as yf
+            prices = self.db.query(GlobalState).filter(GlobalState.category.in_(['index', 'fx', 'crypto', 'commodity'])).all()
+            for p in prices:
+                if 'price' in p.key:
+                    ticker = p.key.replace('index_price_', '').replace('fx_price_', '').replace('crypto_price_', '').replace('commodity_price_', '')
+                    current_prices[ticker.upper()] = float(p.value)
+        except: pass
+
         for s in strategies:
             tid = s.params.get("template_id", "MR_FX")
             if tid not in matrix: continue
@@ -118,14 +159,67 @@ class StrategyManager:
             
             matrix[tid]["total_pnl"] += pnl
             matrix[tid]["total_trades"] += trades
+
+            # Fetch trades for this specific strategy instance
+            all_trades = self.db.query(Trade).filter(
+                Trade.strategy.like(f"{s.name}%")
+            ).order_by(Trade.timestamp.asc()).all()
             
+            pnl_history = [t.pnl for t in all_trades[-10:] if t.pnl is not None]
+            
+            # Iteration 71: Enhanced Live Dataset (Trades, Avg Buy, Market Price)
+            realized_pnl = sum([t.pnl for t in all_trades if t.pnl is not None])
+            
+            # Inventory Tracking
+            net_qty = 0
+            buy_costs = 0
+            buy_qty = 0
+            for t in all_trades:
+                # Normalize side: Treat both BUY and live-entry as long positions
+                side_mult = 1 if t.side.upper() in ['BUY', 'LONG'] else -1
+                net_qty += t.quantity * side_mult
+                if side_mult == 1:
+                    buy_costs += t.quantity * t.price
+                    buy_qty += t.quantity
+            
+            avg_entry = (buy_costs / buy_qty) if buy_qty > 0 else 0
+            
+            # Get current price with fuzzy matching
+            ticker_clean = s.target_ticker.replace('=X', '').replace('.', '').replace('-', '').upper()
+            curr_price = current_prices.get(ticker_clean, 0)
+            
+            if curr_price == 0:
+                # Try with =X suffix if not found
+                curr_price = current_prices.get(ticker_clean + "=X", 0)
+            
+            if curr_price == 0:
+                # Fallback: Quick yfinance hit if data is missing from cache
+                try:
+                    sym = s.target_ticker if "=X" in s.target_ticker else f"{s.target_ticker}=X"
+                    t_yf = yf.Ticker(sym)
+                    curr_price = t_yf.fast_info['lastPrice']
+                except:
+                    curr_price = all_trades[-1].price if all_trades else 1.0
+            
+            unrealized_pnl = net_qty * (curr_price - avg_entry) if net_qty != 0 else 0
+            
+            # Iteration 70/71/72: Detailed Strategy Metrics
             matrix[tid]["pairs"][s.target_ticker] = {
                 "id": s.id,
+                "strategy_name": s.name,
                 "pnl": pnl,
+                "realized_pnl": realized_pnl,
+                "unrealized_pnl": unrealized_pnl,
+                "avg_buy_price": avg_entry,
+                "market_price": curr_price,
+                "inventory_qty": net_qty,
                 "trades": trades,
+                "wins": wins,
+                "losses": trades - wins,
                 "win_rate": (wins / trades * 100) if trades > 0 else 0,
                 "is_active": s.is_active,
-                "mode": s.params.get("execution_mode", "SIMULATION")
+                "mode": s.params.get("execution_mode", "SIMULATION"),
+                "pnl_history": pnl_history
             }
 
         for tid, data in matrix.items():
@@ -138,7 +232,11 @@ class StrategyManager:
 
         # 4. Generate "Discovery" Matrix (Simulated Backtest Accuracy per Pair)
         discovery = {}
-        major_pairs = ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X"]
+        major_pairs = [
+            "EURUSD=X", "USDJPY=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X",
+            "USDCHF=X", "NZDUSD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X",
+            "EURCHF=X", "AUDJPY=X"
+        ]
         
         for tid, t in self.templates.items():
             discovery[tid] = {}
@@ -198,34 +296,48 @@ class StrategyManager:
                 executed = False
                 pnl_change = 0
                 
-                if mode == "PAPER":
-                    # Attempt Real IBKR Execution
-                    if ib_web_service.check_auth():
-                        # We need an account ID. If not stored, we can't trade.
-                        # We'll rely on the default account in `ib_web_service` or skip.
-                        # For safety, let's log warning if no account.
-                        try:
-                            # Using a default or discovered account would be better
-                            # For now, we try 'DUP825942' if user mentioned it, or let service pick
-                            # The service method signature: execute_order(account_id, ticker, action, quantity)
-                            # If account_id is None/Empty, the service might fail.
-                            # We'll skip for now if we can't reliably get the ID without fetching.
-                            pass 
-                            # TODO: Implement robust account ID fetching
-                        except Exception as e:
-                            logger.error(f"Paper Trade Failed: {e}")
+                # Calculate quantity based on allocated capital
+                allocated = s.params.get("allocated_capital", 10000)
+                # Assume 1:1 leverage for simulation accuracy on quantity
+                qty = int(allocated / price)
+                # Attempt Real IBKR Execution
+                if ib_web_service.check_auth():
+                    try:
+                        accounts = ib_web_service.get_accounts()
+                        if accounts:
+                            # Use the first available account
+                            account_id = accounts[0]
+                            # Execute the trade
+                            resp = ib_web_service.execute_order(
+                                account_id=account_id,
+                                ticker=s.target_ticker,
+                                action=side, # "BUY" or "SELL"
+                                quantity=qty
+                            )
+                            logger.info(f"Strategy Trade Triggered: {side} {qty} {s.target_ticker} on {account_id} -> {resp}")
+                            
+                            if resp.get("status") == "success":
+                                executed = True
+                                # For PnL tracking in DB, we rely on simulation values until we have real execution data
+                                # But let's log it
+                                pnl_change = 0 # Real PnL comes from portfolio updates
+                        else:
+                            logger.warning("IBKR Authenticated but no accounts found. Skipping trade.")
+                    except Exception as e:
+                        logger.error(f"Paper Trade Failed: {e}")
                 
                 else:
                     # SIMULATION
                     # Risk/Reward Ratio assumption: 1:1.5
                     rr_ratio = 1.5
-                    risk_per_trade = 100 
+                    risk_pct_per_trade = 0.01 # 1% risk
+                    risk_dollar = allocated * risk_pct_per_trade
                     
                     if is_win:
-                        pnl_change = risk_per_trade * rr_ratio
+                        pnl_change = risk_dollar * rr_ratio
                         s.winning_trades += 1
                     else:
-                        pnl_change = -risk_per_trade
+                        pnl_change = -risk_dollar
                     
                     s.total_trades += 1
                     s.current_pnl += pnl_change
