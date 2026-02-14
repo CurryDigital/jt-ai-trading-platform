@@ -800,6 +800,23 @@ const App = () => {
   const API_BASE = "/api";
   const [selectedAccountId, setSelectedAccountId] = useState(null);
 
+  const connectIb = async () => {
+      try {
+          setIbStatus(prev => ({ ...prev, socket: 'Connecting...' }));
+          const resp = await fetch(`${API_BASE}/velocity/ib/connect`, { method: 'POST' });
+          if (resp.ok) {
+              const data = await resp.json();
+              if (data.status === 'success') {
+                  setIbStatus(prev => ({ ...prev, socket: 'Online' }));
+                  alert("IB Socket Connected");
+              } else {
+                  setIbStatus(prev => ({ ...prev, socket: 'Error' }));
+                  alert("Connection Failed: " + data.message);
+              }
+          }
+      } catch (e) { console.error(e); }
+  };
+
   const fetchIbData = async (accountIdOverride) => {
     try {
       const statusCheck = async () => {
