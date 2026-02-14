@@ -858,20 +858,10 @@ const App = () => {
               });
               setIbAccount(processedAccounts);
 
-              // Process Positions (Only update if successful to avoid flickering)
+              // Process Positions
               if (posResp.ok) {
                   let combinedPositions = await posResp.json();
-                  
-                  if (ledgerResp.ok) {
-                      const ledgerData = await ledgerResp.json();
-                      Object.entries(ledgerData).forEach(([curr, details]) => {
-                          if (curr !== 'BASE' && Math.abs(details.cashbalance) > 1) {
-                              if (!combinedPositions.find(p => p.symbol === curr)) {
-                                  combinedPositions.push({ symbol: curr, position: details.cashbalance, avgCost: 1.0, mktPrice: details.marketvalue / details.cashbalance || 1.0, unrealizedPnl: details.unrealizedpnl || 0, secType: 'CASH' });
-                              }
-                          }
-                      });
-                  }
+                  // Removed Ledger merging to prevent confusing CASH entries with $1.00 price
                   setIbPositions(combinedPositions);
               }
             }
