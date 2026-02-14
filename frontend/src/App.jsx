@@ -422,12 +422,10 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
                 <span className={`px-2 py-1 rounded ${isLive ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'} text-[9px] font-black border uppercase tracking-widest`}>
                     {isLive ? 'Live Execution' : 'Simulation Console'}
                 </span>
-                {isLive && (
-                    <button onClick={onOpenBulk} className="ml-4 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase transition-all shadow-lg flex items-center gap-2">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M12 5v14M5 12h14"/></svg>
-                        <span>Deploy Cluster</span>
-                    </button>
-                )}
+                <button onClick={onOpenBulk} className={`ml-4 px-4 py-1.5 rounded-lg text-white text-[10px] font-black uppercase transition-all shadow-lg flex items-center gap-2 ${isLive ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-blue-600 hover:bg-blue-500'}`}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4"><path d="M12 5v14M5 12h14"/></svg>
+                    <span>Deploy Cluster</span>
+                </button>
             </div>
             {isLive && (
                 <div className="flex gap-4">
@@ -790,7 +788,12 @@ const App = () => {
         await fetch(`/api/quant/strategies/create`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pair, lot_size: capital, template_id: templateId }) 
+            body: JSON.stringify({ 
+                pair, 
+                lot_size: capital, 
+                template_id: templateId,
+                execution_mode: quantTab === 'simulation' ? 'SIMULATION' : 'LIVE'
+            }) 
         });
         await fetchQuantStrategies();
     } catch (e) { console.error(e); } 
@@ -897,7 +900,9 @@ const App = () => {
 
   const handleBulkDeploy = async (selections) => {
       try {
-          const resp = await fetch(`${API_BASE}/quant/strategies/bulk-create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selections }) });
+          const mode = quantTab === 'simulation' ? 'SIMULATION' : 'LIVE';
+          const enrichedSelections = selections.map(s => ({ ...s, execution_mode: mode }));
+          const resp = await fetch(`${API_BASE}/quant/strategies/bulk-create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selections: enrichedSelections }) });
           if (resp.ok) { setIsBulkOpen(false); fetchQuantStrategies(); alert("Cluster Deployment Initiated."); }
       } catch (e) { console.error(e); }
   };
