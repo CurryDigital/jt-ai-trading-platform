@@ -820,22 +820,34 @@ const App = () => {
   const fetchIbData = async (accountIdOverride) => {
     try {
       const statusCheck = async () => {
-          await fetch('/v1/api/iserver/accounts', { credentials: 'include' });
+          const acc = await fetch('/v1/api/iserver/accounts', { credentials: 'include' });
           const authResp = await fetch('/v1/api/iserver/auth/status', { credentials: 'include' });
           return authResp.ok ? await authResp.json() : null;
       };
       const authData = await statusCheck();
       if (authData && authData.authenticated) {
           setIbStatus(prev => ({ ...prev, web: 'Authenticated', status: 'Connected' }));
-          await fetch(`${API_BASE}/velocity/ib/sync-session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include' });
+          // Keep session alive
+          fetch(`${API_BASE}/velocity/ib/sync-session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include' }).catch(() => {});
+          
           const accResp = await fetch('/v1/api/portfolio/accounts', { credentials: 'include' });
           if (accResp.ok) {
             const accData = await accResp.json();
             if (accData && accData.length > 0) {
               const targetId = accountIdOverride || selectedAccountId || (accData.find(a => a.id.startsWith('DU')) || accData[0]).id;
               if (!selectedAccountId) setSelectedAccountId(targetId);
-              const summaryResp = await fetch(`/v1/api/portfolio/${targetId}/summary`, { credentials: 'include' });
-              let summaryData = summaryResp.ok ? await summaryResp.json() : {};
+              
+              // Parallel fetch for speed
+              const [summaryResp, posResp, ledgerResp] = await Promise.all([
+                  fetch(`/v1/api/portfolio/${targetId}/summary`, { credentials: 'include' }),
+                  fetch(`/v1/api/portfolio/${targetId}/positions/0`, { credentials: 'include' }),
+                  fetch(`/v1/api/portfolio/${targetId}/ledger`, { credentials: 'include' })
+              ]);
+
+              // Process Summary
+              let summaryData = {};
+              if (summaryResp.ok) summaryData = await summaryResp.json();
+              
               const processedAccounts = accData.map(a => {
                   const isTarget = a.id === targetId;
                   return {
@@ -845,24 +857,27 @@ const App = () => {
                   };
               });
               setIbAccount(processedAccounts);
-              const posResp = await fetch(`/v1/api/portfolio/${targetId}/positions/0`, { credentials: 'include' });
-              let combinedPositions = posResp.ok ? await posResp.json() : [];
-              const ledgerResp = await fetch(`/v1/api/portfolio/${targetId}/ledger`, { credentials: 'include' });
-              if (ledgerResp.ok) {
-                  const ledgerData = await ledgerResp.json();
-                  Object.entries(ledgerData).forEach(([curr, details]) => {
-                      if (curr !== 'BASE' && Math.abs(details.cashbalance) > 1) {
-                          if (!combinedPositions.find(p => p.symbol === curr)) {
-                              combinedPositions.push({ symbol: curr, position: details.cashbalance, avgCost: 1.0, mktPrice: details.marketvalue / details.cashbalance || 1.0, unrealizedPnl: details.unrealizedpnl || 0, secType: 'CASH' });
+
+              // Process Positions (Only update if successful to avoid flickering)
+              if (posResp.ok) {
+                  let combinedPositions = await posResp.json();
+                  
+                  if (ledgerResp.ok) {
+                      const ledgerData = await ledgerResp.json();
+                      Object.entries(ledgerData).forEach(([curr, details]) => {
+                          if (curr !== 'BASE' && Math.abs(details.cashbalance) > 1) {
+                              if (!combinedPositions.find(p => p.symbol === curr)) {
+                                  combinedPositions.push({ symbol: curr, position: details.cashbalance, avgCost: 1.0, mktPrice: details.marketvalue / details.cashbalance || 1.0, unrealizedPnl: details.unrealizedpnl || 0, secType: 'CASH' });
+                              }
                           }
-                      }
-                  });
+                      });
+                  }
+                  setIbPositions(combinedPositions);
               }
-              setIbPositions(combinedPositions);
             }
           }
       } else { setIbStatus(prev => ({ ...prev, web: 'Unauthorized' })); }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("IB Data Fetch Error:", e); }
   };
 
   const activeAccount = useMemo(() => {
@@ -1042,7 +1057,7 @@ const App = () => {
             <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-700 text-left">
                 <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-8 border-b border-white/5 pb-8 font-outfit uppercase">
                    <div className="flex items-baseline gap-6 font-outfit"><h2 className="text-2xl md:text-3xl font-black text-white italic font-outfit leading-none uppercase tracking-tightest">Live Execution <span className="ml-4 text-[10px] bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 tracking-widest">PAPER_TRADING</span></h2><button onClick={() => setIsBulkOpen(true)} className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase border border-emerald-500/20 transition-all shadow-xl glow-emerald flex items-center gap-2"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 5v14M5 12h14"/></svg><span>Deploy Cluster</span></button></div>
-                   <div className="flex items-center gap-4 font-outfit uppercase">{ibAccount && ibAccount.length > 0 ? (<select value={selectedAccountId} onChange={(e) => { const id = e.target.value; setSelectedAccountId(id); fetchIbData(id); }} className="bg-black/60 border border-blue-500/40 rounded-xl px-4 py-2 text-[10px] font-black text-white outline-none focus:border-blue-500 appearance-none pr-10 uppercase font-outfit shadow-[0_0_15px_rgba(59,130,246,0.1)]">{ibAccount.map(acc => (<option key={acc.id} value={acc.id}>{acc.id} ({acc.accountTitle || 'Active'})</option>))}</select>) : (ibStatus.web === 'Authenticated' && (<button onClick={fetchIbData} className="px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 text-[9px] font-black uppercase border border-amber-500/20 animate-pulse font-outfit leading-none">Link_Account_Data</button>))}<div className="flex flex-col text-right font-outfit"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR_LINK_STATUS</span><span className={`text-xs font-bold font-mono ${ibStatus.web === 'Authenticated' ? 'text-emerald-400' : 'text-rose-400'}`}>{ibStatus.web}</span></div>{ibStatus.web !== 'Authenticated' ? (<div className="flex gap-2"><button onClick={() => { const width = 600; const height = 900; const left = (window.screen.width - width) / 2; const top = (window.screen.height - height) / 2; window.open('/sso/Login?forwardTo=22', 'ib_login_popup', `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes,status=yes`); }} className="px-6 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase border border-blue-500 shadow-lg glow-blue font-outfit leading-none font-black">Authorize_Popup</button><button onClick={fetchIbData} className="px-4 py-2 rounded-xl bg-white/10 text-slate-400 text-[10px] font-black uppercase border border-white/10 hover:bg-white/20 transition-all font-outfit leading-none">Sync_Session</button></div>) : (<div className="flex gap-2"><button onClick={fetchIbData} className="px-6 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/20 transition-all font-outfit leading-none font-black">Refresh_Session</button><button onClick={connectIb} className="px-6 py-2 rounded-xl bg-white/5 hover:bg-blue-600 text-slate-300 hover:text-white text-[10px] font-black uppercase border border-white/10 transition-all font-outfit shadow-lg leading-none font-black">Init_Socket</button></div>)}</div>
+                   <div className="flex items-center gap-4 font-outfit uppercase">{ibAccount && ibAccount.length > 0 ? (<select value={selectedAccountId} onChange={(e) => { const id = e.target.value; setSelectedAccountId(id); fetchIbData(id); }} className="bg-black/60 border border-blue-500/40 rounded-xl px-4 py-2 text-[10px] font-black text-white outline-none focus:border-blue-500 appearance-none pr-10 uppercase font-outfit shadow-[0_0_15px_rgba(59,130,246,0.1)]">{ibAccount.map(acc => (<option key={acc.id} value={acc.id}>{acc.id} ({acc.accountTitle || 'Active'})</option>))}</select>) : (ibStatus.web === 'Authenticated' && (<button onClick={fetchIbData} className="px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 text-[9px] font-black uppercase border border-amber-500/20 animate-pulse font-outfit leading-none">Link_Account_Data</button>))}<div className="flex flex-col text-right font-outfit"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR_LINK_STATUS</span><span className={`text-xs font-bold font-mono ${ibStatus.web === 'Authenticated' ? 'text-emerald-400' : 'text-rose-400'}`}>{ibStatus.web}</span></div>{ibStatus.web !== 'Authenticated' ? (<div className="flex gap-2"><button onClick={() => { const width = 600; const height = 900; const left = (window.screen.width - width) / 2; const top = (window.screen.height - height) / 2; window.open('/sso/Login?forwardTo=22', 'ib_login_popup', `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes,status=yes`); }} className="px-6 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase border border-blue-500 shadow-lg glow-blue font-outfit leading-none font-black">Authorize_Popup</button><button onClick={fetchIbData} className="px-4 py-2 rounded-xl bg-white/10 text-slate-400 text-[10px] font-black uppercase border border-white/10 hover:bg-white/20 transition-all font-outfit leading-none">Sync_Session</button></div>) : (<div className="flex gap-2"><button onClick={() => { fetchIbData(); fetchData(); }} className="px-6 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/20 transition-all font-outfit leading-none font-black">Refresh_Session</button><button onClick={connectIb} className="px-6 py-2 rounded-xl bg-white/5 hover:bg-blue-600 text-slate-300 hover:text-white text-[10px] font-black uppercase border border-white/10 transition-all font-outfit shadow-lg leading-none font-black">Init_Socket</button></div>)}</div>
                 </div>
                 <div className="grid grid-cols-12 gap-8">
                     <div className="col-span-12 lg:col-span-8 space-y-8">
