@@ -458,11 +458,11 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
                                 </>
                             ) : (
                                 <>
-                                    <th className="px-6 py-4">Accuracy (Win%)</th>
+                                    <th className="px-6 py-4">Win% / Logic</th>
                                     <th className="px-6 py-4">Trades (30D)</th>
-                                    <th className="px-6 py-4">Recent PnL</th>
-                                    <th className="px-6 py-4 text-emerald-400">Est. Monthly Return</th>
-                                    <th className="px-6 py-4">Allocated Capital ($)</th>
+                                    <th className="px-6 py-4">Daily Est.</th>
+                                    <th className="px-6 py-4 text-emerald-400">Monthly Est.</th>
+                                    <th className="px-6 py-4">Cap ($)</th>
                                 </>
                             )}
                             <th className="px-6 py-4 text-right">Action</th>
@@ -530,22 +530,15 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
                                         <>
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
-                                                    <div className={`h-1.5 w-1.5 rounded-full ${stats.accuracy > 65 ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-amber-400'}`} />
-                                                    <span className={`text-sm font-black font-mono ${stats.accuracy > 65 ? 'text-emerald-400' : 'text-amber-400'}`}>{stats.accuracy}%</span>
+                                                    <span className="text-sm font-black font-mono text-emerald-400">{stats.accuracy}%</span>
+                                                    <span className="text-[8px] text-slate-600 font-bold bg-white/5 px-1.5 py-0.5 rounded">MOD:{stats.risk_score.toFixed(1)}</span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 font-mono font-bold text-slate-300">{stats.trades_30d}</td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`h-1 w-16 bg-white/10 rounded-full overflow-hidden`}>
-                                                        <div className={`h-full ${stats.risk_score > 3 ? 'bg-rose-500' : 'bg-blue-500'}`} style={{width: `${(stats.risk_score/5)*100}%`}} />
-                                                    </div>
-                                                    <span className="text-[9px] font-bold text-slate-500">{stats.risk_score.toFixed(1)}/5</span>
-                                                </div>
-                                            </td>
+                                            <td className="px-6 py-4 font-mono text-slate-300 text-xs">{stats.trades_30d}</td>
+                                            <td className="px-6 py-4 font-mono text-xs text-blue-400">+${(estReturn / 30).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
                                             <td className="px-6 py-4 font-mono font-black text-emerald-400">+${estReturn.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
                                             <td className="px-6 py-4">
-                                                <input type="number" value={currentCapital} disabled={isActive} onChange={e => handleAllocationChange(allocationKey, Number(e.target.value))} className={`bg-black/40 border rounded-lg px-3 py-1.5 text-white font-mono text-xs w-24 focus:border-blue-500 outline-none transition-colors ${isActive ? 'border-transparent text-slate-400' : 'border-white/10'}`} />
+                                                <input type="number" value={currentCapital} disabled={isActive} onChange={e => handleAllocationChange(allocationKey, Number(e.target.value))} className={`bg-black/40 border rounded-lg px-3 py-1.5 text-white font-mono text-xs w-20 focus:border-blue-500 outline-none transition-colors ${isActive ? 'border-transparent text-slate-400' : 'border-white/10'}`} />
                                             </td>
                                         </>
                                     )}
@@ -1081,7 +1074,7 @@ const App = () => {
       </main>
 
       <footer className="fixed bottom-0 left-0 w-full h-12 glass border-t border-white/5 backdrop-blur-3xl z-[110] flex items-center px-12 justify-between">
-         <div className="flex items-center gap-8"><div className="flex items-center gap-2.5 font-outfit"><div className="h-2 w-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_#10b981]" /><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-outfit leading-none">Node_0.129.4 // OK</span></div><div className="h-4 w-px bg-white/5" /><div className="hidden md:flex items-center gap-2.5 font-outfit"><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-outfit leading-none">Neural Compute: 94.2 TFLOPS</span></div></div>
+         <div className="flex items-center gap-8"><div className="flex items-center gap-2.5 font-outfit"><div className="h-2 w-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_#10b981]" /><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-outfit leading-none">Node_0.129.4 // OK</span></div><div className="h-4 w-px bg-white/5" /><div className="hidden md:flex items-center gap-2.5 font-outfit"><span className="text-[10px] font-black text-slate-500 uppercase tracking-widest font-outfit leading-none">Neural Compute: 94.2 TFLOPS</span></div></div>
          <div className="hidden sm:flex items-center gap-6 text-[10px] font-black text-slate-600 uppercase tracking-widest font-outfit italic leading-none font-black">Institutional v2.9 ELITE // Global Portfolio Control</div>
       </footer>
     </div>
