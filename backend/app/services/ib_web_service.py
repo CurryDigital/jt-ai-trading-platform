@@ -81,7 +81,8 @@ class IBKRWebAPIService:
                 # But safer to search the base currency
                 search_term = search_term[:3]
             
-            resp = self.session.get(f"{self.base_url}/iserver/secdef/search?symbol={search_term}")
+            # Explicit search for name=false to search by symbol
+            resp = self.session.get(f"{self.base_url}/iserver/secdef/search?symbol={search_term}&name=false&secType={sec_type}")
             if resp.ok:
                 results = resp.json()
                 

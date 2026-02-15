@@ -51,18 +51,31 @@ class StrategyManager:
     def get_active_strategies(self):
         return self.db.query(QuantStrategy).filter(QuantStrategy.is_active == True).all()
 
-    def create_fx_strategy(self, pair: str, lot_size: float = 1000, template_id: str = "MR_FX"):
+    def create_fx_strategy(self, pair: str, lot_size: float = 1000, template_id: str = "MR_FX", execution_mode: str = "SIMULATION"):
         name_key = f"{template_id}_{pair.replace('=X', '')}"
         existing = self.db.query(QuantStrategy).filter(QuantStrategy.name == name_key).first()
-        if existing: return existing
+        
+        logger.info(f"Creating/Updating Strategy: {name_key} | Mode: {execution_mode} | Pair: {pair}")
+        
+        if existing:
+            # Update mode if it already exists
+            params = dict(existing.params) if existing.params else {}
+            params['execution_mode'] = execution_mode
+            params['allocated_capital'] = lot_size # Update capital too
+            existing.params = params
+            
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(existing, "params")
+            
+            existing.is_active = True # Ensure it's re-activated if it was stopped
+            self.db.commit()
+            logger.info(f"Updated existing strategy {name_key} to mode {execution_mode}")
+            return existing
         
         template = self.templates.get(template_id, self.templates["MR_FX"])
 
         # allocated_capital is passed as lot_size in the payload for now, mapping it
         allocated_capital = lot_size 
-        # Calculate actual lot size (units) based on allocated capital
-        # Assume leverage 1:1 for simplicity or calc units = capital / price
-        # For now, we store capital in params and calculate units in run_tick
         
         new_strat = QuantStrategy(
             name=name_key,
@@ -73,7 +86,7 @@ class StrategyManager:
                 "lot_size": lot_size, # This is now treated as capital in logic
                 "allocated_capital": allocated_capital,
                 "risk_config": template["risk_management"],
-                "execution_mode": "SIMULATION" 
+                "execution_mode": execution_mode 
             },
             win_rate_target=0.65,
             stop_loss_pct=0.005, 
@@ -82,6 +95,7 @@ class StrategyManager:
         )
         self.db.add(new_strat)
         self.db.commit()
+        logger.info(f"Created new strategy {name_key} in mode {execution_mode}")
         return new_strat
 
     def toggle_mode(self, strat_id: int, mode: str):
@@ -103,21 +117,16 @@ class StrategyManager:
 
     def bulk_create_strategies(self, selections: list):
         """
-        selections: list of {"pair": str, "template_id": str, "capital": float}
+        selections: list of {"pair": str, "template_id": str, "capital": float, "execution_mode": str}
         """
         created = []
         for item in selections:
             strat = self.create_fx_strategy(
                 pair=item["pair"], 
                 lot_size=item.get("capital", 10000), 
-                template_id=item["template_id"]
+                template_id=item["template_id"],
+                execution_mode=item.get("execution_mode", "SIMULATION")
             )
-            # Ensure it is set to Live mode immediately if deployed from the Live Tab
-            params = strat.params or {}
-            params['execution_mode'] = 'PAPER' # Default to Paper for Live Tab
-            strat.params = params
-            from sqlalchemy.orm.attributes import flag_modified
-            flag_modified(strat, "params")
             created.append(strat)
         
         self.db.commit()
@@ -167,22 +176,86 @@ class StrategyManager:
             
             pnl_history = [t.pnl for t in all_trades[-10:] if t.pnl is not None]
             
-            # Iteration 71: Enhanced Live Dataset (Trades, Avg Buy, Market Price)
-            realized_pnl = sum([t.pnl for t in all_trades if t.pnl is not None])
-            
-            # Inventory Tracking
+            # Iteration 74: Enhanced FIFO PnL with Separate Long/Short Tracking
+            realized_pnl = 0.0
             net_qty = 0
-            buy_costs = 0
-            buy_qty = 0
-            for t in all_trades:
-                # Normalize side: Treat both BUY and live-entry as long positions
-                side_mult = 1 if t.side.upper() in ['BUY', 'LONG'] else -1
-                net_qty += t.quantity * side_mult
-                if side_mult == 1:
-                    buy_costs += t.quantity * t.price
-                    buy_qty += t.quantity
+            long_queue = []   # List of [qty, price] for LONG positions
+            short_queue = []  # List of [qty, price] for SHORT positions
             
-            avg_entry = (buy_costs / buy_qty) if buy_qty > 0 else 0
+            for t in all_trades:
+                qty = float(t.quantity)
+                price = float(t.price)
+                side = t.side.upper()
+                
+                # Determine direction
+                is_long = side in ['BUY', 'LONG']
+                direction = 1 if is_long else -1
+                signed_qty = qty * direction
+
+                if net_qty == 0:
+                    # Opening new position
+                    net_qty += signed_qty
+                    if is_long:
+                        long_queue.append([qty, price])
+                    else:
+                        short_queue.append([qty, price])
+                elif (net_qty > 0 and is_long) or (net_qty < 0 and not is_long):
+                    # Adding to existing position (same direction)
+                    net_qty += signed_qty
+                    if is_long:
+                        long_queue.append([qty, price])
+                    else:
+                        short_queue.append([qty, price])
+                else:
+                    # Closing/Reducing position (opposite direction)
+                    remaining_close_qty = qty
+                    target_queue = long_queue if net_qty > 0 else short_queue
+                    
+                    while remaining_close_qty > 0 and target_queue:
+                        match_qty, match_price = target_queue[0]
+                        
+                        if remaining_close_qty >= match_qty:
+                            # Fully consumed this batch
+                            if net_qty > 0:  # Closing long
+                                trade_pnl = match_qty * (price - match_price)
+                            else:  # Closing short
+                                trade_pnl = match_qty * (match_price - price)
+                            realized_pnl += trade_pnl
+                            remaining_close_qty -= match_qty
+                            target_queue.pop(0)
+                        else:
+                            # Partially consumed this batch
+                            if net_qty > 0:
+                                trade_pnl = remaining_close_qty * (price - match_price)
+                            else:
+                                trade_pnl = remaining_close_qty * (match_price - price)
+                            realized_pnl += trade_pnl
+                            target_queue[0][0] -= remaining_close_qty
+                            remaining_close_qty = 0
+                    
+                    # If we closed everything and still have quantity, we flipped position
+                    if remaining_close_qty > 0:
+                        net_qty = remaining_close_qty * direction
+                        if is_long:
+                            long_queue.append([remaining_close_qty, price])
+                        else:
+                            short_queue.append([remaining_close_qty, price])
+                    else:
+                        net_qty += signed_qty
+
+            # Calculate separate Avg Entries for Long and Short
+            long_avg = 0
+            short_avg = 0
+            long_qty = sum(q for q, p in long_queue)
+            short_qty = sum(q for q, p in short_queue)
+            
+            if long_qty > 0:
+                long_avg = sum(q * p for q, p in long_queue) / long_qty
+            if short_qty > 0:
+                short_avg = sum(q * p for q, p in short_queue) / short_qty
+            
+            # Overall avg for backward compatibility
+            avg_entry = long_avg if net_qty > 0 else (short_avg if net_qty < 0 else 0)
             
             # Get current price with fuzzy matching
             ticker_clean = s.target_ticker.replace('=X', '').replace('.', '').replace('-', '').upper()
@@ -201,25 +274,46 @@ class StrategyManager:
                 except:
                     curr_price = all_trades[-1].price if all_trades else 1.0
             
-            unrealized_pnl = net_qty * (curr_price - avg_entry) if net_qty != 0 else 0
+            # Unrealized PnL based on Net Qty and Avg Entry
+            if net_qty > 0:
+                unrealized_pnl = net_qty * (curr_price - avg_entry)
+            elif net_qty < 0:
+                unrealized_pnl = abs(net_qty) * (avg_entry - curr_price)
+            else:
+                unrealized_pnl = 0
             
-            # Iteration 70/71/72: Detailed Strategy Metrics
+            # Total Capital Calculation for Exposure
+            total_inventory_value = sum(
+                (d.get("market_price", 0) * abs(d.get("inventory_qty", 0))) 
+                for k, d in matrix.get(tid, {}).get("pairs", {}).items()
+            ) 
+            # Note: This total_inventory_value is partial inside the loop, 
+            # but we can calculate individual exposure relative to s.params['allocated_capital'] or a global sum later.
+            # For now, let's just return the raw values and handle % in frontend or after loop.
+
+            # Iteration 74: Detailed Strategy Metrics with Long/Short Split
             matrix[tid]["pairs"][s.target_ticker] = {
                 "id": s.id,
                 "strategy_name": s.name,
-                "pnl": pnl,
+                "pnl": realized_pnl + unrealized_pnl, # Total PnL
                 "realized_pnl": realized_pnl,
                 "unrealized_pnl": unrealized_pnl,
                 "avg_buy_price": avg_entry,
+                "long_avg_price": long_avg if long_qty > 0 else 0,
+                "short_avg_price": short_avg if short_qty > 0 else 0,
+                "long_qty": long_qty,
+                "short_qty": short_qty,
                 "market_price": curr_price,
                 "inventory_qty": net_qty,
+                "position_type": "LONG" if net_qty > 0 else ("SHORT" if net_qty < 0 else "FLAT"),
                 "trades": trades,
                 "wins": wins,
                 "losses": trades - wins,
                 "win_rate": (wins / trades * 100) if trades > 0 else 0,
                 "is_active": s.is_active,
                 "mode": s.params.get("execution_mode", "SIMULATION"),
-                "pnl_history": pnl_history
+                "pnl_history": pnl_history,
+                "allocated_capital": s.params.get("allocated_capital", 10000)
             }
 
         for tid, data in matrix.items():
@@ -276,33 +370,88 @@ class StrategyManager:
         
         for s in strats:
             mode = s.params.get("execution_mode", "SIMULATION")
-            is_trend = "TREND" in s.name
-            win_prob = 0.55 if is_trend else 0.60 
             
-            if random.random() > 0.90: 
+            # Skip if random probability check fails (simulate realistic trading frequency)
+            # BUT for debugging, if in LIVE mode, let's force check every time to ensure connectivity
+            prob_threshold = 0.90 if mode == "SIMULATION" else 0.50 
+            
+            if random.random() > prob_threshold: 
                 outcome = random.random()
+                is_trend = "TREND" in s.name
+                win_prob = 0.55 if is_trend else 0.60 
                 is_win = outcome < win_prob
                 
                 side = "BUY" if random.random() > 0.5 else "SELL"
                 allocated = s.params.get("allocated_capital", 10000)
 
                 # PRICE FETCH
-                price = 1.08 # Default fallback
+                price = 0.0 # Initialize to 0
                 ticker_clean = s.target_ticker.replace('=X', '').upper()
                 if ticker_clean in current_prices:
                     price = current_prices[ticker_clean]
                 elif (ticker_clean + "=X") in current_prices:
                     price = current_prices[ticker_clean + "=X"]
                 
-                if price <= 0: price = 1.08
+                # If price is still 0 (missing from cache), try a quick YF fetch for robustness
+                if price <= 0:
+                    try:
+                        sym = s.target_ticker if "=X" in s.target_ticker else f"{s.target_ticker}=X"
+                        t_yf = yf.Ticker(sym)
+                        price = t_yf.fast_info.get('lastPrice', 0.0)
+                    except: pass
+                
+                # If still no price, skip this trade to avoid corrupting PnL calculations
+                if price <= 0:
+                    logger.warning(f"Skipping trade for {s.target_ticker}: No valid price available")
+                    continue
 
-                qty = int(allocated / price) if price > 0 else 1000
+                # Calculate quantity: if FX, round to nearest micro lot (1000) or at least 100 for clean numbers
+                # But typically FX is traded in lots of 1000 units minimum.
+                raw_qty = allocated / price if price > 0 else 1000
+                if "USD" in s.target_ticker or "EUR" in s.target_ticker or "JPY" in s.target_ticker:
+                    # FX Logic: Round to nearest 1000 (Micro Lot)
+                    qty = int(round(raw_qty / 1000.0) * 1000)
+                    if qty == 0: qty = 1000 # Minimum 1 micro lot
+                else:
+                    # Stock/Crypto Logic: Integer quantity
+                    qty = int(raw_qty)
+                
                 executed = False
                 pnl_change = 0
                 
                 if ib_web_service.check_auth() and mode != "SIMULATION":
-                    # ... [Existing IBKR Logic] ...
-                    pass
+                    # LIVE / PAPER Execution
+                    # Actually execute against IBKR
+                    
+                    logger.info(f"Attempting LIVE execution for {s.name}: {side} {qty} {s.target_ticker}")
+                    
+                    # 1. Get Account ID
+                    accounts = ib_web_service.get_accounts()
+                    # Prefer Paper account (starts with DU) if in PAPER mode, though usually just one active.
+                    active_acc = accounts[0] if accounts else None
+                    
+                    if active_acc:
+                        # Attempt execution
+                        # Note: execute_order handles conid resolution internally
+                        order_resp = ib_web_service.execute_order(
+                            account_id=active_acc, 
+                            ticker=s.target_ticker, 
+                            action=side, 
+                            quantity=qty
+                        )
+                        
+                        if order_resp.get('status') == 'success':
+                            executed = True
+                            # Real P&L is 0 at the moment of entry. 
+                            pnl_change = 0 
+                            # Track trade count but NOT win/loss yet (that requires closing)
+                            s.total_trades += 1
+                            logger.info(f"Execution SUCCESS: {s.name} order {order_resp.get('orderId')}")
+                        else:
+                            logger.error(f"Strategy {s.name} Execution Failed: {order_resp.get('message')}")
+                    else:
+                        logger.error("No active IBKR account found for execution.")
+                    
                 else:
                     # SIMULATION
                     volatility_factor = 0.0025 # 0.25% move

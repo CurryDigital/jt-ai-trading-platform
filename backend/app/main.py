@@ -516,7 +516,8 @@ def create_strategy(payload: dict, db: Session = Depends(get_db)):
         pair = payload.get("pair", "EURUSD=X")
         qty = payload.get("lot_size", 1000)
         template_id = payload.get("template_id", "MR_FX")
-        strat = strategy_manager.create_fx_strategy(pair, qty, template_id)
+        mode = payload.get("execution_mode", "SIMULATION")
+        strat = strategy_manager.create_fx_strategy(pair, qty, template_id, mode)
         return strat
     except Exception as e:
         print(f"Quant Strategy Create Error: {e}")

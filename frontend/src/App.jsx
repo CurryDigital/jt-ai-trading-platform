@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { ProfessionalLiveTrading } from './ProfessionalLiveTrading';
+import { ProfessionalSimulationLab } from './ProfessionalSimulationLab';
 
 // --- UTILS & HELPERS ---
 const parseRationale = (raw) => {
@@ -414,6 +416,23 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
   const handleAllocationChange = (key, value) => setAllocations(prev => ({ ...prev, [key]: value }));
   const isLive = mode === 'live';
 
+  // Calculate total allocated capital across all active strategies for exposure %
+  const totalAllocatedCapital = useMemo(() => {
+    if (!matrix?.active) return 0;
+    let total = 0;
+    Object.values(matrix.active).forEach(template => {
+      if (template?.pairs) {
+        Object.values(template.pairs).forEach(pair => {
+          // Only count strategies that are active
+          if (pair?.is_active) {
+            total += Number(pair?.allocated_capital) || 0;
+          }
+        });
+      }
+    });
+    return total;
+  }, [matrix?.active]);
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="flex items-center justify-between">
@@ -447,12 +466,15 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
                             <th className="px-6 py-4">Strategy / Pair</th>
                             {isLive ? (
                                 <>
-                                    <th className="px-6 py-4">Actualized (Realized)</th>
-                                    <th className="px-6 py-4">Inventory (Unrealized)</th>
-                                    <th className="px-6 py-4">Avg Buy / Market</th>
-                                    <th className="px-6 py-4">Inventory Qty</th>
-                                    <th className="px-6 py-4">Live Trades</th>
-                                    <th className="px-6 py-4">Win/Loss</th>
+                                    <th className="px-6 py-4">Realized PnL</th>
+                                    <th className="px-6 py-4">Unrealized PnL</th>
+                                    <th className="px-6 py-4">Long Avg</th>
+                                    <th className="px-6 py-4">Short Avg</th>
+                                    <th className="px-6 py-4">Market Price</th>
+                                    <th className="px-6 py-4">Position</th>
+                                    <th className="px-6 py-4">Return %</th>
+                                    <th className="px-6 py-4">Exposure</th>
+                                    <th className="px-6 py-4">Trades</th>
                                 </>
                             ) : (
                                 <>
@@ -488,41 +510,73 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
                                     </td>
                                     {isLive ? (
                                         <>
-                                            <td className="px-6 py-4">
-                                                <span className={`text-sm font-black font-mono ${(Number(livePerf?.realized_pnl) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                    {`${(Number(livePerf?.realized_pnl) || 0) >= 0 ? '+' : ''}$${(Number(livePerf?.realized_pnl) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className={`text-sm font-black font-mono ${(Number(livePerf?.unrealized_pnl) || 0) >= 0 ? 'text-blue-400' : 'text-orange-400'}`}>
-                                                    {`${(Number(livePerf?.unrealized_pnl) || 0) >= 0 ? '+' : ''}$${(Number(livePerf?.unrealized_pnl) || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}`}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex flex-col text-left font-mono">
-                                                    <span className="text-xs font-bold text-white">${(Number(livePerf?.avg_buy_price) || 0).toFixed(4)}</span>
-                                                    <span className="text-[9px] text-slate-500 font-black italic">Mkt: ${(Number(livePerf?.market_price) || 0).toFixed(4)}</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="text-sm font-black text-white font-mono">{Number(livePerf?.inventory_qty) || 0} Units</span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="text-sm font-black text-slate-300 font-mono">{Number(livePerf?.trades) || 0}</span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="flex flex-col text-left">
-                                                        <span className="text-[8px] text-slate-600 font-black uppercase">Wins</span>
-                                                        <span className="text-xs font-bold text-emerald-400 font-mono">{Number(livePerf?.wins) || 0}</span>
-                                                    </div>
-                                                    <div className="h-4 w-px bg-white/5" />
-                                                    <div className="flex flex-col text-left">
-                                                        <span className="text-[8px] text-slate-600 font-black uppercase">Loss</span>
-                                                        <span className="text-xs font-bold text-rose-400 font-mono">{Number(livePerf?.losses) || 0}</span>
-                                                    </div>
-                                                </div>
-                                            </td>
+                                            {(() => {
+                                                const realized = Number(livePerf?.realized_pnl) || 0;
+                                                const unrealized = Number(livePerf?.unrealized_pnl) || 0;
+                                                const totalPnL = realized + unrealized;
+                                                const allocated = Number(livePerf?.allocated_capital) || 10000;
+                                                const absReturn = allocated > 0 ? (totalPnL / allocated) * 100 : 0;
+                                                const exposurePct = totalAllocatedCapital > 0 ? (allocated / totalAllocatedCapital) * 100 : 0;
+                                                const isWinning = absReturn >= 0;
+                                                const posType = livePerf?.position_type || 'FLAT';
+                                                const netQty = Number(livePerf?.inventory_qty) || 0;
+                                                const longQty = Number(livePerf?.long_qty) || 0;
+                                                const shortQty = Number(livePerf?.short_qty) || 0;
+                                                const longAvg = Number(livePerf?.long_avg_price) || 0;
+                                                const shortAvg = Number(livePerf?.short_avg_price) || 0;
+                                                const marketPrice = Number(livePerf?.market_price) || 0;
+                                                return (
+                                                    <>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`text-sm font-black font-mono ${realized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                {`${realized >= 0 ? '+' : ''}$${realized.toLocaleString(undefined, {minimumFractionDigits: 2})}`}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`text-sm font-black font-mono ${unrealized >= 0 ? 'text-blue-400' : 'text-orange-400'}`}>
+                                                                {`${unrealized >= 0 ? '+' : ''}$${unrealized.toLocaleString(undefined, {minimumFractionDigits: 2})}`}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="text-xs font-bold text-emerald-400 font-mono">{longAvg > 0 ? `$${longAvg.toFixed(4)}` : '-'}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="text-xs font-bold text-rose-400 font-mono">{shortAvg > 0 ? `$${shortAvg.toFixed(4)}` : '-'}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="text-sm font-bold text-white font-mono">${marketPrice.toFixed(4)}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex flex-col text-left">
+                                                                <span className={`px-2 py-0.5 rounded text-[9px] font-black ${posType === 'LONG' ? 'bg-emerald-500/10 text-emerald-400' : posType === 'SHORT' ? 'bg-rose-500/10 text-rose-400' : 'bg-slate-500/10 text-slate-400'}`}>
+                                                                    {posType}
+                                                                </span>
+                                                                <span className="text-[9px] font-mono text-slate-400 mt-1">
+                                                                    {netQty !== 0 ? `${Math.abs(netQty).toLocaleString()} units` : 'Flat'}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`text-sm font-black font-mono ${isWinning ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                {isWinning ? '+' : ''}{absReturn.toFixed(2)}%
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="text-sm font-black text-amber-400 font-mono">
+                                                                {exposurePct.toFixed(1)}%
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex flex-col text-left">
+                                                                <span className="text-sm font-black text-slate-300 font-mono">{Number(livePerf?.trades) || 0}</span>
+                                                                <span className="text-[8px] text-slate-600">
+                                                                    {Number(livePerf?.wins) || 0}W / {Number(livePerf?.losses) || 0}L
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                    </>
+                                                );
+                                            })()}
                                         </>
                                     ) : (
                                         <>
@@ -575,10 +629,25 @@ const StrategyMatrix = ({ matrix, onDeploy, activeStrategies, mode = 'simulation
                                 </div>
                                 {isLive ? (
                                     <div className="grid grid-cols-2 gap-4 pt-2">
-                                        <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Actualized</span><div className={`text-sm font-black font-mono ${isPos ? 'text-emerald-400' : 'text-rose-400'}`}>{isPos ? '+' : ''}${(Number(livePerf?.realized_pnl) || 0).toFixed(2)}</div></div>
-                                        <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Inventory</span><div className={`text-sm font-black font-mono ${(Number(livePerf?.unrealized_pnl) || 0) >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>${(Number(livePerf?.unrealized_pnl) || 0).toFixed(2)}</div></div>
-                                        <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Units / Trades</span><div className="text-xs font-black text-white font-mono">{Number(livePerf?.inventory_qty) || 0}U / {Number(livePerf?.trades) || 0}Ex</div></div>
-                                        <div className="space-y-1 text-right"><span className="text-[8px] text-slate-500 font-black uppercase">Avg / Mkt</span><div className="text-[10px] font-bold text-white font-mono">${(Number(livePerf?.avg_buy_price) || 0).toFixed(2)} / <span className="text-emerald-400">${(Number(livePerf?.market_price) || 0).toFixed(2)}</span></div></div>
+                                        {(() => {
+                                            const realized = Number(livePerf?.realized_pnl) || 0;
+                                            const unrealized = Number(livePerf?.unrealized_pnl) || 0;
+                                            const totalPnL = realized + unrealized;
+                                            const allocated = Number(livePerf?.allocated_capital) || 10000;
+                                            const absReturn = allocated > 0 ? (totalPnL / allocated) * 100 : 0;
+                                            const exposurePct = totalAllocatedCapital > 0 ? (allocated / totalAllocatedCapital) * 100 : 0;
+                                            const isWinning = absReturn >= 0;
+                                            return (
+                                                <>
+                                                    <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Actualized</span><div className={`text-sm font-black font-mono ${realized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{realized >= 0 ? '+' : ''}${realized.toFixed(2)}</div></div>
+                                                    <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Inventory</span><div className={`text-sm font-black font-mono ${unrealized >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{unrealized >= 0 ? '+' : ''}${unrealized.toFixed(2)}</div></div>
+                                                    <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Abs Return %</span><div className={`text-sm font-black font-mono ${isWinning ? 'text-emerald-400' : 'text-rose-400'}`}>{isWinning ? '+' : ''}{absReturn.toFixed(2)}%</div></div>
+                                                    <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Exposure</span><div className="text-sm font-black text-amber-400 font-mono">{exposurePct.toFixed(1)}%</div></div>
+                                                    <div className="space-y-1"><span className="text-[8px] text-slate-500 font-black uppercase">Units / Trades</span><div className="text-xs font-black text-white font-mono">{Number(livePerf?.inventory_qty) || 0}U / {Number(livePerf?.trades) || 0}Ex</div></div>
+                                                    <div className="space-y-1 text-right"><span className="text-[8px] text-slate-500 font-black uppercase">Avg / Mkt</span><div className="text-[10px] font-bold text-white font-mono">${(Number(livePerf?.avg_buy_price) || 0).toFixed(2)} / <span className="text-emerald-400">${(Number(livePerf?.market_price) || 0).toFixed(2)}</span></div></div>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 ) : (
                                     <div className="flex justify-between items-end pt-2">
@@ -756,6 +825,34 @@ const App = () => {
   const [quantTab, setQuantTab] = useState('simulation'); // 'simulation' | 'live'
   const [isBulkOpen, setIsBulkOpen] = useState(false);
 
+  // Derive positions from quantMatrix when IBKR positions are empty
+  const strategyPositions = useMemo(() => {
+    const positions = [];
+    if (!quantMatrix?.active) return positions;
+    
+    Object.values(quantMatrix.active).forEach(template => {
+      if (template?.pairs) {
+        Object.entries(template.pairs).forEach(([pair, data]) => {
+          if (data?.inventory_qty !== 0) {
+            positions.push({
+              symbol: pair.replace('=X', ''),
+              position: data.inventory_qty,
+              avgCost: data.avg_buy_price || 0,
+              marketPrice: data.market_price || 0,
+              unrealizedPnl: data.unrealized_pnl || 0,
+              realizedPnl: data.realized_pnl || 0,
+              strategy: data.strategy_name || 'Unknown'
+            });
+          }
+        });
+      }
+    });
+    return positions;
+  }, [quantMatrix]);
+
+  // Use IBKR positions if available, otherwise fallback to strategy positions
+  const displayPositions = ibPositions?.length > 0 ? ibPositions : strategyPositions;
+
   const fetchQuantStrategies = async () => {
     try {
         const resp = await fetch(`/api/quant/strategies`);
@@ -840,23 +937,63 @@ const App = () => {
               const targetId = accountIdOverride || selectedAccountId || (accData.find(a => a.id.startsWith('DU')) || accData[0]).id;
               if (!selectedAccountId) setSelectedAccountId(targetId);
               
+              // Only trigger summary/ledger if we have a valid targetId
               // Parallel fetch for speed
-              const [summaryResp, posResp, ledgerResp] = await Promise.all([
+              const [summaryResp, posResp] = await Promise.all([
                   fetch(`/v1/api/portfolio/${targetId}/summary`, { credentials: 'include' }),
-                  fetch(`/v1/api/portfolio/${targetId}/positions/0`, { credentials: 'include' }),
-                  fetch(`/v1/api/portfolio/${targetId}/ledger`, { credentials: 'include' })
+                  fetch(`/v1/api/portfolio/${targetId}/positions/0`, { credentials: 'include' })
               ]);
 
               // Process Summary
               let summaryData = {};
-              if (summaryResp.ok) summaryData = await summaryResp.json();
+              if (summaryResp.ok) {
+                  try {
+                      summaryData = await summaryResp.json();
+                  } catch (e) { console.error("Summary JSON Parse Error", e); }
+              }
               
               const processedAccounts = accData.map(a => {
                   const isTarget = a.id === targetId;
+                  // Robust extraction for Net Liq
+                  // IBKR Key Variations: netliquidation, netLiquidation, totalCashValue, equitywithloanvalue
+                  // Value format: can be { amount: 123 } OR just 123.0
+                  let netLiq = 0;
+                  if (isTarget && summaryData) {
+                      const s = summaryData;
+                      const getVal = (k) => {
+                          const val = s[k] || s[k.toLowerCase()];
+                          return (val && typeof val === 'object') ? val.amount : val;
+                      };
+                      
+                      netLiq = getVal('netLiquidationValue') || getVal('netliquidation') || 
+                               getVal('equityWithLoanValue') || getVal('totalCashValue') || 
+                               getVal('netLiquidation') || 0;
+                  }
+                  // Fallback to account object properties from /portfolio/accounts
+                  if (!netLiq) {
+                      netLiq = a.netLiquidationValue || a.netLiquidation || a.totalCashValue || a.amount || a.equity || 0;
+                  }
+
+                  // Robust extraction for Buying Power
+                  let buyPower = 0;
+                  if (isTarget && summaryData) {
+                      const s = summaryData;
+                      const getVal = (k) => {
+                          const val = s[k] || s[k.toLowerCase()];
+                          return (val && typeof val === 'object') ? val.amount : val;
+                      };
+                      
+                      buyPower = getVal('buyingPower') || getVal('buyingpower') || 
+                                 getVal('availableFunds') || getVal('initMarginReq') || 0;
+                  }
+                  if (!buyPower) {
+                      buyPower = a.buyingPower || a.availableFunds || a.cash || 0;
+                  }
+
                   return {
                     ...a,
-                    netLiquidation: (isTarget ? (summaryData.netliquidation?.amount || summaryData.netLiquidation?.amount) : null) || a.netLiquidationValue || a.netLiquidation || a.totalCashValue || a.amount || a.equity || 0,
-                    buyingPower: (isTarget ? (summaryData.buyingpower?.amount || summaryData.buyingPower?.amount) : null) || a.buyingPower || a.availableFunds || a.cash || 0
+                    netLiquidation: Number(netLiq), // Ensure it's a number
+                    buyingPower: Number(buyPower)
                   };
               });
               setIbAccount(processedAccounts);
@@ -903,7 +1040,12 @@ const App = () => {
           const mode = quantTab === 'simulation' ? 'SIMULATION' : 'LIVE';
           const enrichedSelections = selections.map(s => ({ ...s, execution_mode: mode }));
           const resp = await fetch(`${API_BASE}/quant/strategies/bulk-create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selections: enrichedSelections }) });
-          if (resp.ok) { setIsBulkOpen(false); fetchQuantStrategies(); alert("Cluster Deployment Initiated."); }
+          if (resp.ok) { 
+              setIsBulkOpen(false); 
+              await fetchQuantStrategies(); // Ensure this finishes
+              alert("Cluster Deployment Initiated. Refreshing grid...");
+              window.location.reload(); // Force full reload to ensure clean state
+          }
       } catch (e) { console.error(e); }
   };
 
@@ -939,20 +1081,18 @@ const App = () => {
       <header className="px-6 md:px-12 py-8 md:py-10 bg-gradient-to-b from-blue-500/[0.02] to-transparent sticky top-20 md:top-24 z-[90] backdrop-blur-xl border-b border-white/5">
         <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-8 md:gap-10">
             <div className="flex items-center gap-6">
-                <div className="h-12 w-12 glass rounded-xl flex items-center justify-center border-blue-500/20 group cursor-pointer hover:scale-105 transition-all"><div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg"><span className="text-lg font-black text-white italic">O</span></div></div>
+                <div className="h-12 w-12 glass rounded-xl flex items-center justify-center border-blue-500/20 group cursor-pointer hover:scale-105 transition-all">
+                    <img src="/trading_logo.svg" alt="Trading Logo" className="h-8 w-8" />
+                </div>
                 <div className="flex flex-col text-left"><h1 className="text-2xl md:text-3xl font-black text-white tracking-tight uppercase italic font-outfit leading-none font-outfit uppercase font-black">ORCHESTRA <span className="text-blue-500 text-[10px] md:text-[12px] font-mono ml-3 not-italic tracking-widest">v2.9 ELITE</span></h1><div className="flex items-center gap-2 mt-2"><span className="text-[9px] md:text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] font-outfit">Institutional Command</span></div></div>
             </div>
             <nav className="flex flex-wrap gap-1.5 p-1 glass rounded-2xl shadow-inner">
-                {[{id: 'inventory', label: 'Command'}, {id: 'research', label: 'Intelligence'}, {id: 'signals', label: 'Alpha'}, {id: 'fx', label: 'Forex'}, {id: 'crypto', label: 'Digital'}, {id: 'commodities', label: 'Assets'}, {id: 'quant', label: 'Quant'}, {id: 'performance', label: 'Performance'}, {id: 'config', label: 'System'}].map(tab => (
+                {[{id: 'inventory', label: 'Command'}, {id: 'research', label: 'Intelligence'}, {id: 'signals', label: 'Alpha'}, {id: 'fx', label: 'Forex'}, {id: 'crypto', label: 'Digital'}, {id: 'commodities', label: 'Assets'}, {id: 'simulation', label: 'Simulation'}, {id: 'livetrading', label: 'Live Trading'}, {id: 'performance', label: 'Performance'}, {id: 'config', label: 'System'}].map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 md:px-6 py-2 md:py-3 rounded-lg md:rounded-xl text-[10px] md:text-[11px] font-black uppercase tracking-widest transition-all whitespace-nowrap font-outfit ${activeTab === tab.id ? 'bg-white text-black shadow-2xl font-black' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
             </nav>
         </div>
       </header>
-      
-      {activeTab === 'quant' && (
-          <div className="max-w-[1600px] mx-auto px-6 md:px-12 pb-6 border-b border-white/5"><div className="flex gap-4"><button onClick={() => setQuantTab('simulation')} className={`text-[10px] font-black uppercase tracking-widest pb-2 border-b-2 transition-all ${quantTab === 'simulation' ? 'border-blue-500 text-white' : 'border-transparent text-slate-500'}`}>Simulation Lab</button><button onClick={() => setQuantTab('live')} className={`text-[10px] font-black uppercase tracking-widest pb-2 border-b-2 transition-all ${quantTab === 'live' ? 'border-emerald-500 text-white' : 'border-transparent text-slate-500'}`}>Live Trading</button></div></div>
-      )}
 
       <main className="flex-1 p-6 md:p-12 max-w-[1600px] mx-auto w-full mb-32 space-y-10 md:space-y-16">
         
@@ -1030,43 +1170,29 @@ const App = () => {
             </div>
         )}
 
-        {activeTab === 'quant' && quantTab === 'simulation' && (
-            <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-700 text-left">
-                <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-8 border-b border-white/5 pb-8 font-outfit uppercase">
-                   <div className="flex items-baseline gap-6 font-outfit"><h2 className="text-2xl md:text-3xl font-black text-white italic font-outfit leading-none uppercase tracking-tightest">Quant Strategies <span className="ml-4 text-[10px] bg-amber-500/10 text-amber-500 px-3 py-1 rounded-full border border-amber-500/20 tracking-widest">SIMULATION_MODE</span></h2><button onClick={() => setIsModalOpen(true)} className="h-10 w-10 rounded-full glass border-white/20 flex items-center justify-center text-lg font-black text-slate-400 hover:text-blue-400 transition-all shadow-xl">?</button></div>
-                   <div className="flex items-center gap-4 font-outfit uppercase"><div className="flex flex-col text-right font-outfit"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR_LINK_STATUS</span><span className={`text-xs font-bold font-mono ${ibStatus.web === 'Authenticated' ? 'text-emerald-400' : 'text-rose-400'}`}>{ibStatus.web}</span></div></div>
-                </div>
-                <StrategyMatrix matrix={quantMatrix} onDeploy={initiateDeploy} activeStrategies={quantStrategies.filter(s => s.params?.execution_mode === 'SIMULATION')} mode="simulation" onOpenBulk={() => setIsBulkOpen(true)} />
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-                    <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Inventory Value</span><div className="text-lg md:text-2xl font-black text-white font-mono">{`$${velocitySummary.inventory_value?.toLocaleString() || '0.00'}`}</div><div className="text-[8px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{velocitySummary.active_positions} Active</div></div>
-                    <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Today's P&L</span><div className={`text-lg md:text-2xl font-black font-mono ${velocitySummary.today_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{velocitySummary.today_pnl >= 0 ? '+' : ''}${velocitySummary.today_pnl?.toLocaleString() || '0.00'}</div><div className="text-[8px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{velocitySummary.executions_today} Executions</div></div>
-                    <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2 opacity-50"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR Net Liq</span><div className="text-lg md:text-2xl font-black text-slate-400 font-mono">---</div></div>
-                    <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2 opacity-50"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Real-Time P&L</span><div className="text-lg md:text-2xl font-black text-slate-400 font-mono">---</div></div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">{hft.map((h, i) => (<div key={i} className="glass rounded-3xl p-6 border-white/10 shadow-2xl flex flex-col gap-6 group hover:border-blue-500/30 transition-all relative overflow-hidden font-outfit uppercase"><div className="absolute top-0 right-0 p-4 opacity-[0.03] text-4xl font-black italic select-none font-outfit uppercase">{h.asset_class}</div><div className="space-y-1"><span className="text-2xl font-black text-white italic tracking-tighter group-hover:text-blue-400 transition-colors uppercase leading-none font-outfit">{h.ticker}</span><div className={`text-[9px] font-black uppercase tracking-widest flex items-center gap-2 ${h.fusion_signal?.includes('BUY') ? 'text-emerald-400' : 'text-rose-400'}`}>{h.fusion_signal || 'NEUTRAL'}</div></div><div className="grid grid-cols-4 gap-1 border-y border-white/5 py-3">{['1m', '5m', '30m', '1h'].map(t => (<div key={t} className="flex flex-col items-center"><span className="text-[7px] text-slate-600 uppercase font-black">{t}</span><span className={`text-[10px] font-bold font-mono ${h.velocity_estimates?.[t]?.includes('+') ? 'text-blue-400' : 'text-orange-400'}`}>{h.velocity_estimates?.[t] || '--'}</span></div>))}</div><div className="flex justify-between items-center text-[10px] font-black font-outfit"><span className="text-slate-500 uppercase">Pressure</span><span className="text-white font-mono">{(h.pressure_value || 0).toFixed(2)}</span></div></div>))}</div>
-                <div className="space-y-6"><div className="flex justify-between items-center"><h3 className="text-sm md:text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Sim Execution Log (HKT)</h3><button className="px-3 md:px-4 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-[8px] md:text-[10px] font-black uppercase border border-white/10 transition-all font-outfit">Export</button></div><div className="glass rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden shadow-2xl border-white/10"><div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar"><table className="w-full text-left font-outfit uppercase relative min-w-[700px]"><thead className="bg-black/80 backdrop-blur-md text-slate-500 text-[10px] font-black tracking-[0.2em] sticky top-0 z-10 border-b border-white/10"><tr><th className="px-8 py-5">Time (HKT)</th><th className="px-8 py-5">Ticker</th><th className="px-8 py-5">Side</th><th className="px-8 py-5">Price</th><th className="px-8 py-5">Qty</th><th className="px-8 py-5">Value</th><th className="px-8 py-5 text-right">P&L</th></tr></thead><tbody className="divide-y divide-white/5">{velocityTrades.length > 0 ? velocityTrades.slice(0, 50).map((t, i) => (<tr key={i} className="hover:bg-white/[0.02] transition-colors group"><td className="px-8 py-5 text-[10px] font-bold text-slate-500 font-mono">{new Date(t.timestamp).toLocaleTimeString('en-HK', { timeZone: 'Asia/Hong_Kong', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td><td className="px-8 py-5 text-sm font-black text-white italic">{t.ticker}{t.strategy && t.strategy !== 'MANUAL_OVERRIDE' && (<span className="ml-2 px-1.5 py-0.5 rounded bg-blue-500/10 text-[8px] font-black text-blue-400 border border-blue-500/20 uppercase tracking-widest">SIM</span>)}</td><td className="px-8 py-5"><span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.side === 'BUY' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>{t.side}</span></td><td className="px-8 py-5 text-sm font-bold text-slate-300 font-mono">${t.price?.toFixed(2)}</td><td className="px-8 py-5 text-sm font-bold text-slate-300 font-mono">{t.quantity}</td><td className="px-8 py-5 text-sm font-bold text-slate-300 font-mono">${t.total_value?.toLocaleString()}</td><td className={`px-8 py-5 text-sm font-black font-mono text-right ${t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.pnl !== null ? `${t.pnl >= 0 ? '+' : ''}${t.pnl?.toLocaleString()}` : '---'}</td></tr>)) : (<tr><td colSpan="7" className="px-8 py-12 text-center text-slate-600 font-bold italic uppercase tracking-widest">No executions recorded in current cycle</td></tr>)}</tbody></table></div></div></div>
-            </div>
+        {activeTab === 'simulation' && (
+            <ProfessionalSimulationLab
+                quantMatrix={quantMatrix}
+                activeStrategies={quantStrategies.filter(s => s.params?.execution_mode === 'SIMULATION')}
+                onDeploy={initiateDeploy}
+                onOpenBulk={() => setIsBulkOpen(true)}
+            />
         )}
 
-        {activeTab === 'quant' && quantTab === 'live' && (
-            <div className="space-y-16 animate-in fade-in slide-in-from-bottom-6 duration-700 text-left">
-                <div className="flex flex-col md:flex-row md:items-baseline justify-between gap-8 border-b border-white/5 pb-8 font-outfit uppercase">
-                   <div className="flex items-baseline gap-6 font-outfit"><h2 className="text-2xl md:text-3xl font-black text-white italic font-outfit leading-none uppercase tracking-tightest">Live Execution <span className="ml-4 text-[10px] bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-full border border-emerald-500/20 tracking-widest">PAPER_TRADING</span></h2><button onClick={() => setIsBulkOpen(true)} className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase border border-emerald-500/20 transition-all shadow-xl glow-emerald flex items-center gap-2"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 5v14M5 12h14"/></svg><span>Deploy Cluster</span></button></div>
-                   <div className="flex items-center gap-4 font-outfit uppercase">{ibAccount && ibAccount.length > 0 ? (<select value={selectedAccountId} onChange={(e) => { const id = e.target.value; setSelectedAccountId(id); fetchIbData(id); }} className="bg-black/60 border border-blue-500/40 rounded-xl px-4 py-2 text-[10px] font-black text-white outline-none focus:border-blue-500 appearance-none pr-10 uppercase font-outfit shadow-[0_0_15px_rgba(59,130,246,0.1)]">{ibAccount.map(acc => (<option key={acc.id} value={acc.id}>{acc.id} ({acc.accountTitle || 'Active'})</option>))}</select>) : (ibStatus.web === 'Authenticated' && (<button onClick={fetchIbData} className="px-4 py-2 rounded-xl bg-amber-500/20 text-amber-400 text-[9px] font-black uppercase border border-amber-500/20 animate-pulse font-outfit leading-none">Link_Account_Data</button>))}<div className="flex flex-col text-right font-outfit"><span className="text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR_LINK_STATUS</span><span className={`text-xs font-bold font-mono ${ibStatus.web === 'Authenticated' ? 'text-emerald-400' : 'text-rose-400'}`}>{ibStatus.web}</span></div>{ibStatus.web !== 'Authenticated' ? (<div className="flex gap-2"><button onClick={() => { const width = 600; const height = 900; const left = (window.screen.width - width) / 2; const top = (window.screen.height - height) / 2; window.open('/sso/Login?forwardTo=22', 'ib_login_popup', `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes,status=yes`); }} className="px-6 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase border border-blue-500 shadow-lg glow-blue font-outfit leading-none font-black">Authorize_Popup</button><button onClick={fetchIbData} className="px-4 py-2 rounded-xl bg-white/10 text-slate-400 text-[10px] font-black uppercase border border-white/10 hover:bg-white/20 transition-all font-outfit leading-none">Sync_Session</button></div>) : (<div className="flex gap-2"><button onClick={() => { fetchIbData(); fetchData(); }} className="px-6 py-2 rounded-xl bg-emerald-500/20 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/20 transition-all font-outfit leading-none font-black">Refresh_Session</button><button onClick={connectIb} className="px-6 py-2 rounded-xl bg-white/5 hover:bg-blue-600 text-slate-300 hover:text-white text-[10px] font-black uppercase border border-white/10 transition-all font-outfit shadow-lg leading-none font-black">Init_Socket</button></div>)}</div>
-                </div>
-                <div className="grid grid-cols-12 gap-8">
-                    <div className="col-span-12 lg:col-span-8 space-y-8">
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                            <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">IBKR Net Liq</span><div className="text-lg md:text-2xl font-black text-emerald-400 font-mono">{activeAccount?.netLiquidation?.toLocaleString(undefined, {minimumFractionDigits: 2}) ? `$${activeAccount.netLiquidation.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '---'}</div><div className="text-[8px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BP: {activeAccount?.buyingPower ? `$${activeAccount.buyingPower.toLocaleString(undefined, {minimumFractionDigits: 2})}` : '---'}</div></div>
-                            <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Real-Time P&L</span><div className={`text-lg md:text-2xl font-black font-mono ${(Array.isArray(ibPositions) ? ibPositions : []).reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{(Array.isArray(ibPositions) ? ibPositions : []).reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0) >= 0 ? '+' : ''}${(Array.isArray(ibPositions) ? ibPositions : []).reduce((acc, p) => acc + (p.unrealizedPnl || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</div><div className="text-[8px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Unrealized</div></div>
-                            <div className="glass p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border-white/10 space-y-1 md:space-y-2 col-span-2 md:col-span-1"><span className="text-[7px] md:text-[9px] font-black text-slate-500 uppercase tracking-widest font-outfit">Executions Today</span><div className="text-lg md:text-2xl font-black text-white font-mono">{velocityTrades.filter(t => !t.strategy || !t.strategy.includes('SIMULATION')).length}</div><div className="text-[8px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Live Orders</div></div>
-                        </div>
-                        <StrategyMatrix matrix={quantMatrix} onDeploy={initiateDeploy} activeStrategies={quantStrategies.filter(s => s.params?.execution_mode !== 'SIMULATION')} mode="live" onOpenBulk={() => setIsBulkOpen(true)} />
-                    </div>
-                    <div className="col-span-12 lg:col-span-4"><InventoryCommandTable positions={ibPositions} onClosePosition={closePosition} /></div>
-                </div>
-                <div className="space-y-6"><div className="flex justify-between items-center"><h3 className="text-sm md:text-xl font-black text-white uppercase tracking-widest font-outfit opacity-60 italic">Live Execution Log (HKT)</h3><button className="px-3 md:px-4 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 text-[8px] md:text-[10px] font-black uppercase border border-white/10 transition-all font-outfit">Export</button></div><div className="glass rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden shadow-2xl border-white/10"><div className="overflow-x-auto max-h-[500px] overflow-y-auto custom-scrollbar"><table className="w-full text-left font-outfit uppercase relative min-w-[700px]"><thead className="bg-black/80 backdrop-blur-md text-slate-500 text-[10px] font-black tracking-[0.2em] sticky top-0 z-10 border-b border-white/10"><tr><th className="px-8 py-5">Time (HKT)</th><th className="px-8 py-5">Ticker</th><th className="px-8 py-5">Side</th><th className="px-8 py-5">Price</th><th className="px-8 py-5">Qty</th><th className="px-8 py-5">Value</th><th className="px-8 py-5 text-right">P&L</th></tr></thead><tbody className="divide-y divide-white/5">{velocityTrades.filter(t => !t.strategy || !t.strategy.includes('SIMULATION')).length > 0 ? velocityTrades.filter(t => !t.strategy || !t.strategy.includes('SIMULATION')).slice(0, 50).map((t, i) => (<tr key={i} className="hover:bg-white/[0.02] transition-colors group"><td className="px-8 py-5 text-[10px] font-bold text-slate-500 font-mono">{new Date(t.timestamp).toLocaleTimeString('en-HK', { timeZone: 'Asia/Hong_Kong', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td><td className="px-8 py-5 text-sm font-black text-white italic">{t.ticker}<span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-500/10 text-[8px] font-black text-emerald-400 border border-emerald-500/20 uppercase tracking-widest">LIVE</span></td><td className="px-8 py-5"><span className={`px-2 py-0.5 rounded text-[9px] font-black ${t.side === 'BUY' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>{t.side}</span></td><td className="px-8 py-5 text-sm font-bold text-slate-300 font-mono">${t.price?.toFixed(2)}</td><td className="px-8 py-5 text-sm font-bold text-slate-300 font-mono">{t.quantity}</td><td className="px-8 py-5 text-sm font-bold text-slate-300 font-mono">${t.total_value?.toLocaleString()}</td><td className={`px-8 py-5 text-sm font-black font-mono text-right ${t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{t.pnl !== null ? `${t.pnl >= 0 ? '+' : ''}${t.pnl?.toLocaleString()}` : '---'}</td></tr>)) : (<tr><td colSpan="7" className="px-8 py-12 text-center text-slate-600 font-bold italic uppercase tracking-widest">No live executions recorded</td></tr>)}</tbody></table></div></div></div>
-            </div>
+        {activeTab === 'livetrading' && (
+            <ProfessionalLiveTrading 
+                quantMatrix={quantMatrix}
+                quantStrategies={quantStrategies}
+                velocityTrades={velocityTrades}
+                displayPositions={displayPositions}
+                onDeploy={initiateDeploy}
+                onOpenBulk={() => setIsBulkOpen(true)}
+                onClosePosition={closePosition}
+                ibStatus={ibStatus}
+                fetchIbData={fetchIbData}
+                connectIb={connectIb}
+                fetchData={fetchData}
+            />
         )}
 
         {activeTab === 'performance' && (
