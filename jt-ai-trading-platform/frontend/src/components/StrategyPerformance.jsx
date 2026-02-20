@@ -89,31 +89,27 @@ const StrategySignalMetrics = ({ signal, strategyId, isActive }) => {
     );
   }
 
-  // Calculate centered progress bar position
-  // Center = 50%, Left (stop loss approaching) = 0-50%, Right (take profit) = 50-100%
-  let progressPercent = 50; // Default center
-  let barWidth = 4; // Default thin bar in center
+  // Calculate bidirectional bar widths from center (0)
+  // Left bar (rose) grows as we approach -5% stop loss
+  // Right bar (emerald) grows as we approach +5% take profit
+  let leftBarWidth = 0;
+  let rightBarWidth = 0;
   
   if (pnlPct !== undefined) {
-    // Map PnL range (-5% to +5%) to position (0% to 100%)
-    // -5% = fully left (stop loss), 0% = center, +5% = fully right (take profit)
-    const minPnL = -5;
-    const maxPnL = 5;
-    const clampedPnL = Math.max(minPnL, Math.min(maxPnL, pnlPct));
-    progressPercent = ((clampedPnL - minPnL) / (maxPnL - minPnL)) * 100;
+    const maxPnL = 5; // ±5% target/stop
+    const clampedPnL = Math.max(-maxPnL, Math.min(maxPnL, pnlPct));
     
-    // Bar width grows as we approach extremes
-    const distanceFromCenter = Math.abs(progressPercent - 50);
-    barWidth = 4 + (distanceFromCenter / 50) * 46; // 4% to 50% width
+    if (clampedPnL < 0) {
+      // Negative: left bar grows
+      leftBarWidth = (Math.abs(clampedPnL) / maxPnL) * 50;
+    } else if (clampedPnL > 0) {
+      // Positive: right bar grows
+      rightBarWidth = (clampedPnL / maxPnL) * 50;
+    }
   }
   
-  // Bar color based on direction
-  let barGradient = 'bg-gradient-to-r from-rose-500 via-slate-400 to-emerald-500';
-  if (isProfitable) {
-    barGradient = 'bg-emerald-500';
-  } else if (pnlPct < 0) {
-    barGradient = 'bg-rose-500';
-  }
+  // Show current PnL value
+  const pnlDisplay = pnlPct !== undefined ? `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '0.00%';
 
   return (
     <div className={`mt-3 p-3 rounded-lg border ${borderColor}`}>
@@ -122,26 +118,43 @@ const StrategySignalMetrics = ({ signal, strategyId, isActive }) => {
         <span className={`text-sm font-bold ${strengthColor}`}>{strength.toFixed(0)}%</span>
       </div>
 
-      {/* Centered Performance Bar */}
-      <div className="relative mt-2 h-3 rounded-full bg-slate-700 overflow-hidden">
-        {/* Center marker */}
-        <div className="absolute top-0 bottom-0 w-0.5 bg-slate-500 left-1/2 transform -translate-x-1/2 z-10" />
+      {/* Bidirectional Performance Bar - Axis at 0 */}
+      <div className="relative mt-2">
+        {/* Track background */}
+        <div className="h-4 rounded-full bg-slate-700/50 flex items-center relative overflow-hidden">
+          {/* Left side (Stop Loss) - grows from center to left */}
+          <div className="absolute right-1/2 top-0.5 bottom-0.5 flex justify-end" style={{ width: '50%' }}>
+            <div 
+              className={`h-full rounded-l-full bg-rose-500 transition-all duration-300 ${leftBarWidth > 0 ? 'shadow-[0_0_10px_rgba(244,63,94,0.6)]' : ''}`}
+              style={{ width: `${leftBarWidth}%` }}
+            />
+          </div>
+          
+          {/* Right side (Take Profit) - grows from center to right */}
+          <div className="absolute left-1/2 top-0.5 bottom-0.5" style={{ width: '50%' }}>
+            <div 
+              className={`h-full rounded-r-full bg-emerald-500 transition-all duration-300 ${rightBarWidth > 0 ? 'shadow-[0_0_10px_rgba(16,185,129,0.6)]' : ''}`}
+              style={{ width: `${rightBarWidth}%` }}
+            />
+          </div>
+          
+          {/* Center axis marker */}
+          <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-white/80 transform -translate-x-1/2 z-10" />
+        </div>
         
-        {/* Progress indicator */}
-        <div
-          className={`absolute top-0.5 bottom-0.5 rounded-full transition-all duration-500 ${barGradient} ${isProfitable ? 'shadow-[0_0_8px_rgba(16,185,129,0.5)]' : pnlPct < 0 ? 'shadow-[0_0_8px_rgba(244,63,94,0.5)]' : ''}`}
-          style={{ 
-            left: `${Math.max(0, progressPercent - (barWidth / 2))}%`,
-            width: `${Math.min(barWidth, 100)}%`
-          }}
-        />
+        {/* PnL value below center */}
+        <div className="flex justify-center mt-1">
+          <span className={`text-xs font-bold ${pnlPct > 0 ? 'text-emerald-400' : pnlPct < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+            {pnlDisplay}
+          </span>
+        </div>
       </div>
       
       {/* Labels below bar */}
       <div className="flex justify-between text-[9px] mt-1 text-slate-500">
-        <span className="text-rose-400">▼ Stop</span>
-        <span className="text-slate-400">0%</span>
-        <span className="text-emerald-400">Target ▲</span>
+        <span className="text-rose-400 font-bold">-5% Stop Loss</span>
+        <span className="text-slate-400">Entry (0%)</span>
+        <span className="text-emerald-400 font-bold">+5% Take Profit</span>
       </div>
 
       {progressText && (
