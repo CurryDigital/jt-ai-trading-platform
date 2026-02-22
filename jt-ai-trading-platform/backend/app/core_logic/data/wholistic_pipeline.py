@@ -110,15 +110,48 @@ def simulate_historical_accuracy(df, horizon_type, ticker, asset_class='STOCK'):
     return wr, calculate_risk_metrics(returns)
 
 def calculate_horizon_estimates(p_7d_raw, vol_ann, win_rate):
-    p_7d = float(p_7d_raw); confidence_adj = 0.4 + (win_rate * 0.6)
-    est_1d = (p_7d / 7.0) * confidence_adj
+    """
+    Conservative horizon estimates with realistic caps.
+    A good strategy should target 5-15% monthly, not 25%+.
+    """
+    p_7d = float(p_7d_raw)
+    
+    # More conservative confidence adjustment
+    # Win rate of 0.5 = 50% confidence, win rate of 0.7 = 75% confidence
+    confidence_adj = 0.3 + (win_rate * 0.5)
+    
+    # 1D estimate - very conservative, typically 0.1-0.5%
+    est_1d = (p_7d / 7.0) * confidence_adj * 0.5  # Additional 50% dampening
+    
+    # Monthly estimate with strong mean reversion dampening
     time_ratio = 30.0 / 7.0
-    damping_exponent = 0.35 if vol_ann > 0.5 else 0.45 
-    scaling_factor = (time_ratio ** damping_exponent) * confidence_adj
+    # Higher damping for longer timeframes (square root rule with adjustment)
+    damping_exponent = 0.5 if vol_ann > 0.5 else 0.6
+    scaling_factor = (time_ratio ** damping_exponent) * confidence_adj * 0.7
     est_1m = p_7d * scaling_factor
-    limit = 25.0 if vol_ann < 0.6 else 40.0
-    est_1m = max(min(est_1m, limit), -limit)
-    return { "1d": f"{est_1d:+.2f}%", "7d": f"{p_7d:+.2f}%", "1m": f"{est_1m:+.2f}%" }
+    
+    # STRICT LIMITS - Realistic trading returns:
+    # Conservative: 2-5% monthly
+    # Moderate: 5-10% monthly  
+    # Aggressive: 10-15% monthly (rare)
+    # Anything above 15% is unrealistic for sustained periods
+    base_limit = 8.0 if vol_ann < 0.3 else 12.0 if vol_ann < 0.5 else 15.0
+    
+    # Further reduce limit based on win rate - low win rate = lower expectations
+    adjusted_limit = base_limit * (0.5 + win_rate * 0.5)
+    
+    est_1m = max(min(est_1m, adjusted_limit), -adjusted_limit)
+    est_1d = max(min(est_1d, 2.0), -2.0)  # Daily moves rarely > 2%
+    
+    # 7D estimate - moderate between 1D and 1M
+    est_7d = p_7d * confidence_adj * 0.8
+    est_7d = max(min(est_7d, adjusted_limit * 0.6), -adjusted_limit * 0.6)
+    
+    return { 
+        "1d": f"{est_1d:+.2f}%", 
+        "7d": f"{est_7d:+.2f}%", 
+        "1m": f"{est_1m:+.2f}%" 
+    }
 
 def detect_market_regime():
     try:
@@ -170,36 +203,123 @@ async def get_news_sentiment_score(ticker):
 # --- WORKER 5: STOCKS ---
 async def refresh_stock_layer():
     db = SessionLocal(); now = hkt_now(); regime = detect_market_regime(); macro_drag = get_macro_drag()
+    
+    # Import new backtester
+    from app.core_logic.backtesting.strategy_backtester import StrategyBacktester, generate_signals_from_backtest
+    backtester = StrategyBacktester()
+    
     res = db.execute(text("SELECT * FROM gold.asset_registry WHERE asset_class = 'STOCK' AND is_active = True"))
     stocks = res.fetchall()
     db.execute(text("DELETE FROM consumption.stock WHERE true")); db.commit()
+    
     for s in stocks:
         try:
             t = yf.Ticker(s.ticker); df = t.history(period="1y")
             if df.empty: continue
+            if len(df) < 60: continue  # Need minimum data
+            
             info = t.info; pe = to_native(info.get('trailingPE') or info.get('forwardPE')) or 0.0
             fcf = to_native(info.get('freeCashflow')); fcf_str = f"${fcf/1e9:.1f}B" if fcf else "---"
             curr_p = to_native(df['Close'].iloc[-1]); prev_p = to_native(df['Close'].iloc[-2]) if len(df)>1 else curr_p
             rsi = to_native(ta.rsi(df['Close'], length=14).iloc[-1]) or 50
-            p_v = to_native(get_prophet_prediction(s.ticker)['P_7d']) if get_prophet_prediction(s.ticker) else 0.0
-            win_rate, risk = simulate_historical_accuracy(df, s.horizon, s.ticker, 'STOCK')
-            est = calculate_horizon_estimates(p_v, to_native(df['Close'].pct_change().std()*np.sqrt(252)) or 0.4, win_rate)
-            corr = calculate_correlation(df, "^DJI" if s.market=='US' else "^HSI"); atr = calculate_atr_stops(df); sent = await get_news_sentiment_score(s.ticker)
+            
+            # NEW: Use proper backtester with entry/exit rules
+            signal_data = generate_signals_from_backtest(df, s.ticker)
+            win_rate = signal_data['win_rate']
+            
+            # Get best strategy result for additional metrics
+            strategy_name, result = backtester.get_best_strategy(df)
+            
+            # Calculate estimates based on backtest performance
+            est_1d = f"{signal_data['expected_return']/5:+.2f}%" if signal_data['expected_return'] else "+0.00%"
+            est_7d = f"{signal_data['expected_return']:+.2f}%" if signal_data['expected_return'] else "+0.00%"
+            est_1m = f"{signal_data['expected_return']*4:+.2f}%" if signal_data['expected_return'] else "+0.00%"
+            
+            # Sentiment
+            sent = await get_news_sentiment_score(s.ticker)
             cdl_pattern, cdl_sentiment = detect_candlestick_patterns(df)
             
-            # Score
-            score = ((max(0,min(1,p_v/15 + 0.3))*0.2) + (win_rate*0.3) + (sent*0.2) + ((0.5+cdl_sentiment*0.2)*0.1) + (0.5*0.2)) * macro_drag
-            score = round(max(min(score, 0.98), 0.15), 2)
-            if p_v < -2.0 or win_rate < (0.15 if regime != "CRASH" else 0.4): continue
-
-            tags = ["HIGH_ACCURACY"] if win_rate > 0.7 else []
-            if rsi < 35: tags.append("MEAN_REVERSION")
-            if cdl_pattern: tags.append(f"CDL_{cdl_pattern.replace(' ','_')}")
+            # NEW SCORING: Based on backtest metrics
+            # score = (win_rate * 0.4) + (sharpe_ratio * 0.2) + (sentiment * 0.2) + (signal_strength * 0.2)
+            sharpe_contrib = max(0, min(1, result.sharpe_ratio / 3.0))  # Normalize Sharpe to 0-1
+            signal_strength = 1.0 if signal_data['signal'] == 'BUY' else 0.5 if signal_data['signal'] == 'HOLD' else 0.0
             
-            db.execute(text("INSERT INTO gold.stock_metrics (date, ticker, sector, close, rsi_14, prophet_forecast, candlestick_pattern, candlestick_sentiment) VALUES (:ts, :t, 'Equity', :c, :rsi, :pf, :cp, :cs) ON CONFLICT (ticker, date) DO NOTHING"), { "ts": now, "t": s.ticker, "c": curr_p, "rsi": rsi, "pf": p_v, "cp": cdl_pattern, "cs": cdl_sentiment })
-            db.add(ConsumptionStock(timestamp=now, ticker=s.ticker, market=s.market, horizon=s.horizon, final_score=score, close_price=curr_p, daily_change=((curr_p-prev_p)/prev_p*100), est_1d=est['1d'], est_7d=est['7d'], est_1m=est['1m'], win_rate=win_rate, strategy_tags=tags, stop_loss=atr['sl'], rr_ratio=atr['rr'], candlestick_pattern=cdl_pattern, sparkline=generate_sparkline(df['Close'].tail(24).tolist()), logic_summary=f"{cdl_pattern or 'No pattern'} detected. Sentiment: {sent*100:.0f}%. Alpha: {score:.2f}.", metrics={"rsi": round(rsi,1), "vol": f"{risk['sharpe']}", "pe": pe, "fcf": fcf_str, "sharpe": risk['sharpe'], "mdd": risk['mdd'], "regime": regime }))
+            score = ((win_rate * 0.35) + 
+                    (sharpe_contrib * 0.25) + 
+                    (sent * 0.20) + 
+                    (signal_strength * 0.20)) * macro_drag
+            score = round(max(min(score, 0.98), 0.10), 2)
+            
+            # Filter out poor performers
+            if result.sharpe_ratio < 0.5 or win_rate < 0.4: 
+                continue
+            
+            # Strategy tags based on best strategy
+            tags = []
+            if result.win_rate > 0.65:
+                tags.append("HIGH_ACCURACY")
+            if strategy_name == 'mean_reversion':
+                tags.append("MEAN_REVERSION")
+            elif strategy_name == 'trend_following':
+                tags.append("TREND_FOLLOW")
+            elif strategy_name == 'breakout':
+                tags.append("BREAKOUT")
+            if cdl_pattern:
+                tags.append(f"CDL_{cdl_pattern.replace(' ','_')}")
+            
+            # Calculate ATR-based stop
+            try:
+                atr = ta.atr(df['High'], df['Low'], df['Close'], length=14).iloc[-1]
+                stop_loss = f"${curr_p - (2 * atr):.2f}"
+                rr_ratio = "1:2.0"
+            except:
+                stop_loss = f"${curr_p * 0.95:.2f}"
+                rr_ratio = "1:2.0"
+            
+            # Logic summary with backtest info
+            logic_summary = (f"{strategy_name.replace('_', ' ').title()} strategy. "
+                           f"Backtest: {win_rate*100:.0f}% WR, {result.sharpe_ratio:.2f} Sharpe, "
+                           f"{result.num_trades} trades. "
+                           f"Signal: {signal_data['signal']}. "
+                           f"{cdl_pattern or 'No pattern'} detected. "
+                           f"Sentiment: {sent*100:.0f}%.")
+            
+            db.execute(text("INSERT INTO gold.stock_metrics (date, ticker, sector, close, rsi_14, prophet_forecast, candlestick_pattern, candlestick_sentiment) VALUES (:ts, :t, 'Equity', :c, :rsi, :pf, :cp, :cs) ON CONFLICT (ticker, date) DO NOTHING"), { "ts": now, "t": s.ticker, "c": curr_p, "rsi": rsi, "pf": 0.0, "cp": cdl_pattern, "cs": cdl_sentiment })
+            
+            db.add(ConsumptionStock(
+                timestamp=now, 
+                ticker=s.ticker, 
+                market=s.market, 
+                horizon=s.horizon, 
+                final_score=score, 
+                close_price=curr_p, 
+                daily_change=((curr_p-prev_p)/prev_p*100), 
+                est_1d=est_1d, 
+                est_7d=est_7d, 
+                est_1m=est_1m, 
+                win_rate=win_rate, 
+                strategy_tags=tags, 
+                stop_loss=stop_loss, 
+                rr_ratio=rr_ratio, 
+                candlestick_pattern=cdl_pattern, 
+                sparkline=generate_sparkline(df['Close'].tail(24).tolist()), 
+                logic_summary=logic_summary,
+                metrics={
+                    "rsi": round(rsi,1), 
+                    "pe": pe, 
+                    "fcf": fcf_str, 
+                    "sharpe": result.sharpe_ratio, 
+                    "mdd": f"{result.max_drawdown:.1f}%",
+                    "regime": regime,
+                    "strategy": strategy_name,
+                    "signal": signal_data['signal'],
+                    "trades": result.num_trades
+                }
+            ))
             db.commit()
-        except: db.rollback()
+        except Exception as e:
+            print(f"Error processing {s.ticker}: {e}")
+            db.rollback()
     db.close()
 
 async def get_crypto_native_metrics(ticker, df):
@@ -483,3 +603,201 @@ async def refresh_hft_layer():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(refresh_stock_layer())
+
+# --- NEW: ETF DATA INGESTION (Daily) ---
+async def refresh_etf_layer():
+    """Daily ETF data ingestion for XLK, XLU, SPY, QQQ, IWM"""
+    etfs = ['XLK', 'XLU', 'SPY', 'QQQ', 'IWM']
+    logger.info(f"[ETF] Starting daily refresh for {len(etfs)} ETFs...")
+    
+    db = SessionLocal()
+    today = datetime.datetime.now().date()
+    
+    for etf in etfs:
+        try:
+            ticker = yf.Ticker(etf)
+            df = ticker.history(period="2d")  # Get last 2 days
+            
+            if df.empty or len(df) < 1:
+                logger.warning(f"[ETF] No data for {etf}")
+                continue
+            
+            # Get latest data
+            latest = df.iloc[-1]
+            date = df.index[-1].date()
+            
+            # Skip if already ingested today
+            existing = db.execute(text("""
+                SELECT 1 FROM gold.etf_daily_data 
+                WHERE ticker = :ticker AND date = :date
+            """), {"ticker": etf, "date": date}).fetchone()
+            
+            if existing:
+                logger.info(f"[ETF] {etf} already up-to-date ({date})")
+                continue
+            
+            # Insert/update data
+            db.execute(text("""
+                INSERT INTO gold.etf_daily_data 
+                (ticker, date, open_price, high_price, low_price, close_price, volume, created_at)
+                VALUES (:ticker, :date, :open, :high, :low, :close, :volume, NOW())
+                ON CONFLICT (ticker, date) DO UPDATE SET
+                    open_price = EXCLUDED.open_price,
+                    high_price = EXCLUDED.high_price,
+                    low_price = EXCLUDED.low_price,
+                    close_price = EXCLUDED.close_price,
+                    volume = EXCLUDED.volume
+            """), {
+                "ticker": etf,
+                "date": date,
+                "open": float(latest['Open']),
+                "high": float(latest['High']),
+                "low": float(latest['Low']),
+                "close": float(latest['Close']),
+                "volume": int(latest['Volume'])
+            })
+            db.commit()
+            logger.info(f"[ETF] ✓ {etf} updated: ${latest['Close']:.2f} ({date})")
+            
+        except Exception as e:
+            logger.error(f"[ETF] Error processing {etf}: {e}")
+            db.rollback()
+    
+    db.close()
+    logger.info("[ETF] Daily refresh complete")
+
+# --- NEW: ACCRUALS QUALITY DATA INGESTION (Weekly) ---
+async def refresh_accruals_quality():
+    """Weekly accruals quality data update for S&P 100 stocks"""
+    # S&P 100 subset (top 50 for weekly updates)
+    sp100_stocks = [
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK-B', 'AVGO', 'WMT',
+        'JPM', 'V', 'PG', 'UNH', 'MA', 'HD', 'LLY', 'MRK', 'PEP', 'KO',
+        'ABBV', 'COST', 'TMO', 'DIS', 'ADBE', 'WFC', 'VZ', 'NKE', 'TXN', 'CMCSA',
+        'PFE', 'MS', 'CRM', 'ABT', 'INTC', 'NEE', 'QCOM', 'RTX', 'HON', 'AMGN',
+        'UPS', 'LOW', 'PM', 'UNP', 'IBM', 'CAT', 'MDT', 'GE', 'CVX', 'XOM'
+    ]
+    
+    logger.info(f"[ACCRUALS] Starting weekly quality update for {len(sp100_stocks)} stocks...")
+    
+    db = SessionLocal()
+    updated = 0
+    
+    for ticker in sp100_stocks:
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # Get quarterly financials
+            income = stock.quarterly_financials
+            cashflow = stock.quarterly_cashflow
+            balance = stock.quarterly_balance_sheet
+            
+            if income is None or balance is None:
+                continue
+            
+            # Process latest quarter
+            for col in income.columns[:1]:  # Only latest quarter
+                try:
+                    quarter = col.strftime('%Y-%m-%d') if hasattr(col, 'strftime') else str(col)[:10]
+                    
+                    # Extract Net Income
+                    net_income = None
+                    for field in ['Net Income', 'NetIncome']:
+                        if field in income.index:
+                            net_income = income.loc[field].get(col, None)
+                            if net_income is not None:
+                                break
+                    
+                    # Extract Total Assets
+                    total_assets = None
+                    for field in ['Total Assets', 'TotalAssets']:
+                        if field in balance.index:
+                            total_assets = balance.loc[field].get(col, None)
+                            if total_assets is not None:
+                                break
+                    
+                    # Extract Operating Cash Flow
+                    ocf = None
+                    if cashflow is not None:
+                        for field in ['Operating Cash Flow', 'Total Cash From Operating Activities', 'OperatingCashFlow']:
+                            if field in cashflow.index:
+                                ocf = cashflow.loc[field].get(col, None)
+                                if ocf is not None:
+                                    break
+                    
+                    if net_income is None or total_assets is None:
+                        continue
+                    
+                    # Calculate metrics
+                    ni = float(net_income)
+                    ta = float(total_assets)
+                    ocf_val = float(ocf) if ocf else None
+                    
+                    accruals = ni - ocf_val if ocf_val else None
+                    accruals_ratio = (accruals / ta) if (accruals and ta != 0) else None
+                    
+                    # Quality score: 1 - normalized accruals ratio
+                    quality_score = None
+                    if accruals_ratio is not None:
+                        quality_score = max(0, min(1, 1 - abs(accruals_ratio) * 10))
+                    
+                    # Insert/update
+                    db.execute(text("""
+                        INSERT INTO gold.accruals_quality 
+                        (ticker, quarter, net_income, operating_cash_flow, total_assets, 
+                         accruals, accruals_ratio, quality_score, created_at)
+                        VALUES (:ticker, :quarter, :ni, :ocf, :assets, :accruals, :ratio, :quality, NOW())
+                        ON CONFLICT (ticker, quarter) DO UPDATE SET
+                            net_income = EXCLUDED.net_income,
+                            operating_cash_flow = EXCLUDED.operating_cash_flow,
+                            total_assets = EXCLUDED.total_assets,
+                            accruals = EXCLUDED.accruals,
+                            accruals_ratio = EXCLUDED.accruals_ratio,
+                            quality_score = EXCLUDED.quality_score
+                    """), {
+                        "ticker": ticker,
+                        "quarter": quarter,
+                        "ni": ni,
+                        "ocf": ocf_val,
+                        "assets": ta,
+                        "accruals": accruals,
+                        "ratio": accruals_ratio,
+                        "quality": quality_score
+                    })
+                    db.commit()
+                    updated += 1
+                    
+                    logger.info(f"[ACCRUALS] ✓ {ticker} Q{quarter}: Quality={quality_score:.2f if quality_score else 'N/A'}")
+                    
+                except Exception as e:
+                    logger.error(f"[ACCRUALS] Error processing {ticker} quarter: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"[ACCRUALS] Error fetching {ticker}: {e}")
+            continue
+    
+    db.close()
+    logger.info(f"[ACCRUALS] Weekly update complete: {updated} records updated")
+
+# --- MASTER REFRESH FUNCTION ---
+async def run_daily_ingestion():
+    """Run all daily data ingestion pipelines"""
+    logger.info("=" * 60)
+    logger.info("STARTING DAILY INGESTION PIPELINE")
+    logger.info("=" * 60)
+    
+    # Core layers
+    await refresh_indices_and_mood()
+    await refresh_stock_layer()
+    await refresh_fx_layer()
+    await refresh_commodity_layer()
+    await refresh_crypto_layer()
+    
+    # New data sources
+    await refresh_etf_layer()
+    # await refresh_accruals_quality()  # Run weekly, not daily
+    
+    logger.info("=" * 60)
+    logger.info("DAILY INGESTION COMPLETE")
+    logger.info("=" * 60)

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY, ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
@@ -222,3 +222,51 @@ class Trade(Base):
     total_value = Column(Float)
     pnl = Column(Float)
     strategy = Column(String(50))
+
+# --- FX STREAMING TABLES (Phase 1.1) ---
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+    __table_args__ = {"schema": "gold"}
+    id = Column(Integer, primary_key=True)
+    strategy_id = Column(Integer, ForeignKey("gold.quant_strategies.id"))
+    run_date = Column(DateTime, default=get_hkt_now)
+    start_date = Column(DateTime)
+    end_date = Column(DateTime)
+    total_return_pct = Column(Float)
+    sharpe_ratio = Column(Float)
+    max_drawdown_pct = Column(Float)
+    win_rate = Column(Float)
+    total_trades = Column(Integer)
+    avg_trade_return = Column(Float)
+    raw_results = Column(JSON)
+    __tablename__ = "fx_ticks"
+    __table_args__ = {"schema": "gold"}
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=get_hkt_now)
+    ticker = Column(String(10), index=True)
+    bid = Column(Float, nullable=False)
+    ask = Column(Float, nullable=False)
+    source = Column(String(20), default='IBKR')
+
+class FXBars5S(Base):
+    __tablename__ = "fx_bars_5s"
+    __table_args__ = {"schema": "gold"}
+    bucket = Column(DateTime, primary_key=True)
+    ticker = Column(String(10), primary_key=True)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    bid_open = Column(Float, nullable=False)
+    bid_high = Column(Float, nullable=False)
+    bid_low = Column(Float, nullable=False)
+    bid_close = Column(Float, nullable=False)
+    ask_open = Column(Float, nullable=False)
+    ask_high = Column(Float, nullable=False)
+    ask_low = Column(Float, nullable=False)
+    ask_close = Column(Float, nullable=False)
+    spread_avg_bps = Column(Float, nullable=False)
+    spread_min_bps = Column(Float, nullable=False)
+    spread_max_bps = Column(Float, nullable=False)
+    tick_count = Column(Integer, nullable=False)
+    source = Column(String(20), default='IBKR')
