@@ -1,0 +1,357 @@
+Importing plotly failed. Interactive plots will not work.
+INFO:     Started server process [15429]
+INFO:     Waiting for application startup.
+INFO:botocore.credentials:Found credentials from IAM Role: openclaw_ec2
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCAD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (8 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (9 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDCHF=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://databricksllmpoc.openai.azure.com/openai/deployments/gpt-4.1-nano/chat/completions?api-version=2025-03-01-preview "HTTP/1.1 200 OK"
+INFO:app.services.trading_service:Auto-Trade: Disabled in GlobalState. Skipping.
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for GBPUSD=X: No valid price available
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).
+WARNING:app.services.strategy_manager:Skipping trade for EURUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for AUDUSD=X: No valid price available
+WARNING:app.services.strategy_manager:Skipping trade for USDJPY=X: No valid price available
+ERROR:app.services.ib_web_service:IBKR Auth Check Error: HTTPSConnectionPool(host='trade.jtcml.com', port=443): Read timed out. (read timeout=5)
+INFO:app.services.ib_web_service:IBKR: Session cookies synchronized (7 cookies).

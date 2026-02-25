@@ -1,0 +1,378 @@
+{
+  "timestamp": "2026-02-23T19:28:31.498589",
+  "batch": "continuous_research_2026-02-23_evening",
+  "results": [
+    {
+      "hypothesis": "H1_Bearish_RSI_Regime",
+      "ticker": "QQQ",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H1_Bearish_RSI_Regime",
+      "ticker": "AAPL",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H1_Bearish_RSI_Regime",
+      "ticker": "MSFT",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H1_Bearish_RSI_Regime",
+      "ticker": "NVDA",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H1_Bearish_RSI_Regime",
+      "ticker": "TSLA",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H1_Bearish_RSI_Regime",
+      "ticker": "AMD",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H2_Volume_Breakout_1.3x",
+      "ticker": "AAPL",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 52.9,
+        "test_win_rate": 60.0,
+        "train_n": 17,
+        "test_n": 10,
+        "decay": -7.1,
+        "ci_lower": 29.6,
+        "ci_upper": 90.4,
+        "avg_return": 0.66,
+        "total_return": 6.57
+      }
+    },
+    {
+      "hypothesis": "H2_Volume_Breakout_1.3x",
+      "ticker": "MSFT",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 78.9,
+        "test_win_rate": 93.8,
+        "train_n": 38,
+        "test_n": 16,
+        "decay": -14.8,
+        "ci_lower": 81.9,
+        "ci_upper": 100,
+        "avg_return": 0.2,
+        "total_return": 3.2
+      }
+    },
+    {
+      "hypothesis": "H2_Volume_Breakout_1.3x",
+      "ticker": "NVDA",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 52.9,
+        "test_win_rate": 64.7,
+        "train_n": 17,
+        "test_n": 17,
+        "decay": -11.8,
+        "ci_lower": 42.0,
+        "ci_upper": 87.4,
+        "avg_return": 0.21,
+        "total_return": 3.59
+      }
+    },
+    {
+      "hypothesis": "H2_Volume_Breakout_1.3x",
+      "ticker": "TSLA",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 61.5,
+        "test_win_rate": 71.4,
+        "train_n": 26,
+        "test_n": 14,
+        "decay": -9.9,
+        "ci_lower": 47.8,
+        "ci_upper": 95.1,
+        "avg_return": 0.22,
+        "total_return": 3.11
+      }
+    },
+    {
+      "hypothesis": "H2_Volume_Breakout_1.3x",
+      "ticker": "AMD",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 68.2,
+        "test_win_rate": 66.7,
+        "train_n": 22,
+        "test_n": 15,
+        "decay": 1.5,
+        "ci_lower": 42.8,
+        "ci_upper": 90.5,
+        "avg_return": 0.19,
+        "total_return": 2.88
+      }
+    },
+    {
+      "hypothesis": "H2_Volume_Breakout_1.3x",
+      "ticker": "META",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 63.0,
+        "test_win_rate": 71.4,
+        "train_n": 27,
+        "test_n": 14,
+        "decay": -8.5,
+        "ci_lower": 47.8,
+        "ci_upper": 95.1,
+        "avg_return": 0.56,
+        "total_return": 7.91
+      }
+    },
+    {
+      "hypothesis": "H3_Multi_Timeframe",
+      "ticker": "AAPL",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H3_Multi_Timeframe",
+      "ticker": "MSFT",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H3_Multi_Timeframe",
+      "ticker": "NVDA",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H3_Multi_Timeframe",
+      "ticker": "TSLA",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H3_Multi_Timeframe",
+      "ticker": "AMD",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H3_Multi_Timeframe",
+      "ticker": "META",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "AAPL",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 59.5,
+        "test_win_rate": 42.9,
+        "train_n": 37,
+        "test_n": 14,
+        "decay": 16.6,
+        "ci_lower": 16.9,
+        "ci_upper": 68.8,
+        "avg_return": 0.22,
+        "total_return": 3.05
+      }
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "MSFT",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "NVDA",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 52.6,
+        "test_win_rate": 100.0,
+        "train_n": 19,
+        "test_n": 2,
+        "decay": -47.4,
+        "ci_lower": 100.0,
+        "ci_upper": 100,
+        "avg_return": 0.48,
+        "total_return": 0.96
+      }
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "TSLA",
+      "status": "INSUFFICIENT DATA",
+      "stats": null
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "AMD",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 77.8,
+        "test_win_rate": 83.3,
+        "train_n": 9,
+        "test_n": 6,
+        "decay": -5.6,
+        "ci_lower": 53.5,
+        "ci_upper": 100,
+        "avg_return": 0.51,
+        "total_return": 3.08
+      }
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "META",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 40.0,
+        "test_win_rate": 100.0,
+        "train_n": 30,
+        "test_n": 2,
+        "decay": -60.0,
+        "ci_lower": 100.0,
+        "ci_upper": 100,
+        "avg_return": 1.2,
+        "total_return": 2.39
+      }
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "COIN",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 66.7,
+        "test_win_rate": 18.2,
+        "train_n": 9,
+        "test_n": 11,
+        "decay": 48.5,
+        "ci_lower": 0,
+        "ci_upper": 41.0,
+        "avg_return": -0.97,
+        "total_return": -10.66
+      }
+    },
+    {
+      "hypothesis": "H4_BB_Reversal",
+      "ticker": "MSTR",
+      "status": "INSUFFICIENT (n<30)",
+      "stats": {
+        "train_win_rate": 44.4,
+        "test_win_rate": 100.0,
+        "train_n": 9,
+        "test_n": 2,
+        "decay": -55.6,
+        "ci_lower": 100.0,
+        "ci_upper": 100,
+        "avg_return": 0.21,
+        "total_return": 0.42
+      }
+    },
+    {
+      "hypothesis": "H5_ADX_Trend",
+      "ticker": "QQQ",
+      "status": "GOLDEN",
+      "stats": {
+        "train_win_rate": 80.3,
+        "test_win_rate": 89.8,
+        "train_n": 228,
+        "test_n": 108,
+        "decay": -9.6,
+        "ci_lower": 84.1,
+        "ci_upper": 95.5,
+        "avg_return": 0.53,
+        "total_return": 56.75
+      }
+    },
+    {
+      "hypothesis": "H5_ADX_Trend",
+      "ticker": "AAPL",
+      "status": "VALIDATED",
+      "stats": {
+        "train_win_rate": 50.2,
+        "test_win_rate": 66.4,
+        "train_n": 241,
+        "test_n": 122,
+        "decay": -16.2,
+        "ci_lower": 58.0,
+        "ci_upper": 74.8,
+        "avg_return": 1.43,
+        "total_return": 174.2
+      }
+    },
+    {
+      "hypothesis": "H5_ADX_Trend",
+      "ticker": "MSFT",
+      "status": "GOLDEN",
+      "stats": {
+        "train_win_rate": 87.6,
+        "test_win_rate": 75.4,
+        "train_n": 210,
+        "test_n": 57,
+        "decay": 12.2,
+        "ci_lower": 64.3,
+        "ci_upper": 86.6,
+        "avg_return": 0.33,
+        "total_return": 18.8
+      }
+    },
+    {
+      "hypothesis": "H5_ADX_Trend",
+      "ticker": "NVDA",
+      "status": "GOLDEN",
+      "stats": {
+        "train_win_rate": 73.2,
+        "test_win_rate": 77.5,
+        "train_n": 306,
+        "test_n": 89,
+        "decay": -4.3,
+        "ci_lower": 68.9,
+        "ci_upper": 86.2,
+        "avg_return": 0.35,
+        "total_return": 31.17
+      }
+    },
+    {
+      "hypothesis": "H5_ADX_Trend",
+      "ticker": "TSLA",
+      "status": "GOLDEN",
+      "stats": {
+        "train_win_rate": 76.7,
+        "test_win_rate": 92.6,
+        "train_n": 253,
+        "test_n": 136,
+        "decay": -16.0,
+        "ci_lower": 88.3,
+        "ci_upper": 97.0,
+        "avg_return": 0.52,
+        "total_return": 71.21
+      }
+    },
+    {
+      "hypothesis": "H5_ADX_Trend",
+      "ticker": "AMD",
+      "status": "GOLDEN",
+      "stats": {
+        "train_win_rate": 68.7,
+        "test_win_rate": 85.2,
+        "train_n": 291,
+        "test_n": 88,
+        "decay": -16.5,
+        "ci_lower": 77.8,
+        "ci_upper": 92.6,
+        "avg_return": 0.8,
+        "total_return": 70.04
+      }
+    }
+  ]
+}

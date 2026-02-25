@@ -1,0 +1,95 @@
+name: "Gold/Silver Ratio Rotation"
+version: "1.0"
+description: "Mean reversion strategy trading gold/silver ratio deviations. Long gold/short silver when ratio low, opposite when ratio high."
+
+asset_class: "commodities"
+sub_class: "precious_metals"
+direction: "neutral"
+horizon: "short_term"
+
+status: "backtested"
+target_sharpe: 0.8
+actual_sharpe: 1.11
+target_max_dd: 0.15
+actual_max_dd: 0.12
+win_rate: 0.652
+avg_hold_days: 21
+capacity_millions: 500
+
+universe:
+  - "GLD"   # SPDR Gold Trust
+  - "SLV"   # iShares Silver Trust
+  - "IAU"   # iShares Gold Trust (alternative)
+  - "SIVR"  # Aberdeen Silver ETF (alternative)
+
+signals:
+  frequency: "daily"
+  rebalance: "monthly"
+  lookback_days: 252
+  z_threshold: 1.5
+  
+  long_gold_condition: "ratio_z_score < -1.5"
+  long_silver_condition: "ratio_z_score > 1.5"
+
+risk:
+  max_position_pct: 0.20
+  max_commodity_pct: 0.30
+  beta_neutral: true
+  dollar_neutral: true
+  stop_loss_sigma: 2.0
+  max_hold_days: 30
+
+execution:
+  venue: "IBKR"
+  order_type: "market"
+  slippage: 0.001
+  rebalance_time: "15:55 ET"  # Before close
+
+deployment:
+  mode: "paper"
+  jt_integration: true
+  jt_notified: "2026-02-18"
+  paper_start_date: null
+  live_start_date: null
+
+backtest_results:
+  period: "2019-01-01 to 2024-12-31"
+  total_trades: 282
+  win_rate: 0.652
+  avg_return: 0.011
+  sharpe_ratio: 1.11
+  max_drawdown: 0.12
+  calmar_ratio: 0.93
+
+parameters:
+  lookback_window: 252  # 1 year
+  entry_zscore: 1.5
+  exit_zscore: 0.5
+  hold_days: 21
+  
+# Metadata
+author: "Trade Algo Researcher"
+created: "2026-02-18"
+last_updated: "2026-02-18"
+promoted_from: "hypotheses/active/commodity_seasonality.md"
+backtest_file: "strategies/gold_silver_ratio_backtest.py"
+results_file: "results/gold_silver_ratio_backtest.csv"
+jt_ready: true
+
+# Research Notes
+academic_basis:
+  - "Lucey et al. (2006): Gold/Silver price relationship"
+  - "Escribano & Granger (1998): Cointegration in metals"
+  - "MRCI seasonal patterns in precious metals"
+
+key_insights:
+  - "Gold/Silver ratio mean-reverts around 60-80 historical range"
+  - "Z-score >1.5 provides good entry timing"
+  - "21-day hold captures majority of mean reversion"
+  - "Low correlation to equity markets (diversification benefit)"
+
+risk_factors:
+  - "Industrial demand shocks affect silver more than gold"
+  - "Central bank gold buying can distort ratio"
+  - "Crypto competition as store of value"
+  - "Mining supply disruptions"

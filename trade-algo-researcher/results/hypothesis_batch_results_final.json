@@ -1,0 +1,179 @@
+{
+  "batch_id": "HYPOTHESIS_BATCH_2026-02-23",
+  "timestamp": "2026-02-23T17:26:00Z",
+  "train_period": "2021-01-01 to 2022-12-31",
+  "test_period": "2023-01-01 to 2024-12-31",
+  "summary": {
+    "total_tested": 16,
+    "golden": 0,
+    "validated": 1,
+    "rejected": 10,
+    "insufficient": 5
+  },
+  "results": {
+    "H1_Bearish_RSI_Overbought": {
+      "hypothesis": "RSI > 70 predicts short-term pullback on tech stocks",
+      "entry": "RSI > 70",
+      "exit": "RSI < 50 OR 5 days OR -5% stop",
+      "tickers": {
+        "NVDA": {
+          "test_win_pct": 38.1,
+          "ci_95": [25.0, 53.2],
+          "n": 42,
+          "decay_pct": 30.1,
+          "status": "REJECTED"
+        },
+        "TSLA": {
+          "test_win_pct": 39.0,
+          "ci_95": [25.7, 54.3],
+          "n": 41,
+          "decay_pct": 56.1,
+          "status": "REJECTED"
+        },
+        "AMD": {
+          "test_win_pct": 56.8,
+          "ci_95": [40.9, 71.3],
+          "n": 37,
+          "decay_pct": -2.2,
+          "status": "VALIDATED",
+          "avg_return": 1.09,
+          "signals_per_year": 18.5
+        },
+        "COIN": {
+          "test_win_pct": 42.2,
+          "ci_95": [29.0, 56.7],
+          "n": 45,
+          "decay_pct": 15.6,
+          "status": "REJECTED"
+        },
+        "MSTR": {
+          "test_win_pct": 43.3,
+          "ci_95": [31.6, 55.9],
+          "n": 60,
+          "decay_pct": 28.9,
+          "status": "REJECTED"
+        }
+      },
+      "conclusion": "Only AMD validated. High-volatility momentum stocks (NVDA, TSLA, COIN, MSTR) exhibit trend persistence on overbought signals."
+    },
+    "H2_Bearish_Stochastic_Overbought": {
+      "hypothesis": "Stochastic %K > 80 AND %D > 75 predicts short-term pullback",
+      "entry": "%K > 80 AND %D > 75",
+      "exit": "%K < 50 OR 5 days OR -5% stop",
+      "tickers": {
+        "NVDA": {
+          "test_win_pct": 41.8,
+          "ci_95": [29.7, 55.0],
+          "n": 55,
+          "decay_pct": 35.4,
+          "status": "REJECTED"
+        },
+        "TSLA": {
+          "test_win_pct": 46.3,
+          "ci_95": [33.7, 59.4],
+          "n": 54,
+          "decay_pct": 28.0,
+          "status": "REJECTED"
+        },
+        "AMD": {
+          "test_win_pct": 34.1,
+          "ci_95": [21.6, 49.5],
+          "n": 41,
+          "decay_pct": 47.0,
+          "status": "REJECTED"
+        },
+        "COIN": {
+          "test_win_pct": 42.1,
+          "ci_95": [30.2, 55.0],
+          "n": 57,
+          "decay_pct": 20.0,
+          "status": "REJECTED"
+        },
+        "MSTR": {
+          "test_win_pct": 45.5,
+          "ci_95": [34.0, 57.4],
+          "n": 66,
+          "decay_pct": 18.2,
+          "status": "REJECTED"
+        },
+        "QQQ": {
+          "test_win_pct": 39.1,
+          "ci_95": [26.4, 53.5],
+          "n": 46,
+          "decay_pct": 28.0,
+          "status": "REJECTED"
+        }
+      },
+      "conclusion": "All tickers rejected. Stochastic overbought signals uniformly underperform RSI. Strategy abandoned."
+    },
+    "H3_Weekly_Trend_Daily_MR": {
+      "hypothesis": "Weekly uptrend + daily oversold = high probability long",
+      "entry": "Weekly Close > Weekly 20-SMA AND Daily RSI < 30",
+      "exit": "RSI > 50 OR 5 days OR +5% profit",
+      "tickers": {
+        "SPY": {
+          "test_win_pct": 100.0,
+          "ci_95": [43.8, 100.0],
+          "n": 3,
+          "decay_pct": 0.0,
+          "status": "INSUFFICIENT"
+        },
+        "QQQ": {
+          "test_win_pct": 50.0,
+          "ci_95": [9.5, 90.5],
+          "n": 2,
+          "decay_pct": 0.0,
+          "status": "INSUFFICIENT"
+        },
+        "AAPL": {
+          "test_win_pct": 57.1,
+          "ci_95": [25.0, 84.2],
+          "n": 7,
+          "decay_pct": -14.2,
+          "status": "INSUFFICIENT"
+        },
+        "MSFT": {
+          "test_win_pct": 33.3,
+          "ci_95": [6.1, 79.2],
+          "n": 3,
+          "decay_pct": 0.0,
+          "status": "INSUFFICIENT"
+        },
+        "NVDA": {
+          "test_win_pct": 75.0,
+          "ci_95": [30.1, 95.4],
+          "n": 4,
+          "decay_pct": 0.0,
+          "status": "INSUFFICIENT"
+        }
+      },
+      "conclusion": "All tickers insufficient sample size (n<30). Weekly uptrend + RSI <30 too rare in 2023-2024 bull market. Recommend relaxing to RSI <35."
+    }
+  },
+  "key_findings": [
+    "Bearish strategies show weak edge - only 1 of 16 tests validated",
+    "Momentum stocks (NVDA, TSLA, COIN, MSTR) exhibit trend persistence on overbought signals",
+    "Stochastic overbought uniformly less effective than RSI overbought",
+    "Weekly+daily filter too restrictive - need relaxed parameters",
+    "AMD unique - semi-cyclical nature creates mean reversion vs momentum peers"
+  ],
+  "validated_strategies": [
+    {
+      "id": "AMD_RSI70_SHORT",
+      "name": "AMD Bearish RSI Overbought Short",
+      "ticker": "AMD",
+      "test_win_pct": 56.8,
+      "ci_95": [40.9, 71.3],
+      "n": 37,
+      "decay_pct": -2.2,
+      "status": "VALIDATED",
+      "file": "memory/strategies/AMD_Bearish_RSI_Validated.md"
+    }
+  ],
+  "recommendations": [
+    "Deploy AMD RSI >70 short for paper trading (25% size, 20 trade pilot)",
+    "Abandon H2 Stochastic short - no edge found",
+    "Refine H3: Test with RSI <35 threshold instead of <30",
+    "Research why AMD differs from NVDA/TSLA (market structure, holder base)"
+  ]
+}

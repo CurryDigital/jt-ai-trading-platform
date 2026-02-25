@@ -1,0 +1,106 @@
+# Updated Risk Parameters for JT Trading
+# Replace generic 5% targets with strategy-specific parameters
+
+---
+## SHORT-TERM MEAN REVERSION (1-5 days)
+
+strategies:
+  - name: "Gap Fade (HK)"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 0.8, stop: 0.5, time: 1, trailing: 0.3}
+    rationale: "Intraday strategy; 0.8% realistic for gap fade"
+    
+  - name: "3-Day Reversal (All Regions)"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 3.0, stop: 2.0, time: 3, trailing: 2.0}
+    rationale: "Mean reversion; backtest avg winner +3.5%"
+    
+  - name: "RSI Mean Reversion (All Regions)"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 3.0, stop: 2.0, time: 5, trailing: null}
+    rationale: "5-day hold; prevent catching falling knife"
+
+---
+## MEDIUM-TERM MOMENTUM (10-30 days)
+
+  - name: "20-Day Momentum (All Regions)"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 8.0, stop: 5.0, time: 20, trailing: 5.0}
+    rationale: "Momentum needs room; Jegadeesh avg winner +12%"
+    
+  - name: "Sector Rotation Tech/Util"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 6.0, stop: 4.0, time: 20, trailing: 4.0}
+    rationale: "ETF lower volatility; 6% captures sector move"
+
+---
+## PAIR TRADE / ARBITRAGE
+
+  - name: "AH Premium Arbitrage"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 4.0, stop: 3.0, time: 14, trailing: null}
+    rationale: "Convergence trades smaller; 4% = 10-20% of typical spread"
+    
+  - name: "Gold/Silver Ratio Rotation"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 8.0, stop: 5.0, time: 21, trailing: 5.0}
+    rationale: "Commodity vol higher; 8% realistic for ratio trades"
+
+---
+## INCOME / DIVIDEND
+
+  - name: "Singapore REIT Dividend Capture"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 5.0, stop: 3.0, time: 30, trailing: null}
+    rationale: "Low volatility REITs; 3% stop protects dividend thesis"
+
+---
+## ALTERNATIVE ASSETS
+
+  - name: "FX Carry + Momentum G10"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 1.5, stop: 1.0, time: 4, trailing: 1.0}
+    rationale: "FX moves smaller; 1% = big move unlevered"
+    
+  - name: "Crypto Funding Rate Arbitrage"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 2.0, stop: 1.5, time: 3, trailing: 1.0}
+    rationale: "High vol; quick exit on momentum reversal"
+
+---
+## EVENT-DRIVEN
+
+  - name: "Information Arbitrage — Secondary Wave"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 3.0, stop: 2.0, time: 5, trailing: 2.0}
+    rationale: "Peer lag short (1-3 days); 3% captures quick drift"
+    
+  - name: "ARASO Factor Model"
+    current: {profit: 5.0, stop: 5.0}
+    updated: {profit: 4.0, stop: 2.5, time: 5, trailing: 3.0}
+    rationale: "Multi-factor convergence; tighter stop for alpha decay"
+
+---
+## IMPLEMENTATION CHECKLIST
+
+- [ ] Update JT Trading risk parameters
+- [ ] Regenerate all strategy.yaml files
+- [ ] Backtest validation (30 days)
+- [ ] Monitor win rate improvement
+- [ ] Document actual vs expected performance
+
+---
+## KEY METRICS TO MONITOR
+
+For each strategy, track:
+1. Win rate (target: match backtest)
+2. Avg winner (should approach profit target)
+3. Avg loser (should stay above stop loss)
+4. Time to profit/loss (should match time stop)
+5. Win rate by asset class
+
+---
+Expected Improvement:
+- Gap Fade: 0% → 60%+ win rate (realistic targets)
+- Momentum: Cut winners -50% → -20% (wider targets)
+- FX: Reduce stop outs -40% → -15% (tighter stops)

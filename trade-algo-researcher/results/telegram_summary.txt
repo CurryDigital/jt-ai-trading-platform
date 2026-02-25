@@ -1,0 +1,75 @@
+📊 **HYPOTHESIS TESTING BATCH RESULTS**
+*2026-02-23 | Train: 2021-22 | Test: 2023-24*
+
+━━━━━━━━━━━━━━━━━━━━
+
+📈 **SUMMARY**
+• Total Tested: 16 variants
+• 🏆 Golden: 0
+• ✅ Validated: 1
+• ❌ Rejected: 10
+• ⚠️ Insufficient: 5
+
+━━━━━━━━━━━━━━━━━━━━
+
+**H1: BEARISH RSI SHORT (RSI > 70)**
+
+`NVDA` 38.1% | n=42 | ❌ REJECTED
+`TSLA` 39.0% | n=41 | ❌ REJECTED
+`AMD` **56.8%** | n=37 | ✅ VALIDATED
+`COIN` 42.2% | n=45 | ❌ REJECTED
+`MSTR` 43.3% | n=60 | ❌ REJECTED
+
+━━━━━━━━━━━━━━━━━━━━
+
+**H2: BEARISH STOCH SHORT (%K>80 & %D>75)**
+
+All 6 tickers REJECTED (34-46% win rates)
+`NVDA` 41.8% | `TSLA` 46.3% | `AMD` 34.1%
+`COIN` 42.1% | `MSTR` 45.5% | `QQQ` 39.1%
+
+📛 Strategy abandoned - no edge
+
+━━━━━━━━━━━━━━━━━━━━
+
+**H3: WEEKLY+DAILY MR (LONG)**
+
+All 5 tickers INSUFFICIENT (n=2-7)
+Condition too rare in bull market
+
+💡 Recommendation: Relax RSI <30 → <35
+
+━━━━━━━━━━━━━━━━━━━━
+
+🏅 **VALIDATED STRATEGY**
+
+**AMD Bearish RSI Short**
+• Win Rate: 56.8% (CI: 41-71%)
+• Sample: 37 trades
+• Decay: -2.2% (test > train)
+• Signals: ~18/year
+• Avg Return: +1.09%
+
+📋 *File: memory/strategies/AMD_Bearish_RSI_Validated.md*
+
+━━━━━━━━━━━━━━━━━━━━
+
+🔍 **KEY INSIGHTS**
+
+1️⃣ Bearish strategies show weak edge
+2️⃣ Momentum stocks don't mean-revert on overbought
+3️⃣ Stoch < RSI for overbought signals
+4️⃣ AMD unique - semi-cyclical vs momentum
+
+━━━━━━━━━━━━━━━━━━━━
+
+⚡ **ACTION ITEMS**
+
+✅ Paper trade AMD RSI short (25% size)
+❌ Abandon H2 Stochastic strategy
+🔄 Refine H3 with RSI <35 threshold
+🔬 Research AMD vs NVDA/TSLA differences
+
+━━━━━━━━━━━━━━━━━━━━
+
+*Disclaimer: Research only. Not financial advice.*

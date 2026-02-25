@@ -1,0 +1,30 @@
+{
+  "name": "tang-inventory-api",
+  "version": "1.0.0",
+  "description": "Inventory Management System API",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "migrate": "node src/migrate.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "pg": "^8.11.3",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.37.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "supertest": "^6.3.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

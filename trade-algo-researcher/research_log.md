@@ -1,0 +1,1 @@
+memory/RESEARCH_LOG_OPTIMIZED.md

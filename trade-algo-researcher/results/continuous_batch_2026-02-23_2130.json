@@ -1,0 +1,311 @@
+{
+  "timestamp": "2026-02-23T21:30:00Z",
+  "hypotheses": {
+    "H1_RSI_Volume": [
+      {
+        "train_wr": 68.0,
+        "test_wr": 33.3,
+        "train_n": 25,
+        "test_n": 12,
+        "decay": 34.7,
+        "ci_lower": 13.8,
+        "ci_upper": 60.9,
+        "ticker": "AAPL"
+      },
+      {
+        "train_wr": 100.0,
+        "test_wr": 0,
+        "train_n": 4,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "MSFT"
+      },
+      {
+        "train_wr": 66.7,
+        "test_wr": 0,
+        "train_n": 9,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "NVDA"
+      },
+      {
+        "train_wr": 83.3,
+        "test_wr": 0,
+        "train_n": 12,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "TSLA"
+      },
+      {
+        "train_wr": 83.3,
+        "test_wr": 0,
+        "train_n": 6,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "AMD"
+      },
+      {
+        "train_wr": 25.0,
+        "test_wr": 0.0,
+        "train_n": 28,
+        "test_n": 1,
+        "decay": 25.0,
+        "ci_lower": 0,
+        "ci_upper": 79.3,
+        "ticker": "META"
+      },
+      {
+        "train_wr": 72.7,
+        "test_wr": 55.6,
+        "train_n": 11,
+        "test_n": 9,
+        "decay": 17.2,
+        "ci_lower": 26.7,
+        "ci_upper": 81.1,
+        "ticker": "COIN"
+      },
+      {
+        "train_wr": 62.5,
+        "test_wr": 0,
+        "train_n": 8,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "MSTR"
+      },
+      {
+        "train_wr": 50.0,
+        "test_wr": 50.0,
+        "train_n": 6,
+        "test_n": 2,
+        "decay": 0.0,
+        "ci_lower": 9.5,
+        "ci_upper": 90.5,
+        "ticker": "QQQ"
+      },
+      {
+        "train_wr": 66.7,
+        "test_wr": 0,
+        "train_n": 12,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "SPY"
+      }
+    ],
+    "H2_BB_PctB": [
+      {
+        "train_wr": 61.0,
+        "test_wr": 41.2,
+        "train_n": 41,
+        "test_n": 17,
+        "decay": 19.8,
+        "ci_lower": 21.6,
+        "ci_upper": 64.0,
+        "ticker": "AAPL"
+      },
+      {
+        "train_wr": 100.0,
+        "test_wr": 0,
+        "train_n": 1,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "MSFT"
+      },
+      {
+        "train_wr": 54.5,
+        "test_wr": 100.0,
+        "train_n": 22,
+        "test_n": 5,
+        "decay": -45.5,
+        "ci_lower": 56.6,
+        "ci_upper": 100.0,
+        "ticker": "NVDA"
+      },
+      {
+        "train_wr": 78.9,
+        "test_wr": 0,
+        "train_n": 19,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "TSLA"
+      },
+      {
+        "train_wr": 77.8,
+        "test_wr": 85.7,
+        "train_n": 9,
+        "test_n": 7,
+        "decay": -7.9,
+        "ci_lower": 48.7,
+        "ci_upper": 97.4,
+        "ticker": "AMD"
+      },
+      {
+        "train_wr": 40.6,
+        "test_wr": 100.0,
+        "train_n": 32,
+        "test_n": 5,
+        "decay": -59.4,
+        "ci_lower": 56.6,
+        "ci_upper": 100.0,
+        "ticker": "META"
+      },
+      {
+        "train_wr": 60.0,
+        "test_wr": 18.2,
+        "train_n": 10,
+        "test_n": 11,
+        "decay": 41.8,
+        "ci_lower": 5.1,
+        "ci_upper": 47.7,
+        "ticker": "COIN"
+      },
+      {
+        "train_wr": 45.5,
+        "test_wr": 100.0,
+        "train_n": 11,
+        "test_n": 2,
+        "decay": -54.5,
+        "ci_lower": 34.2,
+        "ci_upper": 100.0,
+        "ticker": "MSTR"
+      },
+      {
+        "train_wr": 50.0,
+        "test_wr": 0.0,
+        "train_n": 18,
+        "test_n": 2,
+        "decay": 50.0,
+        "ci_lower": 0,
+        "ci_upper": 65.8,
+        "ticker": "QQQ"
+      },
+      {
+        "train_wr": 60.0,
+        "test_wr": 83.3,
+        "train_n": 5,
+        "test_n": 6,
+        "decay": -23.3,
+        "ci_lower": 43.6,
+        "ci_upper": 97.0,
+        "ticker": "SPY"
+      }
+    ],
+    "H3_Stoch_Cross": [
+      {
+        "train_wr": 65.6,
+        "test_wr": 30.8,
+        "train_n": 32,
+        "test_n": 13,
+        "decay": 34.9,
+        "ci_lower": 12.7,
+        "ci_upper": 57.6,
+        "ticker": "AAPL"
+      },
+      {
+        "train_wr": 75.0,
+        "test_wr": 100.0,
+        "train_n": 4,
+        "test_n": 1,
+        "decay": -25.0,
+        "ci_lower": 20.7,
+        "ci_upper": 100.0,
+        "ticker": "MSFT"
+      },
+      {
+        "train_wr": 75.0,
+        "test_wr": 0,
+        "train_n": 8,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "NVDA"
+      },
+      {
+        "train_wr": 83.3,
+        "test_wr": 100.0,
+        "train_n": 12,
+        "test_n": 2,
+        "decay": -16.7,
+        "ci_lower": 34.2,
+        "ci_upper": 100.0,
+        "ticker": "TSLA"
+      },
+      {
+        "train_wr": 80.0,
+        "test_wr": 80.0,
+        "train_n": 5,
+        "test_n": 5,
+        "decay": 0.0,
+        "ci_lower": 37.6,
+        "ci_upper": 96.4,
+        "ticker": "AMD"
+      },
+      {
+        "train_wr": 36.0,
+        "test_wr": 50.0,
+        "train_n": 25,
+        "test_n": 2,
+        "decay": -14.0,
+        "ci_lower": 9.5,
+        "ci_upper": 90.5,
+        "ticker": "META"
+      },
+      {
+        "train_wr": 62.5,
+        "test_wr": 42.9,
+        "train_n": 8,
+        "test_n": 7,
+        "decay": 19.6,
+        "ci_lower": 15.8,
+        "ci_upper": 75.0,
+        "ticker": "COIN"
+      },
+      {
+        "train_wr": 66.7,
+        "test_wr": 0,
+        "train_n": 6,
+        "test_n": 0,
+        "decay": 0,
+        "ci_lower": 0,
+        "ci_upper": 0,
+        "ticker": "MSTR"
+      },
+      {
+        "train_wr": 58.3,
+        "test_wr": 66.7,
+        "train_n": 12,
+        "test_n": 3,
+        "decay": -8.3,
+        "ci_lower": 20.8,
+        "ci_upper": 93.9,
+        "ticker": "QQQ"
+      },
+      {
+        "train_wr": 55.6,
+        "test_wr": 80.0,
+        "train_n": 9,
+        "test_n": 5,
+        "decay": -24.4,
+        "ci_lower": 37.6,
+        "ci_upper": 96.4,
+        "ticker": "SPY"
+      }
+    ]
+  }
+}

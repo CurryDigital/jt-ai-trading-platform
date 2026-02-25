@@ -1,0 +1,123 @@
+==========================================================================================
+EXPANDED CONTINUOUS STRATEGY RESEARCH RESULTS
+Date: 2026-02-24 14:00 UTC
+Test Period: 2023-01-01 to 2024-12-31
+==========================================================================================
+
+## EXECUTIVE SUMMARY
+------------------------------------------------------------------------------------------
+**Total Tests Run:** 160 hypothesis-ticker combinations
+**Hypotheses Tested:** 16 | **Tickers:** 10
+
+**Results:** 🏆 Golden: 28 | ⭐ Validated: 73 | ❌ Rejected: 59
+**Long Strategies:** 28 Golden | **Short Strategies:** 0 Golden
+
+## 🏆 GOLDEN LONG STRATEGIES: 28
+------------------------------------------------------------------------------------------
+Strategy                     Ticker   Test WR%   n      Decay    Avg Ret%   95% CI              
+------------------------------------------------------------------------------------------
+H13_Vol_Compression_BO       AMD      73.1       234    -1.6     0.30       [67.0-78.3]         
+H14_RSI_Fast_Slow            AMD      76.7       227    -7.8     0.34       [70.7-81.7]         
+H16_Multi_TF_Trend           AMD      75.4       354    -2.6     0.30       [70.7-79.6]         
+H16_Multi_TF_PT              AMD      75.4       354    -2.6     0.30       [70.7-79.6]         
+H15_ADX_MACD_10D             AMD      80.4       46     -1.0     0.56       [66.8-89.3]         
+H13_Vol_Compression_BO       MSFT     83.8       253    -6.3     0.26       [78.8-87.8]         
+H14_RSI_Fast_Slow            MSFT     82.0       234    -2.9     0.24       [76.6-86.4]         
+H16_Multi_TF_Trend           MSFT     81.6       424    -0.0     0.25       [77.6-85.0]         
+H16_Multi_TF_PT              MSFT     81.6       424    -0.0     0.25       [77.6-85.0]         
+H15_ADX_MACD_10D             MSFT     76.3       38     10.6     0.36       [60.8-87.0]         
+H13_Vol_Compression_BO       MSTR     79.0       253    6.2      0.27       [73.6-83.6]         
+H14_RSI_Fast_Slow            MSTR     79.4       233    7.4      0.26       [73.8-84.1]         
+H16_Multi_TF_Trend           MSTR     80.0       424    5.0      0.26       [75.9-83.5]         
+H16_Multi_TF_PT              MSTR     80.0       424    5.0      0.26       [75.9-83.5]         
+H13_Vol_Compression_BO       NVDA     78.8       226    -11.2    0.28       [73.0-83.6]         
+H14_RSI_Fast_Slow            NVDA     74.3       226    -10.3    0.23       [68.3-79.6]         
+H16_Multi_TF_Trend           NVDA     77.4       380    -11.5    0.22       [72.9-81.3]         
+H16_Multi_TF_PT              NVDA     77.4       380    -11.5    0.22       [72.9-81.3]         
+H15_ADX_MACD_10D             NVDA     76.8       56     -6.8     0.27       [64.2-85.9]         
+H13_Vol_Compression_BO       QQQ      71.1       225    10.4     0.21       [64.9-76.6]         
+H14_RSI_Fast_Slow            QQQ      72.3       213    9.8      0.22       [65.9-77.9]         
+H16_Multi_TF_Trend           QQQ      75.4       366    5.3      0.25       [70.8-79.5]         
+H16_Multi_TF_PT              QQQ      75.4       366    5.3      0.25       [70.8-79.5]         
+H15_ADX_MACD_10D             QQQ      89.4       66     -3.1     0.47       [79.7-94.8]         
+H15_ADX_MACD_10D             SPY      71.6       74     7.3      0.37       [60.5-80.6]         
+H13_Vol_Compression_BO       TSLA     70.9       234    -5.3     0.24       [64.8-76.4]         
+H16_Multi_TF_Trend           TSLA     74.1       406    -6.8     0.23       [69.7-78.2]         
+H16_Multi_TF_PT              TSLA     74.1       406    -6.8     0.23       [69.7-78.2]         
+
+## ⭐ VALIDATED STRATEGIES: 73
+------------------------------------------------------------------------------------------
+Strategy                     Ticker   Test WR%   n      Type      
+------------------------------------------------------------------------------------------
+H12_BB_Squeeze_Momentum      AAPL     66.7       12     LONG      
+H13_Vol_Compression_BO       AAPL     62.5       72     LONG      
+H14_RSI_Fast_Slow            AAPL     59.6       136    LONG      
+H15_ADX_MACD_Combo           AAPL     60.0       95     LONG      
+H16_Multi_TF_Trend           AAPL     58.6       157    LONG      
+H12_BB_Squeeze_PT            AAPL     66.7       12     LONG      
+H15_ADX_MACD_PT              AAPL     60.0       95     LONG      
+H16_Multi_TF_PT              AAPL     58.6       157    LONG      
+B3_Momentum_Div_Short        AAPL     56.2       16     SHORT     
+H15_ADX_MACD_3D              AAPL     55.8       95     LONG      
+H15_ADX_MACD_10D             AAPL     63.2       95     LONG      
+H12_BB_Squeeze_Momentum      AMD      62.5       16     LONG      
+H15_ADX_MACD_Combo           AMD      65.2       46     LONG      
+H12_BB_Squeeze_PT            AMD      62.5       16     LONG      
+H15_ADX_MACD_PT              AMD      65.2       46     LONG      
+H15_ADX_MACD_3D              AMD      56.5       46     LONG      
+H13_Vol_Compression_BO       COIN     64.2       162    LONG      
+H14_RSI_Fast_Slow            COIN     63.0       173    LONG      
+H15_ADX_MACD_Combo           COIN     61.9       97     LONG      
+H16_Multi_TF_Trend           COIN     63.6       206    LONG      
+... and 53 more
+
+## STRATEGY PERFORMANCE BY CATEGORY
+------------------------------------------------------------------------------------------
+Category                            Tests    Golden   Validated  Avg WR%   
+------------------------------------------------------------------------------------------
+New Hypotheses (H12-H16)            100      28       70         70.0      
+Bearish Strategies (B1-B4)          60       0        3          27.0      
+Profit Target Variants              50       6        24         52.3      
+Time-Based Exits                    20       5        15         70.6      
+
+## TOP PERFORMERS BY CATEGORY
+------------------------------------------------------------------------------------------
+**Best Long Strategy:** H12_BB_Squeeze_Momentum on MSTR
+  Test Win Rate: 90.0% | n=20 | Decay: -5.8%
+
+**Best Short Strategy:** B1_ADX_Trend_Short on COIN
+  Test Win Rate: 61.9% | n=21 | Decay: 0.6%
+
+**Most Consistent Strategy:** H15_ADX_MACD_10D
+  Average across 10 tickers: 76.3%
+
+## KEY FINDINGS
+------------------------------------------------------------------------------------------
+1. **Short Strategy Viability:** Average win rate for bearish strategies: 27.1%
+2. **Profit Target Effectiveness:** PT variants average 52.9% win rate
+3. **Hold Period Comparison:** 3-day: 64.9% | 5-day: 53.6%
+4. **Best New Hypothesis:** H12_BB_Squeeze_Momentum with 90.0% win rate
+5. **Statistical Summary:**
+   - Total combinations tested: 160
+   - Golden rate: 17.5%
+   - Validated rate: 45.6%
+
+## DEPLOYMENT RECOMMENDATIONS
+------------------------------------------------------------------------------------------
+### Immediate Deployment (Long Strategies)
+- H13_Vol_Compression_BO on AMD: 73.1% WR, 234 trades
+- H14_RSI_Fast_Slow on AMD: 76.7% WR, 227 trades
+- H16_Multi_TF_Trend on AMD: 75.4% WR, 354 trades
+- H16_Multi_TF_PT on AMD: 75.4% WR, 354 trades
+- H15_ADX_MACD_10D on AMD: 80.4% WR, 46 trades
+
+### Monitor for Promotion (Validated)
+- H12_BB_Squeeze_Momentum on MSTR: 90.0% WR, needs 10 more trades for Golden
+- H12_BB_Squeeze_PT on MSTR: 90.0% WR, needs 10 more trades for Golden
+- H15_ADX_MACD_10D on MSTR: 89.7% WR, needs 1 more trades for Golden
+- H15_ADX_MACD_10D on TSLA: 87.9% WR, needs -36 more trades for Golden
+- H12_BB_Squeeze_Momentum on MSFT: 81.2% WR, needs 14 more trades for Golden
+
+==========================================================================================
+END OF EXPANDED RESEARCH REPORT
+==========================================================================================

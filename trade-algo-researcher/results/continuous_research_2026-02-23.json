@@ -1,0 +1,247 @@
+{
+  "timestamp": "2026-02-23T17:29:11.996753",
+  "h1_bearish_rsi": {
+    "NVDA": {
+      "train": {
+        "win_rate": 27.7,
+        "n": 159,
+        "avg_return": -0.29,
+        "ci_lower": 21.3,
+        "ci_upper": 35.1
+      },
+      "test": {
+        "win_rate": 22.1,
+        "n": 258,
+        "avg_return": -0.19,
+        "ci_lower": 17.5,
+        "ci_upper": 27.5
+      },
+      "decay": 20.2
+    },
+    "TSLA": {
+      "train": {
+        "win_rate": 34.5,
+        "n": 165,
+        "avg_return": -0.18,
+        "ci_lower": 27.7,
+        "ci_upper": 42.1
+      },
+      "test": {
+        "win_rate": 23.2,
+        "n": 263,
+        "avg_return": -0.26,
+        "ci_lower": 18.5,
+        "ci_upper": 28.7
+      },
+      "decay": 32.8
+    },
+    "AMD": {
+      "train": {
+        "win_rate": 25.4,
+        "n": 205,
+        "avg_return": -0.27,
+        "ci_lower": 19.9,
+        "ci_upper": 31.7
+      },
+      "test": {
+        "win_rate": 23.9,
+        "n": 226,
+        "avg_return": -0.28,
+        "ci_lower": 18.8,
+        "ci_upper": 29.9
+      },
+      "decay": 5.9
+    },
+    "COIN": {
+      "train": {
+        "win_rate": 16.1,
+        "n": 298,
+        "avg_return": -0.28,
+        "ci_lower": 12.4,
+        "ci_upper": 20.7
+      },
+      "test": {
+        "win_rate": 30.9,
+        "n": 123,
+        "avg_return": -0.21,
+        "ci_lower": 23.4,
+        "ci_upper": 39.5
+      },
+      "decay": -91.9
+    },
+    "MSTR": {
+      "train": {
+        "win_rate": 12.3,
+        "n": 318,
+        "avg_return": -0.29,
+        "ci_lower": 9.1,
+        "ci_upper": 16.3
+      },
+      "test": {
+        "win_rate": 16.9,
+        "n": 313,
+        "avg_return": -0.28,
+        "ci_lower": 13.2,
+        "ci_upper": 21.5
+      },
+      "decay": -37.4
+    }
+  },
+  "h2_bearish_stoch": {
+    "NVDA": {
+      "train": {
+        "win_rate": 29.8,
+        "n": 131,
+        "avg_return": -0.29,
+        "ci_lower": 22.6,
+        "ci_upper": 38.1
+      },
+      "test": {
+        "win_rate": 17.2,
+        "n": 221,
+        "avg_return": -0.25,
+        "ci_lower": 12.8,
+        "ci_upper": 22.7
+      },
+      "decay": 42.3
+    },
+    "QQQ": {
+      "train": {
+        "win_rate": 17.7,
+        "n": 254,
+        "avg_return": -0.21,
+        "ci_lower": 13.5,
+        "ci_upper": 22.9
+      },
+      "test": {
+        "win_rate": 21.4,
+        "n": 220,
+        "avg_return": -0.26,
+        "ci_lower": 16.5,
+        "ci_upper": 27.2
+      },
+      "decay": -20.9
+    },
+    "TSLA": {
+      "train": {
+        "win_rate": 34.9,
+        "n": 166,
+        "avg_return": -0.19,
+        "ci_lower": 28.1,
+        "ci_upper": 42.5
+      },
+      "test": {
+        "win_rate": 26.8,
+        "n": 220,
+        "avg_return": -0.25,
+        "ci_lower": 21.4,
+        "ci_upper": 33.0
+      },
+      "decay": 23.2
+    },
+    "AMD": {
+      "train": {
+        "win_rate": 28.0,
+        "n": 150,
+        "avg_return": -0.21,
+        "ci_lower": 21.4,
+        "ci_upper": 35.7
+      },
+      "test": {
+        "win_rate": 26.8,
+        "n": 194,
+        "avg_return": -0.25,
+        "ci_lower": 21.1,
+        "ci_upper": 33.4
+      },
+      "decay": 4.3
+    }
+  },
+  "h3_multitimeframe": {
+    "SPY": {
+      "train": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "test": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "decay": 0.0
+    },
+    "QQQ": {
+      "train": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "test": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "decay": 0.0
+    },
+    "AAPL": {
+      "train": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "test": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "decay": 0.0
+    },
+    "MSFT": {
+      "train": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "test": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "decay": 0.0
+    },
+    "NVDA": {
+      "train": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "test": {
+        "win_rate": 0,
+        "n": 0,
+        "avg_return": 0,
+        "ci_lower": 0,
+        "ci_upper": 0
+      },
+      "decay": 0.0
+    }
+  }
+}

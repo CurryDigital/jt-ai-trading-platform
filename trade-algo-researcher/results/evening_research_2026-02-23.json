@@ -1,0 +1,430 @@
+{
+  "timestamp": "2026-02-23T18:27:09.248308",
+  "hypotheses": {
+    "H1_Bearish_RSI_70": {
+      "AAPL": {
+        "win_rate": 44.8,
+        "n_trades": 87,
+        "avg_return": -0.21,
+        "ci_95": [
+          34.4,
+          55.3
+        ]
+      },
+      "MSFT": {
+        "win_rate": 17.8,
+        "n_trades": 298,
+        "avg_return": -0.24,
+        "ci_95": [
+          13.4,
+          22.1
+        ]
+      },
+      "NVDA": {
+        "win_rate": 21.3,
+        "n_trades": 258,
+        "avg_return": -0.19,
+        "ci_95": [
+          16.3,
+          26.3
+        ]
+      },
+      "TSLA": {
+        "win_rate": 26.2,
+        "n_trades": 263,
+        "avg_return": -0.26,
+        "ci_95": [
+          20.9,
+          31.6
+        ]
+      },
+      "AMD": {
+        "win_rate": 24.8,
+        "n_trades": 226,
+        "avg_return": -0.28,
+        "ci_95": [
+          19.2,
+          30.4
+        ]
+      },
+      "META": {
+        "win_rate": 29.5,
+        "n_trades": 183,
+        "avg_return": -0.17,
+        "ci_95": [
+          22.9,
+          36.1
+        ]
+      },
+      "SPY": {
+        "win_rate": 30.0,
+        "n_trades": 203,
+        "avg_return": -0.17,
+        "ci_95": [
+          23.7,
+          36.4
+        ]
+      },
+      "QQQ": {
+        "win_rate": 17.6,
+        "n_trades": 262,
+        "avg_return": -0.27,
+        "ci_95": [
+          13.0,
+          22.2
+        ]
+      },
+      "MSTR": {
+        "win_rate": 16.6,
+        "n_trades": 314,
+        "avg_return": -0.28,
+        "ci_95": [
+          12.4,
+          20.7
+        ]
+      },
+      "COIN": {
+        "win_rate": 32.5,
+        "n_trades": 123,
+        "avg_return": -0.18,
+        "ci_95": [
+          24.2,
+          40.8
+        ]
+      }
+    },
+    "H2_Bearish_Stoch_80": {
+      "AAPL": {
+        "win_rate": 41.1,
+        "n_trades": 90,
+        "avg_return": -0.81,
+        "ci_95": [
+          30.9,
+          51.3
+        ]
+      },
+      "MSFT": {
+        "win_rate": 20.2,
+        "n_trades": 282,
+        "avg_return": -0.22,
+        "ci_95": [
+          15.5,
+          24.9
+        ]
+      },
+      "NVDA": {
+        "win_rate": 20.5,
+        "n_trades": 239,
+        "avg_return": -0.25,
+        "ci_95": [
+          15.4,
+          25.6
+        ]
+      },
+      "TSLA": {
+        "win_rate": 26.5,
+        "n_trades": 238,
+        "avg_return": -0.25,
+        "ci_95": [
+          20.9,
+          32.1
+        ]
+      },
+      "AMD": {
+        "win_rate": 24.5,
+        "n_trades": 208,
+        "avg_return": -0.25,
+        "ci_95": [
+          18.7,
+          30.4
+        ]
+      },
+      "META": {
+        "win_rate": 23.0,
+        "n_trades": 178,
+        "avg_return": -0.34,
+        "ci_95": [
+          16.8,
+          29.2
+        ]
+      },
+      "SPY": {
+        "win_rate": 28.6,
+        "n_trades": 192,
+        "avg_return": -0.18,
+        "ci_95": [
+          22.3,
+          35.0
+        ]
+      },
+      "QQQ": {
+        "win_rate": 20.6,
+        "n_trades": 238,
+        "avg_return": -0.26,
+        "ci_95": [
+          15.5,
+          25.7
+        ]
+      },
+      "MSTR": {
+        "win_rate": 17.3,
+        "n_trades": 271,
+        "avg_return": -0.26,
+        "ci_95": [
+          12.8,
+          21.9
+        ]
+      },
+      "COIN": {
+        "win_rate": 31.8,
+        "n_trades": 132,
+        "avg_return": -0.18,
+        "ci_95": [
+          23.9,
+          39.8
+        ]
+      }
+    },
+    "H3_Multi_Ind_Bull": {
+      "AAPL": {
+        "win_rate": 100.0,
+        "n_trades": 1,
+        "avg_return": 1.25,
+        "ci_95": null
+      }
+    },
+    "H4_BB_Squeeze_BO": {
+      "AAPL": {
+        "win_rate": 61.1,
+        "n_trades": 18,
+        "avg_return": 2.55,
+        "ci_95": [
+          38.6,
+          83.6
+        ]
+      },
+      "MSFT": {
+        "win_rate": 91.7,
+        "n_trades": 36,
+        "avg_return": 0.27,
+        "ci_95": [
+          82.6,
+          100
+        ]
+      },
+      "NVDA": {
+        "win_rate": 88.4,
+        "n_trades": 43,
+        "avg_return": 0.3,
+        "ci_95": [
+          78.8,
+          98.0
+        ]
+      },
+      "TSLA": {
+        "win_rate": 55.3,
+        "n_trades": 47,
+        "avg_return": 0.03,
+        "ci_95": [
+          41.1,
+          69.5
+        ]
+      },
+      "AMD": {
+        "win_rate": 79.2,
+        "n_trades": 24,
+        "avg_return": 0.39,
+        "ci_95": [
+          62.9,
+          95.4
+        ]
+      },
+      "META": {
+        "win_rate": 90.9,
+        "n_trades": 11,
+        "avg_return": 0.9,
+        "ci_95": [
+          73.9,
+          100
+        ]
+      },
+      "SPY": {
+        "win_rate": 76.2,
+        "n_trades": 21,
+        "avg_return": 0.33,
+        "ci_95": [
+          58.0,
+          94.4
+        ]
+      },
+      "QQQ": {
+        "win_rate": 74.4,
+        "n_trades": 39,
+        "avg_return": 0.19,
+        "ci_95": [
+          60.7,
+          88.1
+        ]
+      },
+      "MSTR": {
+        "win_rate": 76.9,
+        "n_trades": 26,
+        "avg_return": 0.2,
+        "ci_95": [
+          60.7,
+          93.1
+        ]
+      },
+      "COIN": {
+        "win_rate": 59.3,
+        "n_trades": 27,
+        "avg_return": 0.25,
+        "ci_95": [
+          40.7,
+          77.8
+        ]
+      }
+    },
+    "H5_ATR_Expansion": {
+      "AAPL": {
+        "win_rate": 58.1,
+        "n_trades": 31,
+        "avg_return": -0.32,
+        "ci_95": [
+          40.7,
+          75.4
+        ]
+      },
+      "META": {
+        "win_rate": 100.0,
+        "n_trades": 1,
+        "avg_return": 2.84,
+        "ci_95": null
+      }
+    },
+    "H6_RSI_MACD_Combo": {
+      "AAPL": {
+        "win_rate": 20.0,
+        "n_trades": 10,
+        "avg_return": -0.53,
+        "ci_95": null
+      },
+      "TSLA": {
+        "win_rate": 100.0,
+        "n_trades": 1,
+        "avg_return": 0.28,
+        "ci_95": null
+      },
+      "META": {
+        "win_rate": 100.0,
+        "n_trades": 2,
+        "avg_return": 0.81,
+        "ci_95": null
+      },
+      "SPY": {
+        "win_rate": 83.3,
+        "n_trades": 6,
+        "avg_return": 0.29,
+        "ci_95": null
+      },
+      "QQQ": {
+        "win_rate": 100.0,
+        "n_trades": 2,
+        "avg_return": 0.26,
+        "ci_95": null
+      },
+      "COIN": {
+        "win_rate": 100.0,
+        "n_trades": 10,
+        "avg_return": 1.09,
+        "ci_95": [
+          100.0,
+          100
+        ]
+      }
+    },
+    "H7_Stoch_BB_Combo": {
+      "AAPL": {
+        "win_rate": 55.4,
+        "n_trades": 65,
+        "avg_return": 0.57,
+        "ci_95": [
+          43.3,
+          67.5
+        ]
+      },
+      "MSFT": {
+        "win_rate": 100.0,
+        "n_trades": 6,
+        "avg_return": 0.29,
+        "ci_95": null
+      },
+      "NVDA": {
+        "win_rate": 100.0,
+        "n_trades": 5,
+        "avg_return": 0.25,
+        "ci_95": null
+      },
+      "TSLA": {
+        "win_rate": 66.7,
+        "n_trades": 12,
+        "avg_return": 0.17,
+        "ci_95": [
+          40.0,
+          93.3
+        ]
+      },
+      "AMD": {
+        "win_rate": 75.0,
+        "n_trades": 24,
+        "avg_return": 0.43,
+        "ci_95": [
+          57.7,
+          92.3
+        ]
+      },
+      "META": {
+        "win_rate": 65.6,
+        "n_trades": 32,
+        "avg_return": 0.56,
+        "ci_95": [
+          49.2,
+          82.1
+        ]
+      },
+      "SPY": {
+        "win_rate": 54.2,
+        "n_trades": 24,
+        "avg_return": 0.09,
+        "ci_95": [
+          34.2,
+          74.1
+        ]
+      },
+      "QQQ": {
+        "win_rate": 52.6,
+        "n_trades": 19,
+        "avg_return": 0.21,
+        "ci_95": [
+          30.2,
+          75.1
+        ]
+      },
+      "MSTR": {
+        "win_rate": 100.0,
+        "n_trades": 5,
+        "avg_return": 0.23,
+        "ci_95": null
+      },
+      "COIN": {
+        "win_rate": 49.1,
+        "n_trades": 55,
+        "avg_return": -0.0,
+        "ci_95": [
+          35.9,
+          62.3
+        ]
+      }
+    }
+  }
+}

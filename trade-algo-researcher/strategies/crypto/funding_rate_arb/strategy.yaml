@@ -1,0 +1,58 @@
+name: "Crypto Funding Rate Arbitrage"
+version: "1.0"
+description: "Capture funding payments by shorting perp + long spot when funding is positive"
+
+asset_class: "crypto"
+direction: "neutral"
+horizon: "short_term"
+
+status: "backtested"
+target_sharpe: 2.0
+actual_sharpe: 2.5
+target_max_dd: 0.10
+actual_max_dd: 0.08
+win_rate: 0.75
+avg_hold_days: 1.0
+capacity_millions: 50
+
+universe:
+  - "BTC"
+  - "ETH"
+  - "SOL"
+
+signals:
+  frequency: "hourly"
+  rebalance: "as_needed"
+  entry_threshold: 0.001  # 10bps funding
+  exit_threshold: 0.0001  # 1bps funding
+
+risk:
+  max_position_pct: 0.10
+  max_exchange_exposure: 0.33
+  beta_neutral: true
+  dollar_neutral: true
+  liquidation_buffer: 2.0
+  max_hold_hours: 72
+
+execution:
+  venue: "BINANCE"
+  venues:
+    - "BINANCE"
+    - "OKX"
+    - "BYBIT"
+  order_type: "limit"
+  slippage: 0.0005
+
+deployment:
+  mode: "paper"
+  jt_integration: true
+  jt_notified: "2026-02-18"
+  paper_start_date: null
+  live_start_date: null
+
+# Metadata
+author: "Trade Algo Researcher"
+created: "2026-02-17"
+last_updated: "2026-02-18"
+backtest_period: "2022-01-01 to 2024-12-31"
+jt_ready: true

@@ -1,0 +1,1402 @@
+[
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 2,
+      "total": 3,
+      "win_rate": 66.67,
+      "ci_low": 20.77,
+      "ci_high": 93.85
+    },
+    "test": {
+      "wins": 3,
+      "total": 5,
+      "win_rate": 60.0,
+      "ci_low": 23.07,
+      "ci_high": 88.24
+    },
+    "decay": 6.67,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 5,
+      "total": 17,
+      "win_rate": 29.41,
+      "ci_low": 13.28,
+      "ci_high": 53.13
+    },
+    "test": {
+      "wins": 8,
+      "total": 17,
+      "win_rate": 47.06,
+      "ci_low": 26.16,
+      "ci_high": 69.04
+    },
+    "decay": -17.65,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 8,
+      "total": 13,
+      "win_rate": 61.54,
+      "ci_low": 35.52,
+      "ci_high": 82.29
+    },
+    "test": {
+      "wins": 5,
+      "total": 9,
+      "win_rate": 55.56,
+      "ci_low": 26.66,
+      "ci_high": 81.12
+    },
+    "decay": 5.98,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 91,
+      "total": 193,
+      "win_rate": 47.15,
+      "ci_low": 40.23,
+      "ci_high": 54.18
+    },
+    "test": {
+      "wins": 107,
+      "total": 165,
+      "win_rate": 64.85,
+      "ci_low": 57.3,
+      "ci_high": 71.72
+    },
+    "decay": -17.7,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 103,
+      "total": 248,
+      "win_rate": 41.53,
+      "ci_low": 35.57,
+      "ci_high": 47.75
+    },
+    "test": {
+      "wins": 69,
+      "total": 246,
+      "win_rate": 28.05,
+      "ci_low": 22.81,
+      "ci_high": 33.97
+    },
+    "decay": 13.48,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "AAPL",
+    "train": {
+      "wins": 139,
+      "total": 279,
+      "win_rate": 49.82,
+      "ci_low": 44.0,
+      "ci_high": 55.65
+    },
+    "test": {
+      "wins": 141,
+      "total": 254,
+      "win_rate": 55.51,
+      "ci_low": 49.36,
+      "ci_high": 61.5
+    },
+    "decay": -5.69,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "AMD",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "AMD",
+    "train": {
+      "wins": 2,
+      "total": 4,
+      "win_rate": 50.0,
+      "ci_low": 15.0,
+      "ci_high": 85.0
+    },
+    "test": {
+      "wins": 0,
+      "total": 2,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 65.76
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "AMD",
+    "train": {
+      "wins": 7,
+      "total": 8,
+      "win_rate": 87.5,
+      "ci_low": 52.91,
+      "ci_high": 97.76
+    },
+    "test": {
+      "wins": 6,
+      "total": 8,
+      "win_rate": 75.0,
+      "ci_low": 40.93,
+      "ci_high": 92.85
+    },
+    "decay": 12.5,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "AMD",
+    "train": {
+      "wins": 2,
+      "total": 2,
+      "win_rate": 100.0,
+      "ci_low": 34.24,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 3,
+      "total": 3,
+      "win_rate": 100.0,
+      "ci_low": 43.85,
+      "ci_high": 100.0
+    },
+    "decay": 0.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "AMD",
+    "train": {
+      "wins": 136,
+      "total": 197,
+      "win_rate": 69.04,
+      "ci_low": 62.27,
+      "ci_high": 75.08
+    },
+    "test": {
+      "wins": 82,
+      "total": 117,
+      "win_rate": 70.09,
+      "ci_low": 61.26,
+      "ci_high": 77.64
+    },
+    "decay": -1.05,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "AMD",
+    "train": {
+      "wins": 1,
+      "total": 394,
+      "win_rate": 0.25,
+      "ci_low": 0.04,
+      "ci_high": 1.42
+    },
+    "test": {
+      "wins": 8,
+      "total": 376,
+      "win_rate": 2.13,
+      "ci_low": 1.08,
+      "ci_high": 4.14
+    },
+    "decay": -1.88,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "AMD",
+    "train": {
+      "wins": 232,
+      "total": 329,
+      "win_rate": 70.52,
+      "ci_low": 65.38,
+      "ci_high": 75.18
+    },
+    "test": {
+      "wins": 240,
+      "total": 313,
+      "win_rate": 76.68,
+      "ci_low": 71.69,
+      "ci_high": 81.02
+    },
+    "decay": -6.16,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "COIN",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "COIN",
+    "train": {
+      "wins": 3,
+      "total": 3,
+      "win_rate": 100.0,
+      "ci_low": 43.85,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "COIN",
+    "train": {
+      "wins": 2,
+      "total": 4,
+      "win_rate": 50.0,
+      "ci_low": 15.0,
+      "ci_high": 85.0
+    },
+    "test": {
+      "wins": 9,
+      "total": 16,
+      "win_rate": 56.25,
+      "ci_low": 33.18,
+      "ci_high": 76.9
+    },
+    "decay": -6.25,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "COIN",
+    "train": {
+      "wins": 2,
+      "total": 2,
+      "win_rate": 100.0,
+      "ci_low": 34.24,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 2,
+      "total": 8,
+      "win_rate": 25.0,
+      "ci_low": 7.15,
+      "ci_high": 59.07
+    },
+    "decay": 75.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "COIN",
+    "train": {
+      "wins": 90,
+      "total": 105,
+      "win_rate": 85.71,
+      "ci_low": 77.76,
+      "ci_high": 91.15
+    },
+    "test": {
+      "wins": 122,
+      "total": 191,
+      "win_rate": 63.87,
+      "ci_low": 56.85,
+      "ci_high": 70.35
+    },
+    "decay": 21.84,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "COIN",
+    "train": {
+      "wins": 2,
+      "total": 415,
+      "win_rate": 0.48,
+      "ci_low": 0.13,
+      "ci_high": 1.74
+    },
+    "test": {
+      "wins": 13,
+      "total": 306,
+      "win_rate": 4.25,
+      "ci_low": 2.5,
+      "ci_high": 7.13
+    },
+    "decay": -3.77,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "COIN",
+    "train": {
+      "wins": 265,
+      "total": 329,
+      "win_rate": 80.55,
+      "ci_low": 75.93,
+      "ci_high": 84.46
+    },
+    "test": {
+      "wins": 199,
+      "total": 304,
+      "win_rate": 65.46,
+      "ci_low": 59.95,
+      "ci_high": 70.58
+    },
+    "decay": 15.09,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "META",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "META",
+    "train": {
+      "wins": 0,
+      "total": 1,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 79.35
+    },
+    "test": {
+      "wins": 0,
+      "total": 1,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 79.35
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "META",
+    "train": {
+      "wins": 10,
+      "total": 27,
+      "win_rate": 37.04,
+      "ci_low": 21.53,
+      "ci_high": 55.77
+    },
+    "test": {
+      "wins": 7,
+      "total": 9,
+      "win_rate": 77.78,
+      "ci_low": 45.26,
+      "ci_high": 93.68
+    },
+    "decay": -40.74,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "META",
+    "train": {
+      "wins": 2,
+      "total": 11,
+      "win_rate": 18.18,
+      "ci_low": 5.14,
+      "ci_high": 47.7
+    },
+    "test": {
+      "wins": 1,
+      "total": 1,
+      "win_rate": 100.0,
+      "ci_low": 20.65,
+      "ci_high": 100.0
+    },
+    "decay": -81.82,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "META",
+    "train": {
+      "wins": 86,
+      "total": 148,
+      "win_rate": 58.11,
+      "ci_low": 50.05,
+      "ci_high": 65.75
+    },
+    "test": {
+      "wins": 68,
+      "total": 124,
+      "win_rate": 54.84,
+      "ci_low": 46.07,
+      "ci_high": 63.32
+    },
+    "decay": 3.27,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "META",
+    "train": {
+      "wins": 19,
+      "total": 264,
+      "win_rate": 7.2,
+      "ci_low": 4.66,
+      "ci_high": 10.97
+    },
+    "test": {
+      "wins": 26,
+      "total": 336,
+      "win_rate": 7.74,
+      "ci_low": 5.34,
+      "ci_high": 11.1
+    },
+    "decay": -0.54,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "META",
+    "train": {
+      "wins": 157,
+      "total": 273,
+      "win_rate": 57.51,
+      "ci_low": 51.58,
+      "ci_high": 63.23
+    },
+    "test": {
+      "wins": 192,
+      "total": 295,
+      "win_rate": 65.08,
+      "ci_low": 59.48,
+      "ci_high": 70.3
+    },
+    "decay": -7.57,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 5,
+      "total": 6,
+      "win_rate": 83.33,
+      "ci_low": 43.65,
+      "ci_high": 96.99
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 5,
+      "total": 7,
+      "win_rate": 71.43,
+      "ci_low": 35.89,
+      "ci_high": 91.78
+    },
+    "test": {
+      "wins": 2,
+      "total": 5,
+      "win_rate": 40.0,
+      "ci_low": 11.76,
+      "ci_high": 76.93
+    },
+    "decay": 31.43,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 132,
+      "total": 175,
+      "win_rate": 75.43,
+      "ci_low": 68.55,
+      "ci_high": 81.22
+    },
+    "test": {
+      "wins": 87,
+      "total": 115,
+      "win_rate": 75.65,
+      "ci_low": 67.06,
+      "ci_high": 82.58
+    },
+    "decay": -0.22,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 0,
+      "total": 437,
+      "win_rate": 0.0,
+      "ci_low": -0.0,
+      "ci_high": 0.87
+    },
+    "test": {
+      "wins": 0,
+      "total": 422,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.9
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "MSFT",
+    "train": {
+      "wins": 266,
+      "total": 343,
+      "win_rate": 77.55,
+      "ci_low": 72.84,
+      "ci_high": 81.65
+    },
+    "test": {
+      "wins": 264,
+      "total": 327,
+      "win_rate": 80.73,
+      "ci_low": 76.11,
+      "ci_high": 84.64
+    },
+    "decay": -3.18,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 1,
+      "total": 1,
+      "win_rate": 100.0,
+      "ci_low": 20.65,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 2,
+      "total": 2,
+      "win_rate": 100.0,
+      "ci_low": 34.24,
+      "ci_high": 100.0
+    },
+    "decay": 0.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 1,
+      "total": 1,
+      "win_rate": 100.0,
+      "ci_low": 20.65,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 7,
+      "total": 8,
+      "win_rate": 87.5,
+      "ci_low": 52.91,
+      "ci_high": 97.76
+    },
+    "decay": 12.5,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 74,
+      "total": 90,
+      "win_rate": 82.22,
+      "ci_low": 73.06,
+      "ci_high": 88.75
+    },
+    "test": {
+      "wins": 71,
+      "total": 89,
+      "win_rate": 79.78,
+      "ci_low": 70.28,
+      "ci_high": 86.81
+    },
+    "decay": 2.44,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 0,
+      "total": 440,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.87
+    },
+    "test": {
+      "wins": 0,
+      "total": 426,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.89
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "MSTR",
+    "train": {
+      "wins": 266,
+      "total": 312,
+      "win_rate": 85.26,
+      "ci_low": 80.89,
+      "ci_high": 88.76
+    },
+    "test": {
+      "wins": 268,
+      "total": 332,
+      "win_rate": 80.72,
+      "ci_low": 76.14,
+      "ci_high": 84.61
+    },
+    "decay": 4.54,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 3,
+      "total": 5,
+      "win_rate": 60.0,
+      "ci_low": 23.07,
+      "ci_high": 88.24
+    },
+    "test": {
+      "wins": 1,
+      "total": 2,
+      "win_rate": 50.0,
+      "ci_low": 9.45,
+      "ci_high": 90.55
+    },
+    "decay": 10.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 9,
+      "total": 14,
+      "win_rate": 64.29,
+      "ci_low": 38.76,
+      "ci_high": 83.66
+    },
+    "test": {
+      "wins": 3,
+      "total": 5,
+      "win_rate": 60.0,
+      "ci_low": 23.07,
+      "ci_high": 88.24
+    },
+    "decay": 4.29,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 5,
+      "total": 6,
+      "win_rate": 83.33,
+      "ci_low": 43.65,
+      "ci_high": 96.99
+    },
+    "test": {
+      "wins": 2,
+      "total": 2,
+      "win_rate": 100.0,
+      "ci_low": 34.24,
+      "ci_high": 100.0
+    },
+    "decay": -16.67,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 116,
+      "total": 173,
+      "win_rate": 67.05,
+      "ci_low": 59.74,
+      "ci_high": 73.62
+    },
+    "test": {
+      "wins": 99,
+      "total": 126,
+      "win_rate": 78.57,
+      "ci_low": 70.62,
+      "ci_high": 84.83
+    },
+    "decay": -11.52,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 10,
+      "total": 348,
+      "win_rate": 2.87,
+      "ci_low": 1.57,
+      "ci_high": 5.21
+    },
+    "test": {
+      "wins": 0,
+      "total": 399,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.95
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "NVDA",
+    "train": {
+      "wins": 213,
+      "total": 318,
+      "win_rate": 66.98,
+      "ci_low": 61.64,
+      "ci_high": 71.92
+    },
+    "test": {
+      "wins": 240,
+      "total": 307,
+      "win_rate": 78.18,
+      "ci_low": 73.22,
+      "ci_high": 82.43
+    },
+    "decay": -11.2,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 1,
+      "total": 1,
+      "win_rate": 100.0,
+      "ci_low": 20.65,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 2,
+      "total": 4,
+      "win_rate": 50.0,
+      "ci_low": 15.0,
+      "ci_high": 85.0
+    },
+    "decay": 50.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 2,
+      "total": 3,
+      "win_rate": 66.67,
+      "ci_low": 20.77,
+      "ci_high": 93.85
+    },
+    "test": {
+      "wins": 5,
+      "total": 6,
+      "win_rate": 83.33,
+      "ci_low": 43.65,
+      "ci_high": 96.99
+    },
+    "decay": -16.66,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 2,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 65.76
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 97,
+      "total": 130,
+      "win_rate": 74.62,
+      "ci_low": 66.5,
+      "ci_high": 81.32
+    },
+    "test": {
+      "wins": 145,
+      "total": 191,
+      "win_rate": 75.92,
+      "ci_low": 69.38,
+      "ci_high": 81.43
+    },
+    "decay": -1.3,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 1,
+      "total": 419,
+      "win_rate": 0.24,
+      "ci_low": 0.04,
+      "ci_high": 1.34
+    },
+    "test": {
+      "wins": 0,
+      "total": 398,
+      "win_rate": 0.0,
+      "ci_low": -0.0,
+      "ci_high": 0.96
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "QQQ",
+    "train": {
+      "wins": 253,
+      "total": 330,
+      "win_rate": 76.67,
+      "ci_low": 71.81,
+      "ci_high": 80.91
+    },
+    "test": {
+      "wins": 260,
+      "total": 332,
+      "win_rate": 78.31,
+      "ci_low": 73.57,
+      "ci_high": 82.41
+    },
+    "decay": -1.64,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "SPY",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "SPY",
+    "train": {
+      "wins": 1,
+      "total": 1,
+      "win_rate": 100.0,
+      "ci_low": 20.65,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 5,
+      "total": 6,
+      "win_rate": 83.33,
+      "ci_low": 43.65,
+      "ci_high": 96.99
+    },
+    "decay": 16.67,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "SPY",
+    "train": {
+      "wins": 3,
+      "total": 3,
+      "win_rate": 100.0,
+      "ci_low": 43.85,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 13,
+      "total": 16,
+      "win_rate": 81.25,
+      "ci_low": 56.99,
+      "ci_high": 93.41
+    },
+    "decay": 18.75,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "SPY",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 1,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 79.35
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "SPY",
+    "train": {
+      "wins": 98,
+      "total": 122,
+      "win_rate": 80.33,
+      "ci_low": 72.4,
+      "ci_high": 86.41
+    },
+    "test": {
+      "wins": 141,
+      "total": 196,
+      "win_rate": 71.94,
+      "ci_low": 65.27,
+      "ci_high": 77.76
+    },
+    "decay": 8.39,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "SPY",
+    "train": {
+      "wins": 0,
+      "total": 423,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.9
+    },
+    "test": {
+      "wins": 0,
+      "total": 370,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 1.03
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "SPY",
+    "train": {
+      "wins": 234,
+      "total": 308,
+      "win_rate": 75.97,
+      "ci_low": 70.9,
+      "ci_high": 80.41
+    },
+    "test": {
+      "wins": 237,
+      "total": 340,
+      "win_rate": 69.71,
+      "ci_low": 64.62,
+      "ci_high": 74.35
+    },
+    "decay": 6.26,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H6_Stoch_MACD",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H7_ADX_Volume",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 3,
+      "total": 5,
+      "win_rate": 60.0,
+      "ci_low": 23.07,
+      "ci_high": 88.24
+    },
+    "test": {
+      "wins": 3,
+      "total": 3,
+      "win_rate": 100.0,
+      "ci_low": 43.85,
+      "ci_high": 100.0
+    },
+    "decay": -40.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H8_RSI_Divergence",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 12,
+      "total": 15,
+      "win_rate": 80.0,
+      "ci_low": 54.81,
+      "ci_high": 92.95
+    },
+    "test": {
+      "wins": 7,
+      "total": 9,
+      "win_rate": 77.78,
+      "ci_low": 45.26,
+      "ci_high": 93.68
+    },
+    "decay": 2.22,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H9_BB_MR_v2",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 2,
+      "total": 2,
+      "win_rate": 100.0,
+      "ci_low": 34.24,
+      "ci_high": 100.0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E5_ADX_ProfitTarget",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 152,
+      "total": 213,
+      "win_rate": 71.36,
+      "ci_low": 64.95,
+      "ci_high": 77.01
+    },
+    "test": {
+      "wins": 168,
+      "total": 214,
+      "win_rate": 78.5,
+      "ci_low": 72.52,
+      "ci_high": 83.48
+    },
+    "decay": -7.14,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "E6_BB_TrailingStop",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 1,
+      "total": 365,
+      "win_rate": 0.27,
+      "ci_low": 0.05,
+      "ci_high": 1.54
+    },
+    "test": {
+      "wins": 0,
+      "total": 405,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.94
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "E7_Multi_Consensus",
+    "ticker": "TSLA",
+    "train": {
+      "wins": 226,
+      "total": 326,
+      "win_rate": 69.33,
+      "ci_low": 64.12,
+      "ci_high": 74.08
+    },
+    "test": {
+      "wins": 256,
+      "total": 348,
+      "win_rate": 73.56,
+      "ci_low": 68.69,
+      "ci_high": 77.92
+    },
+    "decay": -4.23,
+    "status": "GOLDEN"
+  }
+]

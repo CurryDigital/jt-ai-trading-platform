@@ -1,0 +1,65 @@
+# Tang Inventory System - Docker Compose
+# Isolated ports to avoid conflicts with existing nginx (80/443) and openclaw-gateway (18789/18792)
+
+version: '3.8'
+
+services:
+  # Backend API (isolated on port 3001)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inventory-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSL: ${DB_SSL:-true}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      LOW_STOCK_THRESHOLD: ${LOW_STOCK_THRESHOLD:-0.15}
+    ports:
+      - "${API_PORT:-3001}:3000"
+    volumes:
+      - ./backend/src:/app/src
+      - /app/node_modules
+    networks:
+      - inventory-network
+    command: sh -c "npm run migrate && npm start"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Frontend Dashboard (isolated on port 8081)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: inventory-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NODE_ENV: ${NODE_ENV:-development}
+    ports:
+      - "${FRONTEND_PORT:-8081}:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - inventory-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: sh -c "npm run build && npm start"
+
+networks:
+  inventory-network:
+    name: inventory-network
+    driver: bridge

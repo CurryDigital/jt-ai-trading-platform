@@ -1,0 +1,14 @@
+[
+  {
+    "ticker": "AAPL",
+    "strategy": "BB Walk ADX35",
+    "train_wr": 44.2,
+    "train_n": 258,
+    "test_wr": 64.0,
+    "test_n": 172,
+    "decay": -19.8,
+    "ci_lower": 56.8,
+    "ci_upper": 71.1,
+    "avg_return": 0.79,
+    "status": "\u2705 Validated",
+    "is_golden": 

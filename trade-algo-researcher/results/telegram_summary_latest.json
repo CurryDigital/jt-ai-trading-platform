@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-02-24T12:55:58.383512",
+  "golden": [
+    {
+      "ticker": "META",
+      "strategy": "BB Squeeze + RSI <40",
+      "train_wr": 45.6,
+      "train_n": 149,
+      "test_wr": 76.5,
+      "test_n": 34,
+      "decay": -30.8,
+      "ci_lower": 62.2,
+      "ci_upper": 90.7,
+      "avg_return": 0.58,
+      "status": "\ud83c\udfc6 GOLDEN",
+      "is_golden": 

@@ -1,0 +1,17 @@
+{
+  "ticker": "AMD",
+  "strategy": "ADX Trend Pullback",
+  "entry_rules": [
+    "ADX > 25 (trend strength)",
+    "Price < SMA20 (pullback)",
+    "5-day hold"
+  ],
+  "test_win_rate": 80.35714285714286,
+  "n_trades": 56,
+  "avg_return": 0.45357442455908653,
+  "median_return": 0.29225672111794687,
+  "max_gain": 1.9267507232137988,
+  "max_loss": -0.5244950340363785,
+  "sharpe": 0.7612437748808099,
+  "total_return": 25.400167775308848
+}

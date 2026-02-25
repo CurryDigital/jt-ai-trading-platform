@@ -1,0 +1,265 @@
+{
+  "timestamp": "2026-02-23T22:35:30.501892",
+  "new_hypotheses": {
+    "rsi_macd_volume": {
+      "META": {
+        "train_wr": 35.1,
+        "test_wr": 80.0,
+        "n": 5,
+        "decay": 44.9,
+        "ci": [
+          44.9,
+          100
+        ]
+      },
+      "AAPL": {
+        "train_wr": 58.3,
+        "test_wr": 40.0,
+        "n": 15,
+        "decay": -18.3,
+        "ci": [
+          15.2,
+          64.8
+        ]
+      },
+      "COIN": {
+        "train_wr": 50.0,
+        "test_wr": 66.7,
+        "n": 6,
+        "decay": 16.7,
+        "ci": [
+          28.9,
+          100
+        ]
+      }
+    },
+    "candlestick": {
+      "morning_star": {
+        "NVDA": {
+          "test_wr": 93.3,
+          "n": 15
+        },
+        "AAPL": {
+          "test_wr": 55.6,
+          "n": 9
+        },
+        "META": {
+          "test_wr": 80.0,
+          "n": 15
+        },
+        "AMD": {
+          "test_wr": 90.0,
+          "n": 10
+        },
+        "COIN": {
+          "test_wr": 41.7,
+          "n": 12
+        },
+        "TSLA": {
+          "test_wr": 63.2,
+          "n": 19
+        }
+      },
+      "evening_star": {
+        "NVDA": {
+          "test_wr": 25.0,
+          "n": 20
+        },
+        "AAPL": {
+          "test_wr": 50.0,
+          "n": 22
+        },
+        "META": {
+          "test_wr": 25.0,
+          "n": 20
+        },
+        "AMD": {
+          "test_wr": 7.4,
+          "n": 27
+        },
+        "COIN": {
+          "test_wr": 25.0,
+          "n": 16
+        },
+        "TSLA": {
+          "test_wr": 18.2,
+          "n": 22
+        }
+      },
+      "doji": {
+        "NVDA": {
+          "test_wr": 18.8,
+          "n": 69
+        },
+        "AAPL": {
+          "test_wr": 40.5,
+          "n": 37
+        },
+        "META": {
+          "test_wr": 26.7,
+          "n": 45
+        },
+        "AMD": {
+          "test_wr": 30.4,
+          "n": 69
+        },
+        "COIN": {
+          "test_wr": 40.5,
+          "n": 37
+        },
+        "TSLA": {
+          "test_wr": 26.9,
+          "n": 67
+        }
+      }
+    },
+    "bearish_regime": {}
+  },
+  "enhanced_strategies": {
+    "META": {
+      "original": {
+        "wr": 60.1,
+        "n": 168
+      },
+      "volume_filter": {
+        "wr": 62.0,
+        "n": 71
+      },
+      "adx_30": {
+        "wr": 69.6,
+        "n": 92
+      }
+    },
+    "AMD": {
+      "original": {
+        "wr": 69.2,
+        "n": 143
+      },
+      "volume_1.2x": {
+        "wr": 62.5,
+        "n": 40
+      }
+    }
+  },
+  "cross_sector": {
+    "tech": {
+      "NVDA": {
+        "test_wr": 77.8,
+        "train_wr": 67.5,
+        "n": 36,
+        "decay": 10.3
+      },
+      "META": {
+        "test_wr": 63.9,
+        "train_wr": 45.7,
+        "n": 61,
+        "decay": 18.3
+      },
+      "AAPL": {
+        "test_wr": 62.5,
+        "train_wr": 43.8,
+        "n": 16,
+        "decay": 18.8
+      },
+      "MSFT": {
+        "test_wr": 94.1,
+        "train_wr": 87.0,
+        "n": 17,
+        "decay": 7.1
+      }
+    },
+    "crypto": {
+      "COIN": {
+        "test_wr": 61.5,
+        "train_wr": 60.2,
+        "n": 109,
+        "decay": 1.3
+      },
+      "MSTR": {
+        "test_wr": 81.2,
+        "train_wr": 65.8,
+        "n": 16,
+        "decay": 15.5
+      }
+    }
+  },
+  "summary": {
+    "golden": [
+      {
+        "strategy": "bb_squeeze_tech",
+        "ticker": "NVDA",
+        "test_wr": 77.8,
+        "train_wr": 67.5,
+        "n": 36,
+        "decay": 10.3
+      }
+    ],
+    "validated": [
+      {
+        "strategy": "bb_squeeze_tech",
+        "ticker": "META",
+        "test_wr": 63.9,
+        "train_wr": 45.7,
+        "n": 61,
+        "decay": 18.3
+      },
+      {
+        "strategy": "bb_squeeze_tech",
+        "ticker": "AAPL",
+        "test_wr": 62.5,
+        "train_wr": 43.8,
+        "n": 16,
+        "decay": 18.8
+      },
+      {
+        "strategy": "bb_squeeze_crypto",
+        "ticker": "COIN",
+        "test_wr": 61.5,
+        "train_wr": 60.2,
+        "n": 109,
+        "decay": 1.3
+      }
+    ],
+    "near": [
+      {
+        "strategy": "rsi_macd_volume",
+        "ticker": "META",
+        "train_wr": 35.1,
+        "test_wr": 80.0,
+        "n": 5,
+        "decay": 44.9,
+        "ci": [
+          44.9,
+          100
+        ]
+      },
+      {
+        "strategy": "rsi_macd_volume",
+        "ticker": "COIN",
+        "train_wr": 50.0,
+        "test_wr": 66.7,
+        "n": 6,
+        "decay": 16.7,
+        "ci": [
+          28.9,
+          100
+        ]
+      }
+    ],
+    "rejected": [
+      {
+        "strategy": "rsi_macd_volume",
+        "ticker": "AAPL",
+        "train_wr": 58.3,
+        "test_wr": 40.0,
+        "n": 15,
+        "decay": -18.3,
+        "ci": [
+          15.2,
+          64.8
+        ]
+      }
+    ],
+    "total_tested": 9
+  }
+}

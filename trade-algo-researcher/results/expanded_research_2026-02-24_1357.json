@@ -1,0 +1,4002 @@
+[
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 3,
+      "total": 8,
+      "win_rate": 37.5,
+      "ci_low": 13.68,
+      "ci_high": 69.43,
+      "avg_return": -1.67
+    },
+    "test": {
+      "wins": 8,
+      "total": 12,
+      "win_rate": 66.67,
+      "ci_low": 39.06,
+      "ci_high": 86.19,
+      "avg_return": 1.013
+    },
+    "decay": -29.17,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 45,
+      "total": 72,
+      "win_rate": 62.5,
+      "ci_low": 50.95,
+      "ci_high": 72.78,
+      "avg_return": 0.365
+    },
+    "decay": 0,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 62,
+      "total": 141,
+      "win_rate": 43.97,
+      "ci_low": 36.05,
+      "ci_high": 52.22,
+      "avg_return": -1.648
+    },
+    "test": {
+      "wins": 81,
+      "total": 136,
+      "win_rate": 59.56,
+      "ci_low": 51.16,
+      "ci_high": 67.43,
+      "avg_return": 0.737
+    },
+    "decay": -15.59,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 37,
+      "total": 93,
+      "win_rate": 39.78,
+      "ci_low": 30.43,
+      "ci_high": 49.95,
+      "avg_return": -1.401
+    },
+    "test": {
+      "wins": 57,
+      "total": 95,
+      "win_rate": 60.0,
+      "ci_low": 49.95,
+      "ci_high": 69.28,
+      "avg_return": 0.955
+    },
+    "decay": -20.22,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 55,
+      "total": 114,
+      "win_rate": 48.25,
+      "ci_low": 39.28,
+      "ci_high": 57.33,
+      "avg_return": -1.216
+    },
+    "test": {
+      "wins": 92,
+      "total": 157,
+      "win_rate": 58.6,
+      "ci_low": 50.78,
+      "ci_high": 66.01,
+      "avg_return": 0.31
+    },
+    "decay": -10.35,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "AAPL",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 3,
+      "total": 8,
+      "win_rate": 37.5,
+      "ci_low": 13.68,
+      "ci_high": 69.43,
+      "avg_return": -1.67
+    },
+    "test": {
+      "wins": 8,
+      "total": 12,
+      "win_rate": 66.67,
+      "ci_low": 39.06,
+      "ci_high": 86.19,
+      "avg_return": 1.013
+    },
+    "decay": -29.17,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "AAPL",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 46,
+      "total": 93,
+      "win_rate": 49.46,
+      "ci_low": 39.53,
+      "ci_high": 59.44,
+      "avg_return": -1.401
+    },
+    "test": {
+      "wins": 57,
+      "total": 95,
+      "win_rate": 60.0,
+      "ci_low": 49.95,
+      "ci_high": 69.28,
+      "avg_return": 0.955
+    },
+    "decay": -10.54,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "AAPL",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 61,
+      "total": 114,
+      "win_rate": 53.51,
+      "ci_low": 44.39,
+      "ci_high": 62.4,
+      "avg_return": -1.216
+    },
+    "test": {
+      "wins": 92,
+      "total": 157,
+      "win_rate": 58.6,
+      "ci_low": 50.78,
+      "ci_high": 66.01,
+      "avg_return": 0.31
+    },
+    "decay": -5.09,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 12,
+      "total": 25,
+      "win_rate": 48.0,
+      "ci_low": 30.03,
+      "ci_high": 66.5,
+      "avg_return": 0.557
+    },
+    "test": {
+      "wins": 5,
+      "total": 11,
+      "win_rate": 45.45,
+      "ci_low": 21.27,
+      "ci_high": 71.99,
+      "avg_return": -1.944
+    },
+    "decay": 2.55,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 19,
+      "total": 39,
+      "win_rate": 48.72,
+      "ci_low": 33.86,
+      "ci_high": 63.8,
+      "avg_return": -0.194
+    },
+    "test": {
+      "wins": 20,
+      "total": 60,
+      "win_rate": 33.33,
+      "ci_low": 22.73,
+      "ci_high": 45.94,
+      "avg_return": -0.89
+    },
+    "decay": 15.39,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 7,
+      "total": 20,
+      "win_rate": 35.0,
+      "ci_low": 18.12,
+      "ci_high": 56.71,
+      "avg_return": -0.947
+    },
+    "test": {
+      "wins": 9,
+      "total": 16,
+      "win_rate": 56.25,
+      "ci_low": 33.18,
+      "ci_high": 76.9,
+      "avg_return": 0.53
+    },
+    "decay": -21.25,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 9,
+      "total": 26,
+      "win_rate": 34.62,
+      "ci_low": 19.41,
+      "ci_high": 53.78,
+      "avg_return": -3.983
+    },
+    "test": {
+      "wins": 2,
+      "total": 8,
+      "win_rate": 25.0,
+      "ci_low": 7.15,
+      "ci_high": 59.07,
+      "avg_return": -3.625
+    },
+    "decay": 9.62,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "AAPL",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 17,
+      "total": 25,
+      "win_rate": 68.0,
+      "ci_low": 48.41,
+      "ci_high": 82.8,
+      "avg_return": 0.557
+    },
+    "test": {
+      "wins": 5,
+      "total": 11,
+      "win_rate": 45.45,
+      "ci_low": 21.27,
+      "ci_high": 71.99,
+      "avg_return": -1.944
+    },
+    "decay": 22.55,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "AAPL",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 24,
+      "total": 39,
+      "win_rate": 61.54,
+      "ci_low": 45.9,
+      "ci_high": 75.11,
+      "avg_return": -0.194
+    },
+    "test": {
+      "wins": 20,
+      "total": 60,
+      "win_rate": 33.33,
+      "ci_low": 22.73,
+      "ci_high": 45.94,
+      "avg_return": -0.89
+    },
+    "decay": 28.21,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 39,
+      "total": 93,
+      "win_rate": 41.94,
+      "ci_low": 32.42,
+      "ci_high": 52.09,
+      "avg_return": -0.798
+    },
+    "test": {
+      "wins": 53,
+      "total": 95,
+      "win_rate": 55.79,
+      "ci_low": 45.77,
+      "ci_high": 65.36,
+      "avg_return": 0.634
+    },
+    "decay": -13.85,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "AAPL",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 44,
+      "total": 93,
+      "win_rate": 47.31,
+      "ci_low": 37.47,
+      "ci_high": 57.36,
+      "avg_return": -1.587
+    },
+    "test": {
+      "wins": 60,
+      "total": 95,
+      "win_rate": 63.16,
+      "ci_low": 53.12,
+      "ci_high": 72.17,
+      "avg_return": 1.476
+    },
+    "decay": -15.85,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 11,
+      "total": 17,
+      "win_rate": 64.71,
+      "ci_low": 41.3,
+      "ci_high": 82.69,
+      "avg_return": 0.188
+    },
+    "test": {
+      "wins": 10,
+      "total": 16,
+      "win_rate": 62.5,
+      "ci_low": 38.64,
+      "ci_high": 81.52,
+      "avg_return": 0.311
+    },
+    "decay": 2.21,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 160,
+      "total": 224,
+      "win_rate": 71.43,
+      "ci_low": 65.19,
+      "ci_high": 76.94,
+      "avg_return": 0.207
+    },
+    "test": {
+      "wins": 171,
+      "total": 234,
+      "win_rate": 73.08,
+      "ci_low": 67.05,
+      "ci_high": 78.35,
+      "avg_return": 0.302
+    },
+    "decay": -1.65,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 139,
+      "total": 202,
+      "win_rate": 68.81,
+      "ci_low": 62.12,
+      "ci_high": 74.8,
+      "avg_return": 0.185
+    },
+    "test": {
+      "wins": 174,
+      "total": 227,
+      "win_rate": 76.65,
+      "ci_low": 70.73,
+      "ci_high": 81.68,
+      "avg_return": 0.344
+    },
+    "decay": -7.84,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 54,
+      "total": 73,
+      "win_rate": 73.97,
+      "ci_low": 62.89,
+      "ci_high": 82.66,
+      "avg_return": 0.211
+    },
+    "test": {
+      "wins": 30,
+      "total": 46,
+      "win_rate": 65.22,
+      "ci_low": 50.77,
+      "ci_high": 77.32,
+      "avg_return": 0.136
+    },
+    "decay": 8.75,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 249,
+      "total": 342,
+      "win_rate": 72.81,
+      "ci_low": 67.86,
+      "ci_high": 77.25,
+      "avg_return": 0.25
+    },
+    "test": {
+      "wins": 267,
+      "total": 354,
+      "win_rate": 75.42,
+      "ci_low": 70.68,
+      "ci_high": 79.62,
+      "avg_return": 0.303
+    },
+    "decay": -2.61,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "AMD",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 11,
+      "total": 17,
+      "win_rate": 64.71,
+      "ci_low": 41.3,
+      "ci_high": 82.69,
+      "avg_return": 0.188
+    },
+    "test": {
+      "wins": 10,
+      "total": 16,
+      "win_rate": 62.5,
+      "ci_low": 38.64,
+      "ci_high": 81.52,
+      "avg_return": 0.311
+    },
+    "decay": 2.21,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "AMD",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 54,
+      "total": 73,
+      "win_rate": 73.97,
+      "ci_low": 62.89,
+      "ci_high": 82.66,
+      "avg_return": 0.211
+    },
+    "test": {
+      "wins": 30,
+      "total": 46,
+      "win_rate": 65.22,
+      "ci_low": 50.77,
+      "ci_high": 77.32,
+      "avg_return": 0.136
+    },
+    "decay": 8.75,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "AMD",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 249,
+      "total": 342,
+      "win_rate": 72.81,
+      "ci_low": 67.86,
+      "ci_high": 77.25,
+      "avg_return": 0.25
+    },
+    "test": {
+      "wins": 267,
+      "total": 354,
+      "win_rate": 75.42,
+      "ci_low": 70.68,
+      "ci_high": 79.62,
+      "avg_return": 0.303
+    },
+    "decay": -2.61,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 7,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 35.43,
+      "avg_return": -0.586
+    },
+    "test": {
+      "wins": 1,
+      "total": 10,
+      "win_rate": 10.0,
+      "ci_low": 1.79,
+      "ci_high": 40.42,
+      "avg_return": -0.678
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 39,
+      "total": 148,
+      "win_rate": 26.35,
+      "ci_low": 19.92,
+      "ci_high": 33.98,
+      "avg_return": -0.24
+    },
+    "test": {
+      "wins": 36,
+      "total": 135,
+      "win_rate": 26.67,
+      "ci_low": 19.93,
+      "ci_high": 34.7,
+      "avg_return": -0.219
+    },
+    "decay": -0.32,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 16,
+      "total": 64,
+      "win_rate": 25.0,
+      "ci_low": 16.01,
+      "ci_high": 36.82,
+      "avg_return": -0.219
+    },
+    "test": {
+      "wins": 14,
+      "total": 60,
+      "win_rate": 23.33,
+      "ci_low": 14.44,
+      "ci_high": 35.44,
+      "avg_return": -0.186
+    },
+    "decay": 1.67,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "AMD",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 7,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 35.43,
+      "avg_return": -0.586
+    },
+    "test": {
+      "wins": 1,
+      "total": 10,
+      "win_rate": 10.0,
+      "ci_low": 1.79,
+      "ci_high": 40.42,
+      "avg_return": -0.678
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "AMD",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 39,
+      "total": 148,
+      "win_rate": 26.35,
+      "ci_low": 19.92,
+      "ci_high": 33.98,
+      "avg_return": -0.24
+    },
+    "test": {
+      "wins": 36,
+      "total": 135,
+      "win_rate": 26.67,
+      "ci_low": 19.93,
+      "ci_high": 34.7,
+      "avg_return": -0.219
+    },
+    "decay": -0.32,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 50,
+      "total": 73,
+      "win_rate": 68.49,
+      "ci_low": 57.14,
+      "ci_high": 78.0,
+      "avg_return": 0.122
+    },
+    "test": {
+      "wins": 26,
+      "total": 46,
+      "win_rate": 56.52,
+      "ci_low": 42.25,
+      "ci_high": 69.79,
+      "avg_return": 0.009
+    },
+    "decay": 11.97,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "AMD",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 58,
+      "total": 73,
+      "win_rate": 79.45,
+      "ci_low": 68.83,
+      "ci_high": 87.13,
+      "avg_return": 0.47
+    },
+    "test": {
+      "wins": 37,
+      "total": 46,
+      "win_rate": 80.43,
+      "ci_low": 66.83,
+      "ci_high": 89.35,
+      "avg_return": 0.559
+    },
+    "decay": -0.98,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 19,
+      "total": 21,
+      "win_rate": 90.48,
+      "ci_low": 71.09,
+      "ci_high": 97.35,
+      "avg_return": 0.405
+    },
+    "test": {
+      "wins": 5,
+      "total": 11,
+      "win_rate": 45.45,
+      "ci_low": 21.27,
+      "ci_high": 71.99,
+      "avg_return": -0.19
+    },
+    "decay": 45.03,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 208,
+      "total": 252,
+      "win_rate": 82.54,
+      "ci_low": 77.37,
+      "ci_high": 86.73,
+      "avg_return": 0.31
+    },
+    "test": {
+      "wins": 104,
+      "total": 162,
+      "win_rate": 64.2,
+      "ci_low": 56.56,
+      "ci_high": 71.17,
+      "avg_return": 0.156
+    },
+    "decay": 18.34,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 197,
+      "total": 231,
+      "win_rate": 85.28,
+      "ci_low": 80.14,
+      "ci_high": 89.27,
+      "avg_return": 0.311
+    },
+    "test": {
+      "wins": 109,
+      "total": 173,
+      "win_rate": 63.01,
+      "ci_low": 55.6,
+      "ci_high": 69.84,
+      "avg_return": 0.163
+    },
+    "decay": 22.27,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 37,
+      "total": 45,
+      "win_rate": 82.22,
+      "ci_low": 68.67,
+      "ci_high": 90.71,
+      "avg_return": 0.267
+    },
+    "test": {
+      "wins": 60,
+      "total": 97,
+      "win_rate": 61.86,
+      "ci_low": 51.91,
+      "ci_high": 70.9,
+      "avg_return": 0.134
+    },
+    "decay": 20.36,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 335,
+      "total": 405,
+      "win_rate": 82.72,
+      "ci_low": 78.73,
+      "ci_high": 86.09,
+      "avg_return": 0.289
+    },
+    "test": {
+      "wins": 131,
+      "total": 206,
+      "win_rate": 63.59,
+      "ci_low": 56.83,
+      "ci_high": 69.86,
+      "avg_return": 0.124
+    },
+    "decay": 19.13,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "COIN",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 19,
+      "total": 21,
+      "win_rate": 90.48,
+      "ci_low": 71.09,
+      "ci_high": 97.35,
+      "avg_return": 0.405
+    },
+    "test": {
+      "wins": 5,
+      "total": 11,
+      "win_rate": 45.45,
+      "ci_low": 21.27,
+      "ci_high": 71.99,
+      "avg_return": -0.19
+    },
+    "decay": 45.03,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "COIN",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 37,
+      "total": 45,
+      "win_rate": 82.22,
+      "ci_low": 68.67,
+      "ci_high": 90.71,
+      "avg_return": 0.267
+    },
+    "test": {
+      "wins": 60,
+      "total": 97,
+      "win_rate": 61.86,
+      "ci_low": 51.91,
+      "ci_high": 70.9,
+      "avg_return": 0.134
+    },
+    "decay": 20.36,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "COIN",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 335,
+      "total": 405,
+      "win_rate": 82.72,
+      "ci_low": 78.73,
+      "ci_high": 86.09,
+      "avg_return": 0.289
+    },
+    "test": {
+      "wins": 131,
+      "total": 206,
+      "win_rate": 63.59,
+      "ci_low": 56.83,
+      "ci_high": 69.86,
+      "avg_return": 0.124
+    },
+    "decay": 19.13,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 5,
+      "total": 8,
+      "win_rate": 62.5,
+      "ci_low": 30.57,
+      "ci_high": 86.32,
+      "avg_return": -0.02
+    },
+    "test": {
+      "wins": 13,
+      "total": 21,
+      "win_rate": 61.9,
+      "ci_low": 40.88,
+      "ci_high": 79.25,
+      "avg_return": -0.056
+    },
+    "decay": 0.6,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 32,
+      "total": 169,
+      "win_rate": 18.93,
+      "ci_low": 13.74,
+      "ci_high": 25.51,
+      "avg_return": -0.265
+    },
+    "test": {
+      "wins": 29,
+      "total": 97,
+      "win_rate": 29.9,
+      "ci_low": 21.69,
+      "ci_high": 39.63,
+      "avg_return": -0.207
+    },
+    "decay": -10.97,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 10,
+      "total": 78,
+      "win_rate": 12.82,
+      "ci_low": 7.12,
+      "ci_high": 22.02,
+      "avg_return": -0.299
+    },
+    "test": {
+      "wins": 10,
+      "total": 46,
+      "win_rate": 21.74,
+      "ci_low": 12.26,
+      "ci_high": 35.57,
+      "avg_return": -0.312
+    },
+    "decay": -8.92,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "COIN",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 5,
+      "total": 8,
+      "win_rate": 62.5,
+      "ci_low": 30.57,
+      "ci_high": 86.32,
+      "avg_return": -0.02
+    },
+    "test": {
+      "wins": 13,
+      "total": 21,
+      "win_rate": 61.9,
+      "ci_low": 40.88,
+      "ci_high": 79.25,
+      "avg_return": -0.056
+    },
+    "decay": 0.6,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "COIN",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 32,
+      "total": 169,
+      "win_rate": 18.93,
+      "ci_low": 13.74,
+      "ci_high": 25.51,
+      "avg_return": -0.265
+    },
+    "test": {
+      "wins": 29,
+      "total": 97,
+      "win_rate": 29.9,
+      "ci_low": 21.69,
+      "ci_high": 39.63,
+      "avg_return": -0.207
+    },
+    "decay": -10.97,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 33,
+      "total": 45,
+      "win_rate": 73.33,
+      "ci_low": 58.96,
+      "ci_high": 84.04,
+      "avg_return": 0.138
+    },
+    "test": {
+      "wins": 64,
+      "total": 97,
+      "win_rate": 65.98,
+      "ci_low": 56.1,
+      "ci_high": 74.64,
+      "avg_return": 0.153
+    },
+    "decay": 7.35,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "COIN",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 37,
+      "total": 45,
+      "win_rate": 82.22,
+      "ci_low": 68.67,
+      "ci_high": 90.71,
+      "avg_return": 0.502
+    },
+    "test": {
+      "wins": 64,
+      "total": 97,
+      "win_rate": 65.98,
+      "ci_low": 56.1,
+      "ci_high": 74.64,
+      "avg_return": 0.315
+    },
+    "decay": 16.24,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 6,
+      "total": 15,
+      "win_rate": 40.0,
+      "ci_low": 19.82,
+      "ci_high": 64.25,
+      "avg_return": -0.036
+    },
+    "test": {
+      "wins": 12,
+      "total": 15,
+      "win_rate": 80.0,
+      "ci_low": 54.81,
+      "ci_high": 92.95,
+      "avg_return": 0.612
+    },
+    "decay": -40.0,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 97,
+      "total": 150,
+      "win_rate": 64.67,
+      "ci_low": 56.74,
+      "ci_high": 71.86,
+      "avg_return": 0.248
+    },
+    "test": {
+      "wins": 156,
+      "total": 231,
+      "win_rate": 67.53,
+      "ci_low": 61.25,
+      "ci_high": 73.24,
+      "avg_return": 0.276
+    },
+    "decay": -2.86,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 92,
+      "total": 154,
+      "win_rate": 59.74,
+      "ci_low": 51.85,
+      "ci_high": 67.16,
+      "avg_return": 0.126
+    },
+    "test": {
+      "wins": 138,
+      "total": 181,
+      "win_rate": 76.24,
+      "ci_low": 69.54,
+      "ci_high": 81.86,
+      "avg_return": 0.434
+    },
+    "decay": -16.5,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 43,
+      "total": 79,
+      "win_rate": 54.43,
+      "ci_low": 43.5,
+      "ci_high": 64.95,
+      "avg_return": 0.053
+    },
+    "test": {
+      "wins": 31,
+      "total": 53,
+      "win_rate": 58.49,
+      "ci_low": 45.09,
+      "ci_high": 70.74,
+      "avg_return": 0.292
+    },
+    "decay": -4.06,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 113,
+      "total": 176,
+      "win_rate": 64.2,
+      "ci_low": 56.89,
+      "ci_high": 70.91,
+      "avg_return": 0.214
+    },
+    "test": {
+      "wins": 203,
+      "total": 291,
+      "win_rate": 69.76,
+      "ci_low": 64.25,
+      "ci_high": 74.75,
+      "avg_return": 0.24
+    },
+    "decay": -5.56,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "META",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 6,
+      "total": 15,
+      "win_rate": 40.0,
+      "ci_low": 19.82,
+      "ci_high": 64.25,
+      "avg_return": -0.036
+    },
+    "test": {
+      "wins": 12,
+      "total": 15,
+      "win_rate": 80.0,
+      "ci_low": 54.81,
+      "ci_high": 92.95,
+      "avg_return": 0.612
+    },
+    "decay": -40.0,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "META",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 43,
+      "total": 79,
+      "win_rate": 54.43,
+      "ci_low": 43.5,
+      "ci_high": 64.95,
+      "avg_return": 0.053
+    },
+    "test": {
+      "wins": 31,
+      "total": 53,
+      "win_rate": 58.49,
+      "ci_low": 45.09,
+      "ci_high": 70.74,
+      "avg_return": 0.292
+    },
+    "decay": -4.06,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "META",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 113,
+      "total": 176,
+      "win_rate": 64.2,
+      "ci_low": 56.89,
+      "ci_high": 70.91,
+      "avg_return": 0.214
+    },
+    "test": {
+      "wins": 203,
+      "total": 291,
+      "win_rate": 69.76,
+      "ci_low": 64.25,
+      "ci_high": 74.75,
+      "avg_return": 0.24
+    },
+    "decay": -5.56,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 6,
+      "total": 15,
+      "win_rate": 40.0,
+      "ci_low": 19.82,
+      "ci_high": 64.25,
+      "avg_return": -0.044
+    },
+    "test": {
+      "wins": 3,
+      "total": 13,
+      "win_rate": 23.08,
+      "ci_low": 8.18,
+      "ci_high": 50.26,
+      "avg_return": -0.363
+    },
+    "decay": 16.92,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 31,
+      "total": 72,
+      "win_rate": 43.06,
+      "ci_low": 32.26,
+      "ci_high": 54.56,
+      "avg_return": -0.055
+    },
+    "test": {
+      "wins": 31,
+      "total": 109,
+      "win_rate": 28.44,
+      "ci_low": 20.82,
+      "ci_high": 37.53,
+      "avg_return": -0.296
+    },
+    "decay": 14.62,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 6,
+      "total": 15,
+      "win_rate": 40.0,
+      "ci_low": 19.82,
+      "ci_high": 64.25,
+      "avg_return": -0.192
+    },
+    "test": {
+      "wins": 18,
+      "total": 48,
+      "win_rate": 37.5,
+      "ci_low": 25.22,
+      "ci_high": 51.64,
+      "avg_return": 0.1
+    },
+    "decay": 2.5,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "META",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 6,
+      "total": 15,
+      "win_rate": 40.0,
+      "ci_low": 19.82,
+      "ci_high": 64.25,
+      "avg_return": -0.044
+    },
+    "test": {
+      "wins": 3,
+      "total": 13,
+      "win_rate": 23.08,
+      "ci_low": 8.18,
+      "ci_high": 50.26,
+      "avg_return": -0.363
+    },
+    "decay": 16.92,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "META",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 31,
+      "total": 72,
+      "win_rate": 43.06,
+      "ci_low": 32.26,
+      "ci_high": 54.56,
+      "avg_return": -0.055
+    },
+    "test": {
+      "wins": 31,
+      "total": 109,
+      "win_rate": 28.44,
+      "ci_low": 20.82,
+      "ci_high": 37.53,
+      "avg_return": -0.296
+    },
+    "decay": 14.62,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 41,
+      "total": 79,
+      "win_rate": 51.9,
+      "ci_low": 41.05,
+      "ci_high": 62.57,
+      "avg_return": 0.067
+    },
+    "test": {
+      "wins": 30,
+      "total": 53,
+      "win_rate": 56.6,
+      "ci_low": 43.27,
+      "ci_high": 69.05,
+      "avg_return": 0.168
+    },
+    "decay": -4.7,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "META",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 50,
+      "total": 79,
+      "win_rate": 63.29,
+      "ci_low": 52.28,
+      "ci_high": 73.07,
+      "avg_return": 0.169
+    },
+    "test": {
+      "wins": 33,
+      "total": 53,
+      "win_rate": 62.26,
+      "ci_low": 48.81,
+      "ci_high": 74.06,
+      "avg_return": 0.399
+    },
+    "decay": 1.03,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 16,
+      "total": 23,
+      "win_rate": 69.57,
+      "ci_low": 49.13,
+      "ci_high": 84.4,
+      "avg_return": 0.175
+    },
+    "test": {
+      "wins": 13,
+      "total": 16,
+      "win_rate": 81.25,
+      "ci_low": 56.99,
+      "ci_high": 93.41,
+      "avg_return": 0.125
+    },
+    "decay": -11.68,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 179,
+      "total": 231,
+      "win_rate": 77.49,
+      "ci_low": 71.68,
+      "ci_high": 82.4,
+      "avg_return": 0.215
+    },
+    "test": {
+      "wins": 212,
+      "total": 253,
+      "win_rate": 83.79,
+      "ci_low": 78.75,
+      "ci_high": 87.82,
+      "avg_return": 0.264
+    },
+    "decay": -6.3,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 198,
+      "total": 250,
+      "win_rate": 79.2,
+      "ci_low": 73.75,
+      "ci_high": 83.77,
+      "avg_return": 0.202
+    },
+    "test": {
+      "wins": 192,
+      "total": 234,
+      "win_rate": 82.05,
+      "ci_low": 76.63,
+      "ci_high": 86.44,
+      "avg_return": 0.237
+    },
+    "decay": -2.85,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 26,
+      "total": 46,
+      "win_rate": 56.52,
+      "ci_low": 42.25,
+      "ci_high": 69.79,
+      "avg_return": 0.098
+    },
+    "test": {
+      "wins": 25,
+      "total": 38,
+      "win_rate": 65.79,
+      "ci_low": 49.89,
+      "ci_high": 78.79,
+      "avg_return": 0.164
+    },
+    "decay": -9.27,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 367,
+      "total": 450,
+      "win_rate": 81.56,
+      "ci_low": 77.71,
+      "ci_high": 84.87,
+      "avg_return": 0.225
+    },
+    "test": {
+      "wins": 346,
+      "total": 424,
+      "win_rate": 81.6,
+      "ci_low": 77.64,
+      "ci_high": 85.0,
+      "avg_return": 0.246
+    },
+    "decay": -0.04,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "MSFT",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 16,
+      "total": 23,
+      "win_rate": 69.57,
+      "ci_low": 49.13,
+      "ci_high": 84.4,
+      "avg_return": 0.175
+    },
+    "test": {
+      "wins": 13,
+      "total": 16,
+      "win_rate": 81.25,
+      "ci_low": 56.99,
+      "ci_high": 93.41,
+      "avg_return": 0.125
+    },
+    "decay": -11.68,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "MSFT",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 26,
+      "total": 46,
+      "win_rate": 56.52,
+      "ci_low": 42.25,
+      "ci_high": 69.79,
+      "avg_return": 0.098
+    },
+    "test": {
+      "wins": 25,
+      "total": 38,
+      "win_rate": 65.79,
+      "ci_low": 49.89,
+      "ci_high": 78.79,
+      "avg_return": 0.164
+    },
+    "decay": -9.27,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "MSFT",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 367,
+      "total": 450,
+      "win_rate": 81.56,
+      "ci_low": 77.71,
+      "ci_high": 84.87,
+      "avg_return": 0.225
+    },
+    "test": {
+      "wins": 346,
+      "total": 424,
+      "win_rate": 81.6,
+      "ci_low": 77.64,
+      "ci_high": 85.0,
+      "avg_return": 0.246
+    },
+    "decay": -0.04,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 4,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 48.99,
+      "avg_return": -0.538
+    },
+    "test": {
+      "wins": 1,
+      "total": 4,
+      "win_rate": 25.0,
+      "ci_low": 4.56,
+      "ci_high": 69.94,
+      "avg_return": -0.292
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 37,
+      "total": 176,
+      "win_rate": 21.02,
+      "ci_low": 15.65,
+      "ci_high": 27.63,
+      "avg_return": -0.215
+    },
+    "test": {
+      "wins": 26,
+      "total": 164,
+      "win_rate": 15.85,
+      "ci_low": 11.05,
+      "ci_high": 22.22,
+      "avg_return": -0.227
+    },
+    "decay": 5.17,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 10,
+      "total": 80,
+      "win_rate": 12.5,
+      "ci_low": 6.93,
+      "ci_high": 21.5,
+      "avg_return": -0.262
+    },
+    "test": {
+      "wins": 16,
+      "total": 86,
+      "win_rate": 18.6,
+      "ci_low": 11.79,
+      "ci_high": 28.11,
+      "avg_return": -0.218
+    },
+    "decay": -6.1,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "MSFT",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 4,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 48.99,
+      "avg_return": -0.538
+    },
+    "test": {
+      "wins": 1,
+      "total": 4,
+      "win_rate": 25.0,
+      "ci_low": 4.56,
+      "ci_high": 69.94,
+      "avg_return": -0.292
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "MSFT",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 37,
+      "total": 176,
+      "win_rate": 21.02,
+      "ci_low": 15.65,
+      "ci_high": 27.63,
+      "avg_return": -0.215
+    },
+    "test": {
+      "wins": 26,
+      "total": 164,
+      "win_rate": 15.85,
+      "ci_low": 11.05,
+      "ci_high": 22.22,
+      "avg_return": -0.227
+    },
+    "decay": 5.17,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 26,
+      "total": 46,
+      "win_rate": 56.52,
+      "ci_low": 42.25,
+      "ci_high": 69.79,
+      "avg_return": 0.049
+    },
+    "test": {
+      "wins": 25,
+      "total": 38,
+      "win_rate": 65.79,
+      "ci_low": 49.89,
+      "ci_high": 78.79,
+      "avg_return": 0.114
+    },
+    "decay": -9.27,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "MSFT",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 40,
+      "total": 46,
+      "win_rate": 86.96,
+      "ci_low": 74.33,
+      "ci_high": 93.88,
+      "avg_return": 0.432
+    },
+    "test": {
+      "wins": 29,
+      "total": 38,
+      "win_rate": 76.32,
+      "ci_low": 60.79,
+      "ci_high": 87.01,
+      "avg_return": 0.362
+    },
+    "decay": 10.64,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 16,
+      "total": 19,
+      "win_rate": 84.21,
+      "ci_low": 62.43,
+      "ci_high": 94.48,
+      "avg_return": 0.373
+    },
+    "test": {
+      "wins": 18,
+      "total": 20,
+      "win_rate": 90.0,
+      "ci_low": 69.9,
+      "ci_high": 97.21,
+      "avg_return": 0.198
+    },
+    "decay": -5.79,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 208,
+      "total": 244,
+      "win_rate": 85.25,
+      "ci_low": 80.25,
+      "ci_high": 89.15,
+      "avg_return": 0.315
+    },
+    "test": {
+      "wins": 200,
+      "total": 253,
+      "win_rate": 79.05,
+      "ci_low": 73.62,
+      "ci_high": 83.61,
+      "avg_return": 0.269
+    },
+    "decay": 6.2,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 224,
+      "total": 258,
+      "win_rate": 86.82,
+      "ci_low": 82.15,
+      "ci_high": 90.41,
+      "avg_return": 0.304
+    },
+    "test": {
+      "wins": 185,
+      "total": 233,
+      "win_rate": 79.4,
+      "ci_low": 73.75,
+      "ci_high": 84.1,
+      "avg_return": 0.259
+    },
+    "decay": 7.42,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 17,
+      "total": 20,
+      "win_rate": 85.0,
+      "ci_low": 63.96,
+      "ci_high": 94.76,
+      "avg_return": 0.498
+    },
+    "test": {
+      "wins": 23,
+      "total": 29,
+      "win_rate": 79.31,
+      "ci_low": 61.61,
+      "ci_high": 90.15,
+      "avg_return": 0.113
+    },
+    "decay": 5.69,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 402,
+      "total": 473,
+      "win_rate": 84.99,
+      "ci_low": 81.49,
+      "ci_high": 87.93,
+      "avg_return": 0.282
+    },
+    "test": {
+      "wins": 339,
+      "total": 424,
+      "win_rate": 79.95,
+      "ci_low": 75.88,
+      "ci_high": 83.49,
+      "avg_return": 0.261
+    },
+    "decay": 5.04,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "MSTR",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 16,
+      "total": 19,
+      "win_rate": 84.21,
+      "ci_low": 62.43,
+      "ci_high": 94.48,
+      "avg_return": 0.373
+    },
+    "test": {
+      "wins": 18,
+      "total": 20,
+      "win_rate": 90.0,
+      "ci_low": 69.9,
+      "ci_high": 97.21,
+      "avg_return": 0.198
+    },
+    "decay": -5.79,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "MSTR",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 17,
+      "total": 20,
+      "win_rate": 85.0,
+      "ci_low": 63.96,
+      "ci_high": 94.76,
+      "avg_return": 0.498
+    },
+    "test": {
+      "wins": 23,
+      "total": 29,
+      "win_rate": 79.31,
+      "ci_low": 61.61,
+      "ci_high": 90.15,
+      "avg_return": 0.113
+    },
+    "decay": 5.69,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "MSTR",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 402,
+      "total": 473,
+      "win_rate": 84.99,
+      "ci_low": 81.49,
+      "ci_high": 87.93,
+      "avg_return": 0.282
+    },
+    "test": {
+      "wins": 339,
+      "total": 424,
+      "win_rate": 79.95,
+      "ci_low": 75.88,
+      "ci_high": 83.49,
+      "avg_return": 0.261
+    },
+    "decay": 5.04,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 2,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 65.76,
+      "avg_return": -0.476
+    },
+    "test": {
+      "wins": 0,
+      "total": 5,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 43.45,
+      "avg_return": -0.17
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 29,
+      "total": 197,
+      "win_rate": 14.72,
+      "ci_low": 10.45,
+      "ci_high": 20.34,
+      "avg_return": -0.296
+    },
+    "test": {
+      "wins": 28,
+      "total": 162,
+      "win_rate": 17.28,
+      "ci_low": 12.24,
+      "ci_high": 23.85,
+      "avg_return": -0.258
+    },
+    "decay": -2.56,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 11,
+      "total": 105,
+      "win_rate": 10.48,
+      "ci_low": 5.95,
+      "ci_high": 17.79,
+      "avg_return": -0.313
+    },
+    "test": {
+      "wins": 12,
+      "total": 85,
+      "win_rate": 14.12,
+      "ci_low": 8.26,
+      "ci_high": 23.07,
+      "avg_return": -0.256
+    },
+    "decay": -3.64,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "MSTR",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 2,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 65.76,
+      "avg_return": -0.476
+    },
+    "test": {
+      "wins": 0,
+      "total": 5,
+      "win_rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 43.45,
+      "avg_return": -0.17
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "MSTR",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 29,
+      "total": 197,
+      "win_rate": 14.72,
+      "ci_low": 10.45,
+      "ci_high": 20.34,
+      "avg_return": -0.296
+    },
+    "test": {
+      "wins": 28,
+      "total": 162,
+      "win_rate": 17.28,
+      "ci_low": 12.24,
+      "ci_high": 23.85,
+      "avg_return": -0.258
+    },
+    "decay": -2.56,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 15,
+      "total": 20,
+      "win_rate": 75.0,
+      "ci_low": 53.13,
+      "ci_high": 88.81,
+      "avg_return": 0.287
+    },
+    "test": {
+      "wins": 20,
+      "total": 29,
+      "win_rate": 68.97,
+      "ci_low": 50.77,
+      "ci_high": 82.72,
+      "avg_return": 0.064
+    },
+    "decay": 6.03,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "MSTR",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 18,
+      "total": 20,
+      "win_rate": 90.0,
+      "ci_low": 69.9,
+      "ci_high": 97.21,
+      "avg_return": 1.013
+    },
+    "test": {
+      "wins": 26,
+      "total": 29,
+      "win_rate": 89.66,
+      "ci_low": 73.61,
+      "ci_high": 96.42,
+      "avg_return": 0.406
+    },
+    "decay": 0.34,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 5,
+      "total": 14,
+      "win_rate": 35.71,
+      "ci_low": 16.34,
+      "ci_high": 61.24,
+      "avg_return": -0.45
+    },
+    "test": {
+      "wins": 8,
+      "total": 13,
+      "win_rate": 61.54,
+      "ci_low": 35.52,
+      "ci_high": 82.29,
+      "avg_return": 0.269
+    },
+    "decay": -25.83,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 131,
+      "total": 194,
+      "win_rate": 67.53,
+      "ci_low": 60.65,
+      "ci_high": 73.72,
+      "avg_return": 0.251
+    },
+    "test": {
+      "wins": 178,
+      "total": 226,
+      "win_rate": 78.76,
+      "ci_low": 72.97,
+      "ci_high": 83.59,
+      "avg_return": 0.28
+    },
+    "decay": -11.23,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 121,
+      "total": 189,
+      "win_rate": 64.02,
+      "ci_low": 56.96,
+      "ci_high": 70.52,
+      "avg_return": 0.182
+    },
+    "test": {
+      "wins": 168,
+      "total": 226,
+      "win_rate": 74.34,
+      "ci_low": 68.27,
+      "ci_high": 79.59,
+      "avg_return": 0.228
+    },
+    "decay": -10.32,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 45,
+      "total": 70,
+      "win_rate": 64.29,
+      "ci_low": 52.59,
+      "ci_high": 74.5,
+      "avg_return": 0.121
+    },
+    "test": {
+      "wins": 39,
+      "total": 56,
+      "win_rate": 69.64,
+      "ci_low": 56.66,
+      "ci_high": 80.1,
+      "avg_return": 0.171
+    },
+    "decay": -5.35,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 189,
+      "total": 287,
+      "win_rate": 65.85,
+      "ci_low": 60.19,
+      "ci_high": 71.1,
+      "avg_return": 0.216
+    },
+    "test": {
+      "wins": 294,
+      "total": 380,
+      "win_rate": 77.37,
+      "ci_low": 72.9,
+      "ci_high": 81.29,
+      "avg_return": 0.217
+    },
+    "decay": -11.52,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "NVDA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 5,
+      "total": 14,
+      "win_rate": 35.71,
+      "ci_low": 16.34,
+      "ci_high": 61.24,
+      "avg_return": -0.45
+    },
+    "test": {
+      "wins": 8,
+      "total": 13,
+      "win_rate": 61.54,
+      "ci_low": 35.52,
+      "ci_high": 82.29,
+      "avg_return": 0.269
+    },
+    "decay": -25.83,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "NVDA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 45,
+      "total": 70,
+      "win_rate": 64.29,
+      "ci_low": 52.59,
+      "ci_high": 74.5,
+      "avg_return": 0.121
+    },
+    "test": {
+      "wins": 39,
+      "total": 56,
+      "win_rate": 69.64,
+      "ci_low": 56.66,
+      "ci_high": 80.1,
+      "avg_return": 0.171
+    },
+    "decay": -5.35,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "NVDA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 189,
+      "total": 287,
+      "win_rate": 65.85,
+      "ci_low": 60.19,
+      "ci_high": 71.1,
+      "avg_return": 0.216
+    },
+    "test": {
+      "wins": 294,
+      "total": 380,
+      "win_rate": 77.37,
+      "ci_low": 72.9,
+      "ci_high": 81.29,
+      "avg_return": 0.217
+    },
+    "decay": -11.52,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 7,
+      "total": 19,
+      "win_rate": 36.84,
+      "ci_low": 19.15,
+      "ci_high": 58.96,
+      "avg_return": -0.47
+    },
+    "test": {
+      "wins": 3,
+      "total": 9,
+      "win_rate": 33.33,
+      "ci_low": 12.06,
+      "ci_high": 64.58,
+      "avg_return": -0.213
+    },
+    "decay": 3.51,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 32,
+      "total": 110,
+      "win_rate": 29.09,
+      "ci_low": 21.42,
+      "ci_high": 38.17,
+      "avg_return": -0.23
+    },
+    "test": {
+      "wins": 29,
+      "total": 152,
+      "win_rate": 19.08,
+      "ci_low": 13.63,
+      "ci_high": 26.06,
+      "avg_return": -0.216
+    },
+    "decay": 10.01,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 20,
+      "total": 49,
+      "win_rate": 40.82,
+      "ci_low": 28.22,
+      "ci_high": 54.75,
+      "avg_return": -0.149
+    },
+    "test": {
+      "wins": 12,
+      "total": 62,
+      "win_rate": 19.35,
+      "ci_low": 11.43,
+      "ci_high": 30.85,
+      "avg_return": -0.189
+    },
+    "decay": 21.47,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "NVDA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 7,
+      "total": 19,
+      "win_rate": 36.84,
+      "ci_low": 19.15,
+      "ci_high": 58.96,
+      "avg_return": -0.47
+    },
+    "test": {
+      "wins": 3,
+      "total": 9,
+      "win_rate": 33.33,
+      "ci_low": 12.06,
+      "ci_high": 64.58,
+      "avg_return": -0.213
+    },
+    "decay": 3.51,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "NVDA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 32,
+      "total": 110,
+      "win_rate": 29.09,
+      "ci_low": 21.42,
+      "ci_high": 38.17,
+      "avg_return": -0.23
+    },
+    "test": {
+      "wins": 29,
+      "total": 152,
+      "win_rate": 19.08,
+      "ci_low": 13.63,
+      "ci_high": 26.06,
+      "avg_return": -0.216
+    },
+    "decay": 10.01,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 36,
+      "total": 70,
+      "win_rate": 51.43,
+      "ci_low": 39.95,
+      "ci_high": 62.75,
+      "avg_return": 0.014
+    },
+    "test": {
+      "wins": 44,
+      "total": 56,
+      "win_rate": 78.57,
+      "ci_low": 66.18,
+      "ci_high": 87.29,
+      "avg_return": 0.136
+    },
+    "decay": -27.14,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "NVDA",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 49,
+      "total": 70,
+      "win_rate": 70.0,
+      "ci_low": 58.46,
+      "ci_high": 79.46,
+      "avg_return": 0.388
+    },
+    "test": {
+      "wins": 43,
+      "total": 56,
+      "win_rate": 76.79,
+      "ci_low": 64.23,
+      "ci_high": 85.9,
+      "avg_return": 0.269
+    },
+    "decay": -6.79,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 18,
+      "total": 19,
+      "win_rate": 94.74,
+      "ci_low": 75.36,
+      "ci_high": 99.06,
+      "avg_return": 0.199
+    },
+    "test": {
+      "wins": 16,
+      "total": 20,
+      "win_rate": 80.0,
+      "ci_low": 58.4,
+      "ci_high": 91.93,
+      "avg_return": 0.336
+    },
+    "decay": 14.74,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 198,
+      "total": 243,
+      "win_rate": 81.48,
+      "ci_low": 76.12,
+      "ci_high": 85.86,
+      "avg_return": 0.224
+    },
+    "test": {
+      "wins": 160,
+      "total": 225,
+      "win_rate": 71.11,
+      "ci_low": 64.87,
+      "ci_high": 76.64,
+      "avg_return": 0.206
+    },
+    "decay": 10.37,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 193,
+      "total": 235,
+      "win_rate": 82.13,
+      "ci_low": 76.72,
+      "ci_high": 86.5,
+      "avg_return": 0.219
+    },
+    "test": {
+      "wins": 154,
+      "total": 213,
+      "win_rate": 72.3,
+      "ci_low": 65.94,
+      "ci_high": 77.87,
+      "avg_return": 0.218
+    },
+    "decay": 9.83,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 37,
+      "total": 51,
+      "win_rate": 72.55,
+      "ci_low": 59.05,
+      "ci_high": 82.89,
+      "avg_return": 0.153
+    },
+    "test": {
+      "wins": 46,
+      "total": 66,
+      "win_rate": 69.7,
+      "ci_low": 57.78,
+      "ci_high": 79.45,
+      "avg_return": 0.163
+    },
+    "decay": 2.85,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 327,
+      "total": 405,
+      "win_rate": 80.74,
+      "ci_low": 76.62,
+      "ci_high": 84.29,
+      "avg_return": 0.227
+    },
+    "test": {
+      "wins": 276,
+      "total": 366,
+      "win_rate": 75.41,
+      "ci_low": 70.75,
+      "ci_high": 79.54,
+      "avg_return": 0.247
+    },
+    "decay": 5.33,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "QQQ",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 18,
+      "total": 19,
+      "win_rate": 94.74,
+      "ci_low": 75.36,
+      "ci_high": 99.06,
+      "avg_return": 0.199
+    },
+    "test": {
+      "wins": 16,
+      "total": 20,
+      "win_rate": 80.0,
+      "ci_low": 58.4,
+      "ci_high": 91.93,
+      "avg_return": 0.336
+    },
+    "decay": 14.74,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "QQQ",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 37,
+      "total": 51,
+      "win_rate": 72.55,
+      "ci_low": 59.05,
+      "ci_high": 82.89,
+      "avg_return": 0.153
+    },
+    "test": {
+      "wins": 46,
+      "total": 66,
+      "win_rate": 69.7,
+      "ci_low": 57.78,
+      "ci_high": 79.45,
+      "avg_return": 0.163
+    },
+    "decay": 2.85,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "QQQ",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 327,
+      "total": 405,
+      "win_rate": 80.74,
+      "ci_low": 76.62,
+      "ci_high": 84.29,
+      "avg_return": 0.227
+    },
+    "test": {
+      "wins": 276,
+      "total": 366,
+      "win_rate": 75.41,
+      "ci_low": 70.75,
+      "ci_high": 79.54,
+      "avg_return": 0.247
+    },
+    "decay": 5.33,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 1,
+      "total": 3,
+      "win_rate": 33.33,
+      "ci_low": 6.15,
+      "ci_high": 79.23,
+      "avg_return": 0.076
+    },
+    "test": {
+      "wins": 5,
+      "total": 8,
+      "win_rate": 62.5,
+      "ci_low": 30.57,
+      "ci_high": 86.32,
+      "avg_return": -0.293
+    },
+    "decay": -29.17,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 35,
+      "total": 174,
+      "win_rate": 20.11,
+      "ci_low": 14.83,
+      "ci_high": 26.69,
+      "avg_return": -0.205
+    },
+    "test": {
+      "wins": 30,
+      "total": 168,
+      "win_rate": 17.86,
+      "ci_low": 12.8,
+      "ci_high": 24.35,
+      "avg_return": -0.301
+    },
+    "decay": 2.25,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 3,
+      "total": 81,
+      "win_rate": 3.7,
+      "ci_low": 1.27,
+      "ci_high": 10.33,
+      "avg_return": -0.259
+    },
+    "test": {
+      "wins": 21,
+      "total": 73,
+      "win_rate": 28.77,
+      "ci_low": 19.65,
+      "ci_high": 40.01,
+      "avg_return": -0.189
+    },
+    "decay": -25.07,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "QQQ",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 1,
+      "total": 3,
+      "win_rate": 33.33,
+      "ci_low": 6.15,
+      "ci_high": 79.23,
+      "avg_return": 0.076
+    },
+    "test": {
+      "wins": 5,
+      "total": 8,
+      "win_rate": 62.5,
+      "ci_low": 30.57,
+      "ci_high": 86.32,
+      "avg_return": -0.293
+    },
+    "decay": -29.17,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "QQQ",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 35,
+      "total": 174,
+      "win_rate": 20.11,
+      "ci_low": 14.83,
+      "ci_high": 26.69,
+      "avg_return": -0.205
+    },
+    "test": {
+      "wins": 30,
+      "total": 168,
+      "win_rate": 17.86,
+      "ci_low": 12.8,
+      "ci_high": 24.35,
+      "avg_return": -0.301
+    },
+    "decay": 2.25,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 33,
+      "total": 51,
+      "win_rate": 64.71,
+      "ci_low": 50.99,
+      "ci_high": 76.37,
+      "avg_return": 0.077
+    },
+    "test": {
+      "wins": 42,
+      "total": 66,
+      "win_rate": 63.64,
+      "ci_low": 51.58,
+      "ci_high": 74.19,
+      "avg_return": 0.102
+    },
+    "decay": 1.07,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "QQQ",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 44,
+      "total": 51,
+      "win_rate": 86.27,
+      "ci_low": 74.28,
+      "ci_high": 93.19,
+      "avg_return": 0.387
+    },
+    "test": {
+      "wins": 59,
+      "total": 66,
+      "win_rate": 89.39,
+      "ci_low": 79.69,
+      "ci_high": 94.77,
+      "avg_return": 0.472
+    },
+    "decay": -3.12,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 15,
+      "total": 20,
+      "win_rate": 75.0,
+      "ci_low": 53.13,
+      "ci_high": 88.81,
+      "avg_return": 0.268
+    },
+    "test": {
+      "wins": 12,
+      "total": 19,
+      "win_rate": 63.16,
+      "ci_low": 41.04,
+      "ci_high": 80.85,
+      "avg_return": 0.231
+    },
+    "decay": 11.84,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 174,
+      "total": 232,
+      "win_rate": 75.0,
+      "ci_low": 69.05,
+      "ci_high": 80.13,
+      "avg_return": 0.211
+    },
+    "test": {
+      "wins": 131,
+      "total": 201,
+      "win_rate": 65.17,
+      "ci_low": 58.36,
+      "ci_high": 71.42,
+      "avg_return": 0.142
+    },
+    "decay": 9.83,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 185,
+      "total": 231,
+      "win_rate": 80.09,
+      "ci_low": 74.46,
+      "ci_high": 84.73,
+      "avg_return": 0.207
+    },
+    "test": {
+      "wins": 146,
+      "total": 209,
+      "win_rate": 69.86,
+      "ci_low": 63.32,
+      "ci_high": 75.67,
+      "avg_return": 0.201
+    },
+    "decay": 10.23,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 29,
+      "total": 38,
+      "win_rate": 76.32,
+      "ci_low": 60.79,
+      "ci_high": 87.01,
+      "avg_return": 0.161
+    },
+    "test": {
+      "wins": 48,
+      "total": 74,
+      "win_rate": 64.86,
+      "ci_low": 53.5,
+      "ci_high": 74.76,
+      "avg_return": 0.171
+    },
+    "decay": 11.46,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 320,
+      "total": 405,
+      "win_rate": 79.01,
+      "ci_low": 74.78,
+      "ci_high": 82.7,
+      "avg_return": 0.216
+    },
+    "test": {
+      "wins": 208,
+      "total": 312,
+      "win_rate": 66.67,
+      "ci_low": 61.26,
+      "ci_high": 71.67,
+      "avg_return": 0.155
+    },
+    "decay": 12.34,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "SPY",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 15,
+      "total": 20,
+      "win_rate": 75.0,
+      "ci_low": 53.13,
+      "ci_high": 88.81,
+      "avg_return": 0.268
+    },
+    "test": {
+      "wins": 12,
+      "total": 19,
+      "win_rate": 63.16,
+      "ci_low": 41.04,
+      "ci_high": 80.85,
+      "avg_return": 0.231
+    },
+    "decay": 11.84,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "SPY",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 29,
+      "total": 38,
+      "win_rate": 76.32,
+      "ci_low": 60.79,
+      "ci_high": 87.01,
+      "avg_return": 0.161
+    },
+    "test": {
+      "wins": 48,
+      "total": 74,
+      "win_rate": 64.86,
+      "ci_low": 53.5,
+      "ci_high": 74.76,
+      "avg_return": 0.171
+    },
+    "decay": 11.46,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "SPY",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 320,
+      "total": 405,
+      "win_rate": 79.01,
+      "ci_low": 74.78,
+      "ci_high": 82.7,
+      "avg_return": 0.216
+    },
+    "test": {
+      "wins": 208,
+      "total": 312,
+      "win_rate": 66.67,
+      "ci_low": 61.26,
+      "ci_high": 71.67,
+      "avg_return": 0.155
+    },
+    "decay": 12.34,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 1,
+      "total": 4,
+      "win_rate": 25.0,
+      "ci_low": 4.56,
+      "ci_high": 69.94,
+      "avg_return": -0.207
+    },
+    "test": {
+      "wins": 2,
+      "total": 10,
+      "win_rate": 20.0,
+      "ci_low": 5.67,
+      "ci_high": 50.98,
+      "avg_return": -0.259
+    },
+    "decay": 5.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 35,
+      "total": 163,
+      "win_rate": 21.47,
+      "ci_low": 15.86,
+      "ci_high": 28.39,
+      "avg_return": -0.229
+    },
+    "test": {
+      "wins": 37,
+      "total": 125,
+      "win_rate": 29.6,
+      "ci_low": 22.3,
+      "ci_high": 38.11,
+      "avg_return": -0.202
+    },
+    "decay": -8.13,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 19,
+      "total": 71,
+      "win_rate": 26.76,
+      "ci_low": 17.85,
+      "ci_high": 38.05,
+      "avg_return": -0.149
+    },
+    "test": {
+      "wins": 12,
+      "total": 45,
+      "win_rate": 26.67,
+      "ci_low": 15.96,
+      "ci_high": 41.04,
+      "avg_return": -0.144
+    },
+    "decay": 0.09,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "SPY",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 1,
+      "total": 4,
+      "win_rate": 25.0,
+      "ci_low": 4.56,
+      "ci_high": 69.94,
+      "avg_return": -0.207
+    },
+    "test": {
+      "wins": 2,
+      "total": 10,
+      "win_rate": 20.0,
+      "ci_low": 5.67,
+      "ci_high": 50.98,
+      "avg_return": -0.259
+    },
+    "decay": 5.0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "SPY",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 35,
+      "total": 163,
+      "win_rate": 21.47,
+      "ci_low": 15.86,
+      "ci_high": 28.39,
+      "avg_return": -0.229
+    },
+    "test": {
+      "wins": 37,
+      "total": 125,
+      "win_rate": 29.6,
+      "ci_low": 22.3,
+      "ci_high": 38.11,
+      "avg_return": -0.202
+    },
+    "decay": -8.13,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 24,
+      "total": 38,
+      "win_rate": 63.16,
+      "ci_low": 47.28,
+      "ci_high": 76.62,
+      "avg_return": 0.09
+    },
+    "test": {
+      "wins": 51,
+      "total": 74,
+      "win_rate": 68.92,
+      "ci_low": 57.66,
+      "ci_high": 78.31,
+      "avg_return": 0.106
+    },
+    "decay": -5.76,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "SPY",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 30,
+      "total": 38,
+      "win_rate": 78.95,
+      "ci_low": 63.65,
+      "ci_high": 88.93,
+      "avg_return": 0.317
+    },
+    "test": {
+      "wins": 53,
+      "total": 74,
+      "win_rate": 71.62,
+      "ci_low": 60.48,
+      "ci_high": 80.63,
+      "avg_return": 0.368
+    },
+    "decay": 7.33,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_Momentum",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 6,
+      "total": 10,
+      "win_rate": 60.0,
+      "ci_low": 31.27,
+      "ci_high": 83.18,
+      "avg_return": -0.008
+    },
+    "test": {
+      "wins": 13,
+      "total": 21,
+      "win_rate": 61.9,
+      "ci_low": 40.88,
+      "ci_high": 79.25,
+      "avg_return": 0.263
+    },
+    "decay": -1.9,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H13_Vol_Compression_BO",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 128,
+      "total": 195,
+      "win_rate": 65.64,
+      "ci_low": 58.73,
+      "ci_high": 71.95,
+      "avg_return": 0.202
+    },
+    "test": {
+      "wins": 166,
+      "total": 234,
+      "win_rate": 70.94,
+      "ci_low": 64.82,
+      "ci_high": 76.38,
+      "avg_return": 0.243
+    },
+    "decay": -5.3,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H14_RSI_Fast_Slow",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 133,
+      "total": 199,
+      "win_rate": 66.83,
+      "ci_low": 60.03,
+      "ci_high": 73.0,
+      "avg_return": 0.215
+    },
+    "test": {
+      "wins": 174,
+      "total": 250,
+      "win_rate": 69.6,
+      "ci_low": 63.64,
+      "ci_high": 74.97,
+      "avg_return": 0.21
+    },
+    "decay": -2.77,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_Combo",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 53,
+      "total": 91,
+      "win_rate": 58.24,
+      "ci_low": 47.98,
+      "ci_high": 67.84,
+      "avg_return": 0.173
+    },
+    "test": {
+      "wins": 43,
+      "total": 66,
+      "win_rate": 65.15,
+      "ci_low": 53.11,
+      "ci_high": 75.52,
+      "avg_return": 0.231
+    },
+    "decay": -6.91,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_Trend",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 194,
+      "total": 288,
+      "win_rate": 67.36,
+      "ci_low": 61.75,
+      "ci_high": 72.52,
+      "avg_return": 0.201
+    },
+    "test": {
+      "wins": 301,
+      "total": 406,
+      "win_rate": 74.14,
+      "ci_low": 69.67,
+      "ci_high": 78.16,
+      "avg_return": 0.233
+    },
+    "decay": -6.78,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "H12_BB_Squeeze_PT",
+    "ticker": "TSLA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 6,
+      "total": 10,
+      "win_rate": 60.0,
+      "ci_low": 31.27,
+      "ci_high": 83.18,
+      "avg_return": -0.008
+    },
+    "test": {
+      "wins": 13,
+      "total": 21,
+      "win_rate": 61.9,
+      "ci_low": 40.88,
+      "ci_high": 79.25,
+      "avg_return": 0.263
+    },
+    "decay": -1.9,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_PT",
+    "ticker": "TSLA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 53,
+      "total": 91,
+      "win_rate": 58.24,
+      "ci_low": 47.98,
+      "ci_high": 67.84,
+      "avg_return": 0.173
+    },
+    "test": {
+      "wins": 43,
+      "total": 66,
+      "win_rate": 65.15,
+      "ci_low": 53.11,
+      "ci_high": 75.52,
+      "avg_return": 0.231
+    },
+    "decay": -6.91,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H16_Multi_TF_PT",
+    "ticker": "TSLA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": false,
+    "train": {
+      "wins": 194,
+      "total": 288,
+      "win_rate": 67.36,
+      "ci_low": 61.75,
+      "ci_high": 72.52,
+      "avg_return": 0.201
+    },
+    "test": {
+      "wins": 301,
+      "total": 406,
+      "win_rate": 74.14,
+      "ci_low": 69.67,
+      "ci_high": 78.16,
+      "avg_return": 0.233
+    },
+    "decay": -6.78,
+    "status": "GOLDEN"
+  },
+  {
+    "strategy": "B1_ADX_Trend_Short",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 1,
+      "total": 11,
+      "win_rate": 9.09,
+      "ci_low": 1.62,
+      "ci_high": 37.74,
+      "avg_return": -0.413
+    },
+    "test": {
+      "wins": 1,
+      "total": 7,
+      "win_rate": 14.29,
+      "ci_low": 2.57,
+      "ci_high": 51.31,
+      "avg_return": -0.418
+    },
+    "decay": -5.2,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Upper_Reject",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 43,
+      "total": 112,
+      "win_rate": 38.39,
+      "ci_low": 29.91,
+      "ci_high": 47.64,
+      "avg_return": -0.118
+    },
+    "test": {
+      "wins": 44,
+      "total": 165,
+      "win_rate": 26.67,
+      "ci_low": 20.51,
+      "ci_high": 33.89,
+      "avg_return": -0.224
+    },
+    "decay": 11.72,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B3_Momentum_Div_Short",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 14,
+      "total": 45,
+      "win_rate": 31.11,
+      "ci_low": 19.53,
+      "ci_high": 45.67,
+      "avg_return": -0.196
+    },
+    "test": {
+      "wins": 15,
+      "total": 59,
+      "win_rate": 25.42,
+      "ci_low": 16.06,
+      "ci_high": 37.8,
+      "avg_return": -0.224
+    },
+    "decay": 5.69,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B4_Vol_Expansion_Short",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "test": {
+      "wins": 0,
+      "total": 0,
+      "win_rate": 0,
+      "ci_low": 0,
+      "ci_high": 0,
+      "avg_return": 0
+    },
+    "decay": 0,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B1_ADX_Short_PT",
+    "ticker": "TSLA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 1,
+      "total": 11,
+      "win_rate": 9.09,
+      "ci_low": 1.62,
+      "ci_high": 37.74,
+      "avg_return": -0.413
+    },
+    "test": {
+      "wins": 1,
+      "total": 7,
+      "win_rate": 14.29,
+      "ci_low": 2.57,
+      "ci_high": 51.31,
+      "avg_return": -0.418
+    },
+    "decay": -5.2,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "B2_BB_Reject_PT",
+    "ticker": "TSLA",
+    "exit_type": "profit_target",
+    "hold_days": 5,
+    "is_short": true,
+    "train": {
+      "wins": 43,
+      "total": 112,
+      "win_rate": 38.39,
+      "ci_low": 29.91,
+      "ci_high": 47.64,
+      "avg_return": -0.118
+    },
+    "test": {
+      "wins": 44,
+      "total": 165,
+      "win_rate": 26.67,
+      "ci_low": 20.51,
+      "ci_high": 33.89,
+      "avg_return": -0.224
+    },
+    "decay": 11.72,
+    "status": "REJECTED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_3D",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 3,
+    "is_short": false,
+    "train": {
+      "wins": 56,
+      "total": 91,
+      "win_rate": 61.54,
+      "ci_low": 51.27,
+      "ci_high": 70.87,
+      "avg_return": 0.117
+    },
+    "test": {
+      "wins": 45,
+      "total": 66,
+      "win_rate": 68.18,
+      "ci_low": 56.21,
+      "ci_high": 78.15,
+      "avg_return": 0.137
+    },
+    "decay": -6.64,
+    "status": "VALIDATED"
+  },
+  {
+    "strategy": "H15_ADX_MACD_10D",
+    "ticker": "TSLA",
+    "exit_type": "fixed",
+    "hold_days": 10,
+    "is_short": false,
+    "train": {
+      "wins": 62,
+      "total": 91,
+      "win_rate": 68.13,
+      "ci_low": 57.99,
+      "ci_high": 76.8,
+      "avg_return": 0.437
+    },
+    "test": {
+      "wins": 58,
+      "total": 66,
+      "win_rate": 87.88,
+      "ci_low": 77.86,
+      "ci_high": 93.73,
+      "avg_return": 0.532
+    },
+    "decay": -19.75,
+    "status": "VALIDATED"
+  }
+]

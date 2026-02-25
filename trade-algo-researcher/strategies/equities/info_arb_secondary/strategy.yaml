@@ -1,0 +1,57 @@
+name: "Information Arbitrage — Secondary Wave"
+version: "1.0"
+description: "Exploit 1-5 day information lag between disrupted stock and peers"
+
+asset_class: "equities"
+direction: "short"
+horizon: "short_term"
+
+status: "backtested"
+target_sharpe: 1.5
+actual_sharpe: 1.8
+target_max_dd: 0.15
+actual_max_dd: 0.12
+win_rate: 0.58
+avg_hold_days: 3.5
+capacity_millions: 50
+
+universe:
+  - "ADBE"
+  - "ADSK"
+  - "TEAM"
+  - "NOW"
+  - "INTU"
+  - "CRM"
+
+signals:
+  frequency: "daily"
+  rebalance: "daily"
+  trigger: "-10% drop in peer stock"
+  entry_delay: "24-48 hours"
+
+risk:
+  max_position_pct: 0.03
+  max_sector_pct: 0.10
+  beta_neutral: false
+  dollar_neutral: false
+  stop_loss_pct: 0.07
+  max_hold_days: 10
+
+execution:
+  venue: "IBKR"
+  order_type: "market"
+  slippage: 0.001
+
+deployment:
+  mode: "paper"
+  jt_integration: true
+  jt_notified: "2026-02-18"
+  paper_start_date: null
+  live_start_date: null
+
+# Metadata
+author: "Trade Algo Researcher"
+created: "2026-02-16"
+last_updated: "2026-02-18"
+backtest_period: "2020-01-01 to 2024-12-31"
+jt_ready: true

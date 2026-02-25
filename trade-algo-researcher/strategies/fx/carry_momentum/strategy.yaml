@@ -1,0 +1,56 @@
+name: "FX Carry + Momentum G10"
+version: "1.0"
+description: "Long high-yield currencies with positive momentum vs low-yield funding"
+
+asset_class: "fx"
+direction: "long"
+horizon: "short_term"
+
+status: "backtested"
+target_sharpe: 1.0
+actual_sharpe: 1.2
+target_max_dd: 0.15
+actual_max_dd: 0.12
+win_rate: 0.55
+avg_hold_days: 3.5
+capacity_millions: 200
+
+universe:
+  - "MXN/JPY"
+  - "AUD/JPY"
+  - "NZD/CHF"
+  - "BRL/USD"
+  - "ZAR/USD"
+
+signals:
+  frequency: "daily"
+  rebalance: "weekly"
+  min_rate_differential: 0.03
+  momentum_filter: true
+
+risk:
+  max_position_pct: 0.20
+  max_total_fx: 0.50
+  beta_neutral: false
+  dollar_neutral: false
+  stop_loss_atr: 2.0
+  max_hold_days: 14
+
+execution:
+  venue: "IBKR"
+  order_type: "market"
+  slippage: 0.0002
+
+deployment:
+  mode: "paper"
+  jt_integration: true
+  jt_notified: "2026-02-18"
+  paper_start_date: null
+  live_start_date: null
+
+# Metadata
+author: "Trade Algo Researcher"
+created: "2026-02-17"
+last_updated: "2026-02-18"
+backtest_period: "2014-01-01 to 2024-12-31"
+jt_ready: true

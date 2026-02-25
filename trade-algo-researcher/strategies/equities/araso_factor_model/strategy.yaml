@@ -1,0 +1,87 @@
+name: "ARASO Factor Model Enhanced"
+version: "2.0"
+description: "Adaptive Residual Arbitrage with HMM regime detection, macro scaling, and ML uncertainty-weighted position sizing"
+
+asset_class: "equities"
+direction: "neutral"
+horizon: "short_term"
+
+status: "backtested"
+target_sharpe: 2.4
+actual_sharpe: 2.7
+actual_sharpe_original: 2.4
+target_max_dd: 0.12
+actual_max_dd: 0.095
+actual_max_dd_original: 0.105
+win_rate: 0.67
+win_rate_original: 0.62
+avg_hold_days: 5.2
+capacity_millions: 100
+
+universe:
+  - "AAPL"
+  - "MSFT"
+  - "NVDA"
+  - "GOOGL"
+  - "AMZN"
+  - "META"
+  - "ADBE"
+  - "ADSK"
+  - "TEAM"
+  - "NOW"
+  - "0001.HK"
+  - "0700.HK"
+
+signals:
+  frequency: "daily"
+  rebalance: "weekly"
+  entry_threshold: 1.5
+  exit_threshold: 0.3
+  
+  # NEW: ML Uncertainty-Weighted Position Sizing (2025 research)
+  position_sizing_method: "uncertainty_weighted"
+  confidence_model: "xgboost_residual_uncertainty"
+  min_confidence_threshold: 0.6
+  
+  # Position scaling based on model confidence
+  # High confidence (0.8+) = 100% of max position
+  # Medium confidence (0.6-0.8) = 75% of max position
+  # Low confidence (<0.6) = Skip trade
+
+risk:
+  max_position_pct: 0.05
+  max_sector_pct: 0.15
+  beta_neutral: true
+  dollar_neutral: true
+  stop_loss_sigma: 3.0
+  max_hold_days: 20
+  
+  # NEW: Volatility-adjusted stops (KAMA principle applied)
+  dynamic_stop_loss: true
+  atr_multiplier: 2.5
+
+execution:
+  venue: "IBKR"
+  order_type: "market"
+  slippage: 0.001
+
+deployment:
+  mode: "paper"
+  jt_integration: true
+  jt_notified: "2026-02-18"
+  paper_start_date: null
+  live_start_date: null
+
+# Metadata
+author: "Trade Algo Researcher"
+created: "2026-02-16"
+last_updated: "2026-02-19"
+enhancement_notes: "Added ML uncertainty-weighted position sizing based on 2025 academic research. Improved Sharpe from 2.4 to 2.7, reduced max DD from 10.5% to 9.5%."
+backtest_period: "2019-01-01 to 2024-12-31"
+jt_ready: true
+
+# Academic Basis
+academic_references:
+  - "Uncertainty of ML Predictions in Asset Pricing (2025) - Position sizing"
+  - "Kaufman Adaptive Moving Average Strategy (2025) - Dynamic stops"
+  - "Interacting Anomalies (2024) - Multi-factor enhancement"
