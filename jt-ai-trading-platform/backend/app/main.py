@@ -3114,7 +3114,7 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                 try:
                     tws_status = ib_quant_service.get_status()
                     
-                    if tws_status.get("is_connected"):
+                    if tws_status.get("connected"):
                         account_info = ib_quant_service.get_account_summary()
                         
                         if account_info:

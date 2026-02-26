@@ -338,6 +338,52 @@ class IBKRQuantService:
             logger.error(f"Error getting account summary: {e}")
             return None
 
+    async def connect(self):
+        """Connect/reconnect to IBKR Gateway"""
+        try:
+            # Check if already connected
+            if ib_threaded_service.is_connected:
+                return {
+                    "status": "connected",
+                    "message": "Already connected to IBKR Gateway",
+                    "host": self.host,
+                    "port": self.port,
+                    "client_id": ib_threaded_service.client_id
+                }
+            
+            # Try to restart the service
+            ib_threaded_service.stop()
+            await asyncio.sleep(0.5)
+            ib_threaded_service.start()
+            
+            # Wait for connection
+            for _ in range(50):  # 5 seconds max
+                if ib_threaded_service.is_connected:
+                    return {
+                        "status": "success",
+                        "message": "Connected to IBKR Gateway",
+                        "host": self.host,
+                        "port": self.port,
+                        "client_id": ib_threaded_service.client_id
+                    }
+                await asyncio.sleep(0.1)
+            
+            return {
+                "status": "error",
+                "message": "Failed to connect to IBKR Gateway within timeout",
+                "host": self.host,
+                "port": self.port
+            }
+            
+        except Exception as e:
+            logger.error(f"Error connecting to IBKR: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "host": self.host,
+                "port": self.port
+            }
+
     def place_order(self, symbol, action, quantity, order_type='MKT', account=None, strategy_id='manual', current_price=None):
         """Place an order through IBKR - creates fresh connection with collision handling"""
         import asyncio

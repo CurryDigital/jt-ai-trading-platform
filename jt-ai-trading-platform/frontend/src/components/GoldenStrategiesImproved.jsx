@@ -214,39 +214,86 @@ export const GoldenStrategiesImproved = () => {
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'available'
   const [searchTerm, setSearchTerm] = useState('');
 
+  // AbortController for canceling stale requests
+  const abortControllerRef = React.useRef(null);
+  
   useEffect(() => {
     fetchStrategies(true); // Initial load with spinner
-    const interval = setInterval(() => fetchStrategies(false), 300000); // 5 minutes
-    return () => clearInterval(interval);
+    
+    // Only set up interval if tab is visible
+    let interval = null;
+    const startInterval = () => {
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchStrategies(false);
+        }
+      }, 300000); // 5 minutes
+    };
+    startInterval();
+    
+    // Handle visibility changes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchStrategies(false); // Refresh when coming back to tab
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const fetchStrategies = async (showLoading = false) => {
+    // Cancel any in-flight requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+    const { signal } = abortControllerRef.current;
+    
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch('/api/strategies/researcher');
+      const res = await fetch('/api/strategies/researcher', { signal });
       if (res.ok) {
         const data = await res.json();
         setStrategies(data.strategies || []);
         
-        // Fetch signals for each deployed strategy
+        // Fetch signals SEQUENTIALLY to avoid overwhelming the API
         const deployed = data.strategies?.filter(s => s.is_deployed) || [];
         const signalData = {};
         
-        await Promise.all(
-          deployed.map(async (s) => {
-            try {
-              const res = await fetch(`/api/strategies/${s.id}/top-signals?limit=5`);
-              if (res.ok) {
-                signalData[s.id] = await res.json();
-              }
-            } catch (e) {}
-          })
-        );
-        
-        setSignals(signalData);
+        // Process one at a time with small delays to prevent freezing
+        for (const s of deployed) {
+          if (signal.aborted) break; // Stop if cancelled
+          
+          try {
+            const res = await fetch(`/api/strategies/${s.id}/top-signals?limit=5`, { signal });
+            if (res.ok) {
+              signalData[s.id] = await res.json();
+              // Update state incrementally to prevent UI freeze
+              setSignals(prev => ({ ...prev, [s.id]: signalData[s.id] }));
+            }
+          } catch (e) {
+            if (e.name !== 'AbortError') {
+              console.error(`Failed to fetch signals for ${s.id}:`, e);
+            }
+          }
+          
+          // Small delay between requests to prevent overwhelming the browser
+          if (!signal.aborted) {
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
       }
     } catch (e) {
-      console.error('Failed to fetch strategies:', e);
+      if (e.name !== 'AbortError') {
+        console.error('Failed to fetch strategies:', e);
+      }
     } finally {
       if (showLoading) setLoading(false);
     }

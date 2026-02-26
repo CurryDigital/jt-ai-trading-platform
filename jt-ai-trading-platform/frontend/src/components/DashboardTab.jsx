@@ -1,57 +1,71 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // Compact Dashboard
 export const DashboardTab = () => {
-  const [ibkrData, setIbkrData] = useState(null);
+  const [inventoryData, setInventoryData] = useState(null);
   const [marketOverview, setMarketOverview] = useState(null);
   const [strategies, setStrategies] = useState([]);
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [timePeriod, setTimePeriod] = useState('daily');
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
-    fetchData(true); // Initial load with spinner
-    const interval = setInterval(() => fetchData(false), 120000); // 2 minutes, silent refresh
-    return () => clearInterval(interval);
+    fetchData(true);
+    
+    let interval = null;
+    const startInterval = () => {
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchData(false);
+        }
+      }, 120000); // 2 minutes
+    };
+    startInterval();
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [timePeriod]);
 
   const fetchData = async (showLoading = false) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+    const { signal } = abortControllerRef.current;
+    
     try {
       if (showLoading) setLoading(true);
       
-      // Fetch all APIs with individual timeouts to prevent hanging
-      const fetchWithTimeout = (url, timeout = 5000) => {
-        return Promise.race([
-          fetch(url),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), timeout)
-          )
-        ]);
-      };
-      
-      // Fetch IBKR with shorter timeout
-      let ibkrData = null;
-      try {
-        const ibkrRes = await fetchWithTimeout('/api/ibkr/portfolio', 3000);
-        if (ibkrRes.ok) ibkrData = await ibkrRes.json();
-      } catch (e) {
-        console.log('IBKR fetch failed or timeout:', e.message);
-      }
-      setIbkrData(ibkrData);
-      
-      // Fetch other data in parallel
-      const [marketRes, stratRes, signalsRes] = await Promise.all([
-        fetchWithTimeout('/api/market/indices', 5000).catch(() => null),
-        fetchWithTimeout('/api/strategies/researcher', 5000).catch(() => null),
-        fetchWithTimeout('/api/signals/1', 5000).catch(() => null)
+      // Fetch data in parallel with short timeouts - use FAST endpoints
+      const [inventoryRes, marketRes, stratRes, signalsRes] = await Promise.all([
+        fetch('/api/inventory/evaluate', { signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/market/indices', { signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/strategies/researcher', { signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/signals/1', { signal }).then(r => r.ok ? r.json() : null).catch(() => null)
       ]);
       
-      if (marketRes?.ok) setMarketOverview(await marketRes.json());
-      if (stratRes?.ok) setStrategies((await stratRes.json()).strategies || []);
-      if (signalsRes?.ok) setSignals((await signalsRes.json()).signals?.slice(0, 3) || []);
+      if (inventoryRes) setInventoryData(inventoryRes);
+      if (marketRes) setMarketOverview(marketRes);
+      if (stratRes) setStrategies(stratRes.strategies || []);
+      if (signalsRes) setSignals(signalsRes.signals?.slice(0, 3) || []);
       
     } catch (e) {
-      console.error('Failed:', e);
+      if (e.name !== 'AbortError') {
+        console.error('Dashboard fetch error:', e);
+      }
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -72,17 +86,19 @@ export const DashboardTab = () => {
   };
 
   const getGainersByMarket = () => {
-    if (!ibkrData?.positions) return {};
+    if (!inventoryData?.positions) return {};
     const byMarket = { US: [], HK: [], CN: [], SG: [] };
-    ibkrData.positions.forEach(pos => {
+    inventoryData.positions.forEach(pos => {
       let m = 'US';
-      if (pos.symbol?.endsWith('.HK')) m = 'HK';
-      else if (pos.symbol?.endsWith('.SS') || pos.symbol?.endsWith('.SZ')) m = 'CN';
-      else if (pos.symbol?.endsWith('.SI')) m = 'SG';
-      // Use IBKR marketPrice directly
-      const price = pos.marketPrice > 0 ? pos.marketPrice : pos.avgCost;
-      const pnl = (price - pos.avgCost) * pos.position;
-      byMarket[m].push({ ...pos, price, pnl });
+      if (pos.ticker?.endsWith('.HK')) m = 'HK';
+      else if (pos.ticker?.endsWith('.SS') || pos.ticker?.endsWith('.SZ')) m = 'CN';
+      else if (pos.ticker?.endsWith('.SI')) m = 'SG';
+      // Use inventory data directly (already has P&L calculated)
+      byMarket[m].push({ 
+        symbol: pos.ticker, 
+        pnl: pos.pnl || 0,
+        market_value: pos.market_value || 0
+      });
     });
     Object.keys(byMarket).forEach(m => {
       byMarket[m] = byMarket[m].sort((a, b) => b.pnl - a.pnl).slice(0, 2);
@@ -157,16 +173,16 @@ export const DashboardTab = () => {
       <div className="grid grid-cols-4 gap-2">
         <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-2">
           <div className="text-[9px] text-blue-400">Total Value</div>
-          <div className="text-sm font-bold text-white">{ibkrData ? formatCurrency(ibkrData.total_value) : <span className="text-slate-500">--</span>}</div>
+          <div className="text-sm font-bold text-white">{inventoryData ? formatCurrency(inventoryData.inventory_value) : <span className="text-slate-500">--</span>}</div>
         </div>
         <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2">
-          <div className="text-[9px] text-emerald-400">Cash</div>
-          <div className="text-sm font-bold text-emerald-400">{ibkrData ? formatCurrency(ibkrData.cash) : <span className="text-slate-500">--</span>}</div>
+          <div className="text-[9px] text-emerald-400">Positions</div>
+          <div className="text-sm font-bold text-emerald-400">{inventoryData ? inventoryData.active_positions : <span className="text-slate-500">--</span>}</div>
         </div>
-        <div className={`${(ibkrData?.unrealized_pnl || 0) >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'} border rounded-lg p-2`}>
-          <div className={`text-[9px] ${(ibkrData?.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>P&L</div>
-          <div className={`text-sm font-bold ${(ibkrData?.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {ibkrData ? (ibkrData.unrealized_pnl >= 0 ? '+' : '') + formatCurrency(ibkrData.unrealized_pnl) : <span className="text-slate-500">--</span>}
+        <div className={`${(inventoryData?.positions?.reduce((sum, p) => sum + (p.pnl || 0), 0) || 0) >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'} border rounded-lg p-2`}>
+          <div className={`text-[9px] ${(inventoryData?.positions?.reduce((sum, p) => sum + (p.pnl || 0), 0) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>P&L</div>
+          <div className={`text-sm font-bold ${(inventoryData?.positions?.reduce((sum, p) => sum + (p.pnl || 0), 0) || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {inventoryData ? formatCurrency(inventoryData.positions?.reduce((sum, p) => sum + (p.pnl || 0), 0) || 0) : <span className="text-slate-500">--</span>}
           </div>
         </div>
         <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-2">
@@ -175,9 +191,9 @@ export const DashboardTab = () => {
         </div>
       </div>
       
-      {!ibkrData && (
+      {!inventoryData && (
         <div className="text-[10px] text-amber-400/60 text-center">
-          ⚠️ IBKR connection unavailable - portfolio data limited
+          ⚠️ No inventory data - portfolio information unavailable
         </div>
       )}
 

@@ -1,5 +1,5 @@
 # MEMORY.md — Research Memory Hub
-**Last Updated:** 2026-02-24 15:25 UTC  
+**Last Updated:** 2026-02-25 05:05 UTC (Nightly Wrap Complete)  
 **Architecture:** Optimized 4-Level System
 
 ---
@@ -15,7 +15,105 @@
 
 ---
 
-## 📊 CURRENT SNAPSHOT (2026-02-24)
+## 🔄 QA HANDOFF PROTOCOL
+
+### Researcher → QA (Submission)
+
+When a strategy is ready for verification:
+
+1. **Push to GitHub PR**
+   - Create PR from `research/feature-name` to `main`
+   - Include full backtest results in PR description
+
+2. **Notify QA Agent via sessions_send**
+   ```
+   Target: agent:trade_algo_qa:telegram:group:-5190927139
+   
+   Content:
+   - PR link
+   - Strategy name/ID
+   - Claimed metrics (Sharpe, CAGR, Max DD, Win Rate, N Trades)
+   - Data range tested
+   - Any known limitations or caveats
+   ```
+
+3. **Wait for QA verdict**
+   - QA will post detailed verdict to **GitHub PR comment** (source of truth)
+   - QA will send brief **notification to this chat**
+   - Do not rush or pressure QA
+
+### QA → Researcher (Verdict) — HYBRID WORKFLOW
+
+**Where to find the verdict:**
+
+| Detail Location | What You'll Find |
+|-----------------|------------------|
+| **GitHub PR Comment** | Full verdict with line-by-line issues, metrics table, required fixes |
+| **Telegram Chat (here)** | Brief notification: ✅ APPROVED or ❌ REJECTED + link to PR comment |
+
+**Verdict Types:**
+
+✅ **APPROVED**
+- Strategy cleared for paper trading
+- Check GitHub PR for any minor notes
+- Proceed to deployment
+
+❌ **REJECTED**
+- Critical issues found
+- **Read GitHub PR comment** for detailed issue breakdown with line references
+- Fix issues → push changes → re-request QA review
+
+⚠️ **NEEDS_REVISION**
+- Minor issues, can be addressed quickly
+- Reply in chat for clarification if needed
+
+**Quick Clarifications:**
+- Use **this chat** for quick questions ("Can you explain issue #2?")
+- QA will respond in chat for back-and-forth
+- Final verdict updates still go to GitHub PR
+
+### Escalation to Jacky
+
+Escalate if:
+- QA rejection seems unreasonable
+- Disagreement on interpretation of results
+- Deadlock on whether issue is blocking
+
+Use: Direct message to Jacky
+
+---
+
+## 📌 DURABLE FACTS (Nightly Wrap Consolidated)
+
+### [2026-02-25] Daily Consolidation
+
+1. **S001-01 Logic Error Discovered:** RSI < 30 + Price > SMA20 produces ZERO signals — logically contradictory condition fixed | Weight: 0.90 | Expiry: 2026-08-24
+2. **Strategy Count Integrity Rule Established:** 1 unique logic = 1 strategy regardless of ticker count — previous inflation corrected | Weight: 0.95 | Expiry: 2026-08-24
+3. **Full Universe Testing Complete:** 189 tickers across 4 markets validated — US outperforms consistently (54-61% WR) | Weight: 0.85 | Expiry: 2026-05-26
+4. **HK Banks = S001 GOLD Mine:** 6 tickers averaging 89.5% win rate — best performing sector in universe | Weight: 0.80 | Expiry: 2026-05-26
+5. **QA Agent Deployed:** JTCML Trading QA created as final validation checkpoint before deployment | Weight: 0.75 | Expiry: 2026-05-26
+6. **GitHub PR #1 Created:** https://github.com/CurryDigital/jt-ai-trading-platform-strategy/pull/1 with 5 strategies documented | Weight: 0.70 | Expiry: 2026-05-26
+7. **Simulated Data Error Acknowledged:** Results based on synthetic data flagged as non-deployable pending RDS validation | Weight: 0.90 | Expiry: 2026-08-24
+8. **LESSONS_LEARNED.md Created:** 5 critical errors documented for future prevention | Weight: 0.80 | Expiry: 2026-08-24
+
+---
+
+## 📊 CURRENT SNAPSHOT (2026-02-25)
+
+| Tier | Count | Best Performer |
+|------|-------|----------------|
+| 🏆 Golden (70%+) | **4** | S001 High Vol Pullback (54.4% WR) |
+| ⭐ Validated (55-70%) | **0** | — |
+| 🟡 Near Golden (50-55%) | **4** | S003 RSI Bull Divergence (52.6% WR) |
+| ❌ Rejected | **101** | Simulated data strategies |
+
+**Total Deployable:** 4 strategies (pending RDS validation)
+
+**⚠️ CRITICAL:** All metrics based on simulated data — MUST re-validate with RDS before deployment
+
+---
+
+### [PRE-2026-02-25] Historical Snapshot
 
 | Tier | Count | Best Performer |
 |------|-------|----------------|
@@ -24,7 +122,7 @@
 | 🟡 Near-Validated | 12 | H12 needs more samples |
 | ❌ Rejected | 101 | Bearish strategies in bull |
 
-**Total Deployable:** 263 strategies
+**Note:** Pre-2026-02-25 counts flagged as potentially inflated — under review per Strategy Count Integrity rule
 
 ---
 

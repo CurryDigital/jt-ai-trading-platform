@@ -51,4 +51,48 @@ Skills are shared. Your setup is yours. Keeping them apart means you can update 
 
 ---
 
+## Agent-to-Agent Communication
+
+### QA Agent Target
+
+To send messages to the QA agent:
+
+```json
+{
+  "sessionKey": "agent:trade_algo_qa:telegram:group:-5190927139"
+}
+```
+
+**Usage:**
+- Submit strategies for verification
+- Respond to QA questions
+- Escalate if needed
+
+### Receiving QA Verdicts
+
+**Where to check:**
+
+1. **GitHub PR Comment** (detailed verdict)
+   - URL format: `https://github.com/CurryDigital/jt-ai-trading-platform-strategy/pull/<PR_NUMBER>`
+   - QA posts full analysis with line-by-line issues
+
+2. **Telegram Chat** (notification)
+   - Brief status: ✅ APPROVED or ❌ REJECTED
+   - Link to GitHub PR comment
+
+**Example workflow:**
+```
+1. Submit PR #5
+2. Wait for Telegram notification from QA
+3. Click link to GitHub PR comment
+4. Read detailed verdict
+5. Fix issues → push → re-request review
+```
+
+### Protocol
+
+See `MEMORY.md` → "QA Handoff Protocol" for full workflow.
+
+---
+
 Add whatever helps you do your job. This is your cheat sheet.

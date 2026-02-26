@@ -1,24 +1,56 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // Clean Compact Performance Tab
 export const StrategyPerformance = () => {
   const [deploymentStats, setDeploymentStats] = useState(null);
   const [timeRange, setTimeRange] = useState('7d');
   const [loading, setLoading] = useState(true);
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
-    fetchData(true); // Initial load with spinner
-    const interval = setInterval(() => fetchData(false), 120000); // 2 minutes, silent refresh
-    return () => clearInterval(interval);
+    fetchData(true);
+    
+    let interval = null;
+    const startInterval = () => {
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchData(false);
+        }
+      }, 120000); // 2 minutes
+    };
+    startInterval();
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [timeRange]);
 
   const fetchData = async (showLoading = false) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+    const { signal } = abortControllerRef.current;
+    
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch(`/api/performance/deployment-stats?range=${timeRange}`);
+      const res = await fetch(`/api/performance/deployment-stats?range=${timeRange}`, { signal });
       if (res.ok) setDeploymentStats(await res.json());
     } catch (e) {
-      console.error('Failed:', e);
+      if (e.name !== 'AbortError') {
+        console.error('Failed:', e);
+      }
     } finally {
       if (showLoading) setLoading(false);
     }
