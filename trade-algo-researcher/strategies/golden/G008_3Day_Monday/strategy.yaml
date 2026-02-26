@@ -1,0 +1,107 @@
+# G008: 3-Day Monday Strategy
+strategy_id: G008
+name: 3-Day Monday Reversal
+version: "1.0.0"
+status: golden
+jt_integration: true
+last_modified: "2026-02-26T14:00:00Z"
+
+description: |
+  Mean reversion strategy that trades on Mondays following 3 consecutive 
+  down days. Combines short-term exhaustion with Monday effect for high 
+  probability bounce plays.
+
+classification:
+  tier: golden
+  path: A (High Win Rate)
+  win_rate_threshold: 70%
+  profit_factor_threshold: 1.5
+  sharpe_threshold: 1.5
+  max_dd_threshold: 15%
+
+universe:
+  primary: ["SPY", "QQQ", "IWM", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA"]
+  extended: US_large_cap
+  market: US
+  asset_class: equity
+
+entry_conditions:
+  - indicator: consecutive_down_days
+    condition: "=="
+    threshold: 3
+    description: "3 consecutive negative closes"
+  - indicator: day_of_week
+    condition: "=="
+    value: "Monday"
+  - indicator: rsi
+    period: 14
+    condition: "<"
+    threshold: 40
+
+exit_conditions:
+  primary:
+    - type: price_target
+      condition: "close > entry_price"
+      description: "Any profitable close"
+  secondary:
+    - type: time_exit
+      days: 5
+
+position_sizing:
+  method: fixed_percentage
+  max_position_pct: 4.0
+  max_sector_pct: 15.0
+
+risk_management:
+  stop_loss_pct: null
+  max_drawdown_strategy: 10.0
+  max_drawdown_portfolio: 20.0
+
+backtest_results:
+  period: "2021-2024"
+  total_trades: 112
+  win_rate: 70.5
+  profit_factor: 1.9
+  sharpe_ratio: 1.6
+  max_drawdown: 8.0
+  avg_hold_days: 2.9
+  cagr: 22.0
+
+train_metrics:
+  period: "2021-2022"
+  trades: 58
+  win_rate: 69.0
+  profit_factor: 1.8
+
+test_metrics:
+  period: "2023-2024"
+  trades: 54
+  win_rate: 72.2
+  profit_factor: 2.0
+  decay_vs_train: -4.6
+
+signal_generation:
+  schedule: "Monday 09:00 HKT"
+  sql_query: |
+    WITH down_days AS (
+      SELECT ticker, date, close,
+             CASE WHEN close < LAG(close) OVER (PARTITION BY ticker ORDER BY date) THEN 1 ELSE 0 END as down
+      FROM silver.unified_prices
+    ),
+    streaks AS (
+      SELECT ticker, date, close,
+             SUM(down) OVER (PARTITION BY ticker ORDER BY date ROWS 2 PRECEDING) as down_streak
+      FROM down_days
+    )
+    SELECT ticker, 'BUY' as signal
+    FROM streaks s
+    JOIN gold.stock_metrics m ON s.ticker = m.ticker AND s.date = m.date
+    WHERE down_streak = 3
+    AND EXTRACT(DOW FROM s.date) = 1
+    AND m.rsi_14 < 40
+
+validation_status:
+  backtest_verified: true
+  walk_forward_tested: true
+  qa_approved: false
+  deployed: false

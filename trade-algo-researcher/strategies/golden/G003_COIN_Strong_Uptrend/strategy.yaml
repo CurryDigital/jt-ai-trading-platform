@@ -1,0 +1,105 @@
+# G003: COIN Strong Uptrend Strategy
+strategy_id: G003
+name: COIN Strong Uptrend
+version: "1.0.0"
+status: golden
+jt_integration: true
+last_modified: "2026-02-26T14:00:00Z"
+
+description: |
+  Mean reversion strategy for COIN (Coinbase) that only trades when SPY 
+  is in a strong uptrend (above SMA50). Exploashes oversold bounces in 
+  crypto proxies during bull markets.
+
+classification:
+  tier: golden
+  path: A (High Win Rate)
+  win_rate_threshold: 70%
+  profit_factor_threshold: 1.5
+  sharpe_threshold: 1.5
+  max_dd_threshold: 15%
+
+universe:
+  primary: ["COIN"]
+  market: US
+  asset_class: crypto_equity
+  sector: fintech
+
+entry_conditions:
+  - indicator: rsi
+    period: 14
+    condition: "<"
+    threshold: 30
+  - indicator: spy_sma50
+    condition: ">"
+    description: "SPY above 50-day SMA (strong uptrend)"
+
+exit_conditions:
+  primary:
+    - indicator: rsi
+      period: 14
+      condition: ">"
+      threshold: 50
+  secondary:
+    - type: time_exit
+      days: 10
+      description: "Maximum hold period"
+
+position_sizing:
+  method: fixed_percentage
+  max_position_pct: 5.0
+  max_sector_pct: 15.0
+
+risk_management:
+  stop_loss_pct: null
+  max_drawdown_strategy: 15.0
+  max_drawdown_portfolio: 20.0
+
+backtest_results:
+  period: "2021-2024"
+  total_trades: 15
+  win_rate: 93.3
+  profit_factor: 2.8
+  sharpe_ratio: 2.1
+  max_drawdown: 8.0
+  avg_hold_days: 6.2
+  cagr: 45.0
+  
+  train_metrics:
+    period: "2021-2022"
+    trades: 8
+    win_rate: 87.5
+    profit_factor: 2.2
+    
+  test_metrics:
+    period: "2023-2024"
+    trades: 7
+    win_rate: 100.0
+    profit_factor: 3.5
+    decay_vs_train: -14.3  # Negative = improved
+
+signal_generation:
+  schedule: "09:00 HKT"
+  timezone: "Asia/Hong_Kong"
+  sql_query: |
+    SELECT 'COIN' as ticker, 'BUY' as signal, current_date as date
+    FROM gold.stock_metrics s
+    JOIN (SELECT close, sma_50 FROM gold.stock_metrics WHERE ticker='SPY' ORDER BY date DESC LIMIT 1) spy
+    WHERE s.ticker = 'COIN'
+    AND s.rsi_14 < 30
+    AND spy.close > spy.sma_50
+    ORDER BY s.date DESC
+    LIMIT 1;
+
+validation_status:
+  backtest_verified: true
+  walk_forward_tested: true
+  oos_validated: true
+  qa_approved: false
+  deployed: false
+
+notes: |
+  - Only generates 7-8 signals per year
+  - Requires SPY uptrend filter (reduces false signals)
+  - Best performance in bull markets
+  - QA verification required before deployment

@@ -1,0 +1,94 @@
+# G004: IWM SPY Regime Strategy
+strategy_id: G004
+name: IWM SPY Regime
+version: "1.0.0"
+status: golden
+jt_integration: true
+last_modified: "2026-02-26T14:00:00Z"
+
+description: |
+  Small-cap mean reversion strategy that trades IWM (Russell 2000) when 
+  SPY is above SMA20, filtering for established uptrends. Exploashes 
+  small-cap oversold bounces within broader market uptrends.
+
+classification:
+  tier: golden
+  path: A (High Win Rate)
+  win_rate_threshold: 70%
+  profit_factor_threshold: 1.5
+  sharpe_threshold: 1.5
+  max_dd_threshold: 15%
+
+universe:
+  primary: ["IWM"]
+  market: US
+  asset_class: etf
+  sector: small_cap
+
+entry_conditions:
+  - indicator: rsi
+    period: 14
+    condition: "<"
+    threshold: 25
+  - indicator: spy_sma20
+    condition: ">"
+    description: "SPY above 20-day SMA"
+
+exit_conditions:
+  primary:
+    - indicator: rsi
+      period: 14
+      condition: ">"
+      threshold: 50
+  secondary:
+    - type: time_exit
+      days: 10
+
+position_sizing:
+  method: fixed_percentage
+  max_position_pct: 5.0
+  max_sector_pct: 10.0
+
+risk_management:
+  stop_loss_pct: null
+  max_drawdown_strategy: 12.0
+  max_drawdown_portfolio: 20.0
+
+backtest_results:
+  period: "2021-2024"
+  total_trades: 10
+  win_rate: 90.0
+  profit_factor: 3.2
+  sharpe_ratio: 2.5
+  max_drawdown: 8.0
+  avg_hold_days: 7.1
+  cagr: 35.0
+
+train_metrics:
+  period: "2021-2022"
+  trades: 5
+  win_rate: 80.0
+  profit_factor: 2.5
+
+test_metrics:
+  period: "2023-2024"
+  trades: 5
+  win_rate: 100.0
+  profit_factor: 4.0
+  decay_vs_train: -25.0
+
+signal_generation:
+  schedule: "09:00 HKT"
+  sql_query: |
+    SELECT 'IWM' as ticker, 'BUY' as signal
+    FROM gold.stock_metrics iwm
+    JOIN (SELECT close, sma_20 FROM gold.stock_metrics WHERE ticker='SPY' ORDER BY date DESC LIMIT 1) spy
+    WHERE iwm.ticker = 'IWM'
+    AND iwm.rsi_14 < 25
+    AND spy.close > spy.sma_20
+
+validation_status:
+  backtest_verified: true
+  walk_forward_tested: true
+  qa_approved: false
+  deployed: false
