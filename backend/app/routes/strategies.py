@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api", tags=["strategies"])
 
 @router.get("/quant/templates")
 def get_strategy_templates_quant():
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     return StrategyManager().get_templates()
 
 
@@ -30,7 +30,7 @@ def get_quant_strategies(db: Session = Depends(get_db)):
 
 @router.post("/quant/strategies/bulk-create")
 def bulk_create_strategies(payload: dict, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     sm = StrategyManager()
     strats = sm.bulk_create_strategies(payload.get("selections", []))
     return {"status": "success", "count": len(strats)}
@@ -38,14 +38,14 @@ def bulk_create_strategies(payload: dict, db: Session = Depends(get_db)):
 
 @router.post("/quant/strategies/mode")
 def set_strategy_mode_quant(payload: dict, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     success = StrategyManager().toggle_mode(payload.get("id"), payload.get("mode"))
     return {"status": "success" if success else "failed"}
 
 
 @router.post("/quant/strategies/create")
 def create_quant_strategy(payload: dict, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     sm = StrategyManager()
     strat = sm.create_fx_strategy(
         payload.get("pair", "EURUSD=X"), payload.get("lot_size", 1000),
@@ -123,8 +123,8 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
 
 @router.get("/strategies/templates")
 def get_strategy_templates(asset_class: str = None):
-    from app.core_logic.strategies.strategy_config import get_all_strategy_templates
-    templates = get_all_strategy_templates()
+    from app.services.strategy_manager import StrategyManager
+    templates = StrategyManager().get_templates()
     if asset_class:
         templates = [t for t in templates if t.asset_class == asset_class]
     return [{"id": t.id, "name": t.name, "description": t.description,
@@ -134,7 +134,7 @@ def get_strategy_templates(asset_class: str = None):
 
 @router.get("/strategies/templates/{asset_class}")
 def get_templates_for_asset(asset_class: str):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     return StrategyManager().get_templates_by_asset(asset_class.upper())
 
 
@@ -144,7 +144,7 @@ def get_templates_for_asset(asset_class: str):
 
 @router.post("/strategies/create")
 def create_strategy_api(payload: dict, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     sm = StrategyManager()
     try:
         strategy = sm.create_strategy(
@@ -242,7 +242,7 @@ def add_stocks_to_paper(payload: dict, db: Session = Depends(get_db)):
 
 @router.get("/strategies/by-asset/{asset_class}")
 def get_strategies_by_asset(asset_class: str, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     strategies = StrategyManager().get_strategies_by_asset(asset_class)
     return [{"id": s.id, "name": s.name, "ticker": s.target_ticker, "is_active": s.is_active,
              "current_pnl": s.current_pnl, "total_trades": s.total_trades, "params": s.params} for s in strategies]
@@ -250,7 +250,7 @@ def get_strategies_by_asset(asset_class: str, db: Session = Depends(get_db)):
 
 @router.get("/strategies/{strategy_id:path}/daily-pnl")
 def get_strategy_daily_pnl_api(strategy_id: int, start_date: str = None, end_date: str = None, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     result = StrategyManager().get_strategy_daily_pnl(strategy_id, start_date, end_date)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -259,7 +259,7 @@ def get_strategy_daily_pnl_api(strategy_id: int, start_date: str = None, end_dat
 
 @router.get("/strategies/{strategy_id:path}/backtest-summary")
 def get_strategy_backtest_summary_api(strategy_id: int, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     result = StrategyManager().get_strategy_backtest_summary(strategy_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -268,7 +268,7 @@ def get_strategy_backtest_summary_api(strategy_id: int, db: Session = Depends(ge
 
 @router.get("/strategies/{strategy_id:path}/detail")
 def get_strategy_detail(strategy_id: int, db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     sm = StrategyManager()
     strategy = db.query(QuantStrategy).filter(QuantStrategy.id == strategy_id).first()
     if not strategy:

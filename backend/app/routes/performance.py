@@ -198,6 +198,6 @@ def get_hft_matrix(db: Session = Depends(get_db)):
 
 @router.get("/quant/performance/matrix")
 def get_performance_matrix(db: Session = Depends(get_db)):
-    from app.core_logic.strategies.strategy_manager import StrategyManager
+    from app.services.strategy_manager import StrategyManager
     sm = StrategyManager()
     return sm.get_performance_matrix()

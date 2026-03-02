@@ -8,9 +8,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-# TODO: stock_detail router may still use yfinance internally — audit and migrate to DB
-from app.api.stock_detail import router as stock_detail_router
-
 # Route modules
 from app.routes import market, stocks, fx, crypto, strategies, positions
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex
@@ -34,7 +31,6 @@ app.add_middleware(
 )
 
 # Register route modules
-app.include_router(stock_detail_router)
 app.include_router(market.router)
 app.include_router(stocks.router)
 app.include_router(fx.router)
