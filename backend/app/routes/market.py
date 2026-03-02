@@ -66,61 +66,27 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
 def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
     """Get top gainers and losers from consumption view."""
     try:
-        # Try consumption view first (has aggregated data)
+        # Get stocks with non-zero change, properly separated
         rows = db.execute(text("""
             SELECT ticker, name, price, change_pct, volume, sector
             FROM consumption.Markets_Stocks_Overview
-            WHERE change_pct IS NOT NULL
+            WHERE change_pct IS NOT NULL AND change_pct != 0 AND price > 0
             ORDER BY change_pct DESC
-            LIMIT 20
         """)).fetchall()
 
         if rows:
+            # Properly separate gainers (positive) from losers (negative)
             gainers = [{"ticker": r.ticker, "name": r.name or r.ticker, "price": float(r.price or 0), 
-                        "change_percent": round(float(r.change_pct), 2)} for r in rows[:10]]
+                        "change_percent": round(float(r.change_pct), 2),
+                        "volume": r.volume} for r in rows if r.change_pct > 0][:10]
+            
             losers = [{"ticker": r.ticker, "name": r.name or r.ticker, "price": float(r.price or 0),
-                       "change_percent": round(float(r.change_pct), 2)} for r in rows[-10:][::-1]]
-            return {"gainers": gainers, "losers": losers, "source": "consumption"}
+                       "change_percent": round(float(r.change_pct), 2),
+                       "volume": r.volume} for r in rows if r.change_pct < 0][:10]
+            
+            return {"gainers": gainers, "losers": losers, "source": "consumption", "count": len(rows)}
     except Exception as e:
         logger.warning(f"Consumption movers failed: {e}")
-
-    # Fallback to silver.unified_prices
-    try:
-        rows = db.execute(text("""
-            WITH price_changes AS (
-                SELECT 
-                    ticker, close, date,
-                    LAG(close) OVER (PARTITION BY ticker ORDER BY date DESC) as prev_close,
-                    ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
-                FROM silver.unified_prices
-                WHERE date >= CURRENT_DATE - INTERVAL '5 days'
-            )
-            SELECT ticker, close, prev_close,
-                   CASE WHEN prev_close > 0 AND prev_close IS NOT NULL 
-                        THEN ((close - prev_close) / prev_close * 100) 
-                        ELSE 0 
-                   END as change_pct
-            FROM price_changes
-            WHERE rn = 1 AND prev_close IS NOT NULL
-            ORDER BY change_pct DESC
-        """)).fetchall()
-
-        if rows:
-            ticker_changes = []
-            seen = set()
-            for row in rows:
-                if row.ticker not in seen and row.change_pct is not None:
-                    ticker_changes.append({
-                        "ticker": row.ticker,
-                        "name": row.ticker,
-                        "price": float(row.close),
-                        "change_percent": float(row.change_pct),
-                    })
-                    seen.add(row.ticker)
-
-            return {"gainers": ticker_changes[:10], "losers": ticker_changes[-10:][::-1], "source": "silver"}
-    except Exception as e:
-        logger.error(f"Error in market movers: {e}")
 
     return {"gainers": [], "losers": [], "source": "fallback", "message": "No market data available"}
 
