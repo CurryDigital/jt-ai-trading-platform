@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { MarketsTab } from './components/MarketsTab';
+import { SettingsTab } from './components/SettingsTab';
+import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 
 // =============================================================================
-// JTCML TRADING PLATFORM v4.0 — COMPACT AUTO-TRADING DASHBOARD
+// JTCML TRADING PLATFORM v4.1 — COMPACT AUTO-TRADING DASHBOARD
 // =============================================================================
 
 // --- UTILS ---
@@ -18,16 +21,6 @@ const Pill = ({ children, color = 'slate' }) => {
 };
 
 const Dot = ({ on }) => <span className={`inline-block w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />;
-
-const MiniBar = ({ value, max = 100, color = 'blue' }) => {
-  const pct = Math.min(100, Math.max(0, (value / max) * 100));
-  const c = { blue: 'bg-blue-500', emerald: 'bg-emerald-500', rose: 'bg-rose-500', amber: 'bg-amber-500' };
-  return (
-    <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-      <div className={`h-full rounded-full ${c[color] || c.blue}`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-};
 
 const SparkBars = ({ data = [], height = 24 }) => {
   if (!data.length) return <div className="h-6 text-[10px] text-slate-600 flex items-center">No data</div>;
@@ -57,32 +50,24 @@ const KPI = ({ label, value, sub, positive }) => (
 // =============================================================================
 const StrategyRow = ({ s, onDeploy, onViewDetail }) => {
   const wr = s.live_win_rate ?? s.backtest_win_rate;
-  const wrColor = wr > 60 ? 'emerald' : wr > 45 ? 'amber' : 'rose';
   const sig = s.current_signal;
 
   return (
     <div className="grid grid-cols-12 gap-2 items-center px-3 py-2 hover:bg-white/[0.02] border-b border-white/5 text-xs cursor-pointer"
       onClick={() => onViewDetail?.(s)}>
-      {/* Name + Asset */}
       <div className="col-span-3 min-w-0">
         <div className="font-bold text-white truncate">{s.strategy_name || s.strategy_id}</div>
         <div className="text-[10px] text-slate-500">{s.asset_class || '—'}</div>
       </div>
-      {/* Win Rate */}
       <div className="col-span-1 text-right">
-        <span className={`font-mono font-bold ${pnlCl(wr - 50)}`}>{wr != null ? `${wr.toFixed(0)}%` : '—'}</span>
+        <span className={`font-mono font-bold ${pnlCl(wr != null ? wr - 50 : null)}`}>{wr != null ? `${wr.toFixed(0)}%` : '—'}</span>
       </div>
-      {/* Sharpe */}
       <div className="col-span-1 text-right font-mono text-slate-300">{s.sharpe_ratio ? s.sharpe_ratio.toFixed(2) : '—'}</div>
-      {/* Live Trades */}
       <div className="col-span-1 text-right font-mono text-slate-400">{s.live_trades || 0}</div>
-      {/* Returns */}
       <div className="col-span-1 text-right">
         <span className={`font-mono font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</span>
       </div>
-      {/* Backtest WR */}
       <div className="col-span-1 text-right text-slate-500 font-mono">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '—'}</div>
-      {/* Signal */}
       <div className="col-span-2 text-center">
         {sig ? (
           <div className="flex items-center gap-1 justify-center">
@@ -91,7 +76,6 @@ const StrategyRow = ({ s, onDeploy, onViewDetail }) => {
           </div>
         ) : <span className="text-slate-600">—</span>}
       </div>
-      {/* Deploy */}
       <div className="col-span-2 text-right">
         <button onClick={e => { e.stopPropagation(); onDeploy?.(s); }}
           className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-[10px] font-bold rounded transition-colors">
@@ -156,7 +140,6 @@ const PositionTable = ({ positions = [], onClose }) => (
 // P&L SUMMARY — Daily / Weekly / Monthly breakdown
 // =============================================================================
 const PnLSummary = ({ dailyPnl = [], trades = [] }) => {
-  // Group by week and month
   const today = new Date();
   const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
   const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
@@ -234,19 +217,16 @@ const StrategyDetail = ({ strategy, onClose }) => {
           <div className="p-8 text-center text-slate-500">Loading...</div>
         ) : (
           <div className="p-3 space-y-4">
-            {/* Description */}
             {detail?.description && (
               <p className="text-xs text-slate-400 leading-relaxed">{detail.description}</p>
             )}
 
-            {/* Key Metrics */}
             <div className="grid grid-cols-3 gap-2">
               <KPI label="Win Rate" value={strategy.live_win_rate != null ? `${strategy.live_win_rate.toFixed(0)}%` : '—'} sub={strategy.backtest_win_rate != null ? `BT: ${strategy.backtest_win_rate.toFixed(0)}%` : undefined} />
               <KPI label="Sharpe" value={strategy.sharpe_ratio?.toFixed(2) || '—'} />
               <KPI label="Returns" value={fmtPct(strategy.returns)} positive={strategy.returns >= 0} />
             </div>
 
-            {/* Signal Logic */}
             {detail?.signal_logic && (
               <div className="bg-slate-900/50 rounded-lg p-3 border border-white/5">
                 <div className="text-[9px] text-slate-500 uppercase mb-1">Buy Signal</div>
@@ -260,13 +240,11 @@ const StrategyDetail = ({ strategy, onClose }) => {
               </div>
             )}
 
-            {/* P&L Trend */}
             <div className="bg-slate-900/50 rounded-lg p-3 border border-white/5">
               <div className="text-[9px] text-slate-500 uppercase mb-2">Daily P&L (30D)</div>
               <SparkBars data={dailyPnl.map(d => d.total_pnl || d.pnl || 0)} height={40} />
             </div>
 
-            {/* Active Positions */}
             <div>
               <div className="text-[9px] text-slate-500 uppercase mb-1">Active Positions ({positions.length})</div>
               <PositionTable positions={positions} />
@@ -279,7 +257,7 @@ const StrategyDetail = ({ strategy, onClose }) => {
 };
 
 // =============================================================================
-// DEPLOY MODAL — Quick deploy strategy
+// DEPLOY MODAL
 // =============================================================================
 const DeployModal = ({ strategy, onClose, onDone }) => {
   const [tickers, setTickers] = useState('');
@@ -347,7 +325,7 @@ const DeployModal = ({ strategy, onClose, onDone }) => {
 // MAIN APP
 // =============================================================================
 function App() {
-  const [view, setView] = useState('command'); // command | lab | portfolio
+  const [view, setView] = useState('command'); // command | lab | portfolio | markets | settings
   const [data, setData] = useState({
     strategies: [], positions: [], paperStrategies: [],
     dailyPnl: [], trades: [], summary: {},
@@ -356,6 +334,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [detailStrategy, setDetailStrategy] = useState(null);
   const [deployStrategy, setDeployStrategy] = useState(null);
+  const [tickerModal, setTickerModal] = useState(null);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -388,7 +367,7 @@ function App() {
 
   useEffect(() => { fetchAll(); const t = setInterval(fetchAll, 30000); return () => clearInterval(t); }, [fetchAll]);
 
-  // Derived data
+  // Derived
   const totalUnrealized = data.positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
   const totalRealized = data.trades.reduce((s, t) => s + (t.pnl || 0), 0);
   const activeStrategies = data.strategies.filter(s => s.live_trades > 0).length;
@@ -396,12 +375,17 @@ function App() {
   const isConnected = data.ibStatus?.socket === 'Connected' || data.ibStatus?.status === 'Connected';
   const modeColor = data.mode === 'LIVE_TRADING' ? 'rose' : data.mode === 'PAPER_TRADING' ? 'blue' : 'amber';
 
-  // --- NAV ITEMS ---
   const navItems = [
     { id: 'command', icon: '⚡', label: 'Command' },
     { id: 'lab', icon: '🧪', label: 'Lab' },
     { id: 'portfolio', icon: '📊', label: 'Portfolio' },
+    { id: 'markets', icon: '📈', label: 'Markets' },
+    { id: 'settings', icon: '⚙️', label: 'Settings' },
   ];
+
+  const handleTickerClick = (ticker) => {
+    setTickerModal(ticker);
+  };
 
   if (loading) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -417,9 +401,12 @@ function App() {
   // =============================================================================
   const CommandView = () => (
     <div className="space-y-3">
+      {/* Execution Mode Toggle */}
+      <GlobalExecutionToggle />
+
       {/* KPI Strip */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-        <KPI label="Portfolio" value={fmtK(portfolioValue)} sub={data.mode} />
+        <KPI label="Portfolio" value={fmtK(portfolioValue)} sub={data.mode.replace(/_/g, ' ')} />
         <KPI label="Unrealized P&L" value={fmtK(totalUnrealized)} sub={fmtPct(portfolioValue > 0 ? totalUnrealized / portfolioValue * 100 : 0)} positive={totalUnrealized >= 0} />
         <KPI label="Realized P&L" value={fmtK(totalRealized)} positive={totalRealized >= 0} />
         <KPI label="Active Strategies" value={activeStrategies} sub={`of ${data.strategies.length}`} />
@@ -430,9 +417,8 @@ function App() {
       {/* P&L Breakdown */}
       <PnLSummary dailyPnl={data.dailyPnl} trades={data.trades} />
 
-      {/* P&L Chart + Strategies split */}
+      {/* P&L Chart + Strategies */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {/* P&L Trend */}
         <div className="bg-slate-900/50 rounded-lg border border-white/5 p-3">
           <div className="text-[9px] text-slate-500 uppercase mb-2">30-Day P&L Trend</div>
           <SparkBars data={data.dailyPnl.map(d => d.pnl || 0)} height={80} />
@@ -442,13 +428,11 @@ function App() {
           </div>
         </div>
 
-        {/* Strategies Table */}
         <div className="lg:col-span-2 bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
             <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Strategy Performance</span>
             <span className="text-[10px] text-slate-600">{data.strategies.length} strategies</span>
           </div>
-          {/* Header */}
           <div className="grid grid-cols-12 gap-2 px-3 py-1.5 text-[9px] text-slate-500 uppercase tracking-wider border-b border-white/10">
             <div className="col-span-3">Strategy</div>
             <div className="col-span-1 text-right">WR</div>
@@ -492,7 +476,7 @@ function App() {
   );
 
   // =============================================================================
-  // STRATEGY LAB VIEW — Pre-deploy analysis
+  // STRATEGY LAB VIEW
   // =============================================================================
   const LabView = () => {
     const [researchers, setResearchers] = useState([]);
@@ -508,14 +492,12 @@ function App() {
 
     return (
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-bold text-white">Strategy Lab</h2>
-            <p className="text-[10px] text-slate-500">Review backtests and signals before deploying</p>
-          </div>
+        <div>
+          <h2 className="text-sm font-bold text-white">Strategy Lab</h2>
+          <p className="text-[10px] text-slate-500">Review backtests and signals before deploying</p>
         </div>
 
-        {/* Researcher Strategies — Ready to Deploy */}
+        {/* Researcher Strategies */}
         <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5">
             <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">JT-Ready Strategies</span>
@@ -566,7 +548,7 @@ function App() {
           )}
         </div>
 
-        {/* Backtest Comparison — Existing strategies */}
+        {/* Backtest vs Live */}
         <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5">
             <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Backtest vs Live Comparison</span>
@@ -575,8 +557,8 @@ function App() {
             <thead>
               <tr className="text-[9px] text-slate-500 uppercase tracking-wider border-b border-white/10">
                 <th className="text-left py-1.5 px-3">Strategy</th>
-                <th className="text-right py-1.5 px-3">BT Win Rate</th>
-                <th className="text-right py-1.5 px-3">Live Win Rate</th>
+                <th className="text-right py-1.5 px-3">BT WR</th>
+                <th className="text-right py-1.5 px-3">Live WR</th>
                 <th className="text-right py-1.5 px-3">Δ</th>
                 <th className="text-right py-1.5 px-3">BT Return</th>
                 <th className="text-right py-1.5 px-3">Live Return</th>
@@ -586,15 +568,13 @@ function App() {
             </thead>
             <tbody>
               {data.strategies.map((s, i) => {
-                const btWr = s.backtest_win_rate;
-                const liveWr = s.live_win_rate;
-                const delta = btWr != null && liveWr != null ? liveWr - btWr : null;
+                const delta = s.backtest_win_rate != null && s.live_win_rate != null ? s.live_win_rate - s.backtest_win_rate : null;
                 return (
                   <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer"
                     onClick={() => setDetailStrategy(s)}>
                     <td className="py-1.5 px-3 font-bold text-white">{s.strategy_name || s.strategy_id}</td>
-                    <td className="py-1.5 px-3 text-right font-mono text-slate-400">{btWr != null ? `${btWr.toFixed(0)}%` : '—'}</td>
-                    <td className={`py-1.5 px-3 text-right font-mono font-bold ${pnlCl(liveWr != null ? liveWr - 50 : null)}`}>{liveWr != null ? `${liveWr.toFixed(0)}%` : '—'}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-slate-400">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '—'}</td>
+                    <td className={`py-1.5 px-3 text-right font-mono font-bold ${pnlCl(s.live_win_rate != null ? s.live_win_rate - 50 : null)}`}>{s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '—'}</td>
                     <td className={`py-1.5 px-3 text-right font-mono ${pnlCl(delta)}`}>{delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}pp` : '—'}</td>
                     <td className="py-1.5 px-3 text-right font-mono text-slate-400">{s.backtest_return != null ? fmtPct(s.backtest_return) : '—'}</td>
                     <td className={`py-1.5 px-3 text-right font-mono font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</td>
@@ -611,7 +591,7 @@ function App() {
   };
 
   // =============================================================================
-  // PORTFOLIO VIEW — Post-deploy IBKR positions + P&L
+  // PORTFOLIO VIEW
   // =============================================================================
   const PortfolioView = () => {
     const [paperStrats, setPaperStrats] = useState([]);
@@ -631,10 +611,9 @@ function App() {
           <KPI label="Unrealized" value={fmtK(totalUnrealized)} positive={totalUnrealized >= 0} />
           <KPI label="Realized" value={fmtK(totalRealized)} positive={totalRealized >= 0} />
           <KPI label="Positions" value={data.positions.length} />
-          <KPI label="Mode" value={data.mode.replace('_', ' ')} />
+          <KPI label="Mode" value={data.mode.replace(/_/g, ' ')} />
         </div>
 
-        {/* P&L Breakdown */}
         <PnLSummary dailyPnl={data.dailyPnl} trades={data.trades} />
 
         {/* Monthly Returns */}
@@ -666,11 +645,11 @@ function App() {
           }} />
         </div>
 
-        {/* Paper Strategies by Strategy */}
+        {/* Paper Strategies */}
         <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5">
             <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-              Paper Positions ({paperStrats.length}) — {data.mode}
+              Paper Positions ({paperStrats.length})
             </span>
           </div>
           <div className="max-h-[400px] overflow-y-auto">
@@ -715,10 +694,9 @@ function App() {
   // =============================================================================
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans">
-      {/* Top Bar — Compact */}
+      {/* Top Bar */}
       <header className="fixed top-0 left-0 right-0 z-40 border-b border-white/5 bg-slate-950/90 backdrop-blur-xl">
         <div className="flex items-center justify-between px-3 py-1.5 max-w-[1800px] mx-auto">
-          {/* Left — Logo + Nav */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[10px] font-black">JT</div>
@@ -735,7 +713,6 @@ function App() {
             </nav>
           </div>
 
-          {/* Right — Status */}
           <div className="flex items-center gap-3">
             <Pill color={modeColor}>{data.mode.replace('_TRADING', '').replace('_', ' ')}</Pill>
             <div className="flex items-center gap-1">
@@ -748,10 +725,12 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="pt-12 pb-4 px-3 max-w-[1800px] mx-auto">
+      <main className="pt-12 pb-8 px-3 max-w-[1800px] mx-auto">
         {view === 'command' && <CommandView />}
         {view === 'lab' && <LabView />}
         {view === 'portfolio' && <PortfolioView />}
+        {view === 'markets' && <MarketsTab onTickerClick={handleTickerClick} />}
+        {view === 'settings' && <SettingsTab />}
       </main>
 
       {/* Modals */}
@@ -761,7 +740,7 @@ function App() {
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 border-t border-white/5 bg-slate-950/80 backdrop-blur py-1 px-3">
         <div className="flex items-center justify-between text-[9px] text-slate-600 max-w-[1800px] mx-auto">
-          <span>v4.0 • Platform Mode</span>
+          <span>v4.1 • Platform Mode</span>
           <span>JTCML Trading Systems</span>
         </div>
       </footer>
