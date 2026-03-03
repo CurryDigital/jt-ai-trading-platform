@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Internal Imports
 from app.db.session import (
     SessionLocal, Base, engine, Inventory, GlobalState,
-    ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy
+    ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy, StrategyRegistry
 )
 from app.core_logic.data.wholistic_pipeline import (
     refresh_indices_and_mood, refresh_fx_layer, refresh_commodity_layer, refresh_crypto_layer, refresh_stock_layer, refresh_hft_layer
@@ -3793,7 +3793,56 @@ def get_cash_position_summary(db: Session = Depends(get_db)):
 
 @app.get("/api/strategies/researcher")
 def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get_db)):
-    """Get JT Researcher strategies from strategy_definitions"""
+    """Get JT Researcher strategies from strategy_registry (canonical source from DE)"""
+    try:
+        # Query from StrategyRegistry (canonical source of truth from DE)
+        query = db.query(StrategyRegistry)
+        
+        # Filter by status - only active strategies
+        query = query.filter(StrategyRegistry.status.in_(['ACTIVE', 'TESTING']))
+        
+        # Note: asset_class filter can be added if DE adds that column to registry
+        # For now, we filter GOLDEN priority as the "JT-Ready" strategies
+        query = query.filter(StrategyRegistry.priority.in_(['GOLDEN', 'NEAR_GOLDEN']))
+        
+        strategies = query.all()
+        
+        result = []
+        for s in strategies:
+            # Parse target_assets into universe array
+            tickers = s.target_assets.split(',') if s.target_assets else []
+            
+            result.append({
+                "id": s.strategy_id,
+                "name": s.strategy_name,
+                "description": f"{s.priority} strategy v{s.version}",
+                "asset_class": "STOCK",  # Default - could be derived from target_assets
+                "direction": "LONG",  # Default - not in registry schema
+                "time_horizon": "5-10 days",  # Default - not in registry schema
+                "sharpe_ratio": 1.5,  # Placeholder - could be calculated from win_rate
+                "max_drawdown": -5.0,  # Placeholder
+                "win_rate": float(s.win_rate) / 100 if s.win_rate else 0.55,  # Convert from % to decimal
+                "universe": tickers,
+                "universe_count": len(tickers),
+                "max_position_pct": 0.05,
+                "venue": "IBKR",
+                "status": s.status,
+                "priority": s.priority,
+                "version": s.version,
+                "entry_logic": s.entry_logic,
+                "exit_logic": s.exit_logic,
+                "source": "strategy_registry"
+            })
+        
+        return {"strategies": result, "count": len(result)}
+    except Exception as e:
+        logger.error(f"Error fetching from strategy_registry: {e}")
+        # Fallback to legacy table for backward compatibility during migration
+        return _get_strategies_from_definitions(db, asset_class)
+
+
+def _get_strategies_from_definitions(db: Session, asset_class: str = None):
+    """Legacy fallback - read from strategy_definitions during migration"""
     query = """
         SELECT 
             strategy_id as id,
@@ -3836,7 +3885,7 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
             "max_position_pct": float(row.max_position_pct) if row.max_position_pct else 0.05,
             "venue": row.venue,
             "status": row.status,
-            "source": "trade_algo_researcher"
+            "source": "strategy_definitions_fallback"
         })
     
     return {"strategies": strategies, "count": len(strategies)}

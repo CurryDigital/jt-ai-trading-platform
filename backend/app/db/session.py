@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY, DECIMAL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
@@ -209,6 +209,20 @@ class QuantStrategy(Base):
     winning_trades = Column(Integer, default=0)
     current_pnl = Column(Float, default=0.0)
     equity_curve = Column(JSON) # Array of history points
+
+# NEW: Strategy Registry - canonical source of truth from DE
+class StrategyRegistry(Base):
+    __tablename__ = "strategy_registry"
+    __table_args__ = {"schema": "gold"}
+    strategy_id = Column(String(10), primary_key=True)  # S001, S002, etc.
+    strategy_name = Column(String(100))
+    version = Column(String(10))
+    status = Column(String(20))  # ACTIVE/DEPRECATED/TESTING
+    priority = Column(String(20))  # GOLDEN/NEAR_GOLDEN/EXPERIMENTAL
+    win_rate = Column(DECIMAL(5,2))
+    entry_logic = Column(Text)
+    exit_logic = Column(Text)
+    target_assets = Column(Text)  # Ticker list
 
 class Trade(Base):
     __tablename__ = "trades"
