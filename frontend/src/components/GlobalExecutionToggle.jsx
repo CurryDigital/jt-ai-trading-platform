@@ -21,9 +21,8 @@ export const GlobalExecutionToggle = () => {
 
   useEffect(() => {
     fetchGlobalMode();
-    // Auto-refresh disabled - use manual refresh only
-    // const interval = setInterval(fetchGlobalMode, 60000);
-    // return () => clearInterval(interval);
+    const interval = setInterval(fetchGlobalMode, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // Handle click outside to close config panel

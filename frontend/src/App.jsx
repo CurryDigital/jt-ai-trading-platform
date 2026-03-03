@@ -351,9 +351,8 @@ function App() {
     };
 
     fetchData();
-    // Auto-refresh disabled - use manual refresh only
-    // const interval = setInterval(fetchData, 30000);
-    // return () => clearInterval(interval);
+    const interval = setInterval(fetchData, 60000); // Refresh every 60s
+    return () => clearInterval(interval);
   }, []);
 
   // --- TAB CONFIGURATION ---

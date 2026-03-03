@@ -32,18 +32,19 @@ const StrategyLab = () => {
   ];
 
   useEffect(() => {
-    fetchStrategies();
+    fetchStrategies(true);  // Initial load with loading
     fetchLiveStats();
     
-    // Auto-refresh disabled - use manual refresh only
-    // const interval = setInterval(() => {
-    //   fetchLiveStats();
-    // }, 30000);
-    // return () => clearInterval(interval);
+    // Refresh every 60 seconds
+    const interval = setInterval(() => {
+      fetchLiveStats();
+    }, 60000);
+    
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchStrategies = async () => {
-    setLoading(true);
+  const fetchStrategies = async (isInitial = false) => {
+    if (isInitial) setLoading(true);
     try {
       // Fetch all researcher strategies with backtest data
       const res = await fetch('/api/strategies/researcher');
@@ -72,7 +73,7 @@ const StrategyLab = () => {
     } catch (e) {
       console.error('Failed to fetch strategies:', e);
     }
-    setLoading(false);
+    if (isInitial) setLoading(false);
   };
 
   const fetchLiveStats = async () => {
