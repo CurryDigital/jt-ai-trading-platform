@@ -1208,6 +1208,7 @@ def get_volume_leaders(db: Session = Depends(get_db)):
 def get_global_markets(db: Session = Depends(get_db)):
     """Get global market indices with real data from database"""
     from datetime import datetime, timedelta
+    from fastapi.responses import JSONResponse
     
     # Index mapping: ticker -> display info
     indices = {
@@ -1295,7 +1296,15 @@ def get_global_markets(db: Session = Depends(get_db)):
         # Return empty list on error
         return {"data": [], "error": str(e)}
     
-    return {"data": markets}
+    # Return with cache-control headers to prevent browser caching
+    return JSONResponse(
+        content={"data": markets},
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 @app.get("/api/market/breadth")
 def get_market_breadth(db: Session = Depends(get_db)):

@@ -67,8 +67,8 @@ export const MarketsTab = ({ onTickerClick }) => {
       const volumeRes = await fetch('/api/market/volume-leaders');
       const volumeLeaders = volumeRes.ok ? await volumeRes.json() : [];
 
-      // Fetch global markets
-      const globalRes = await fetch('/api/market/global');
+      // Fetch global markets with cache-busting
+      const globalRes = await fetch(`/api/market/global?_t=${Date.now()}`);
       const global = globalRes.ok ? await globalRes.json() : [];
 
       setMarketData({
