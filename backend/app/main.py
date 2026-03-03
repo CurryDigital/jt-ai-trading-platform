@@ -3941,7 +3941,7 @@ def get_cash_position_summary(db: Session = Depends(get_db)):
 
 @app.get("/api/strategies/researcher")
 def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get_db)):
-    """Get JT Researcher strategies from strategy_registry (canonical source from DE)"""
+    """Get JT Researcher strategies from strategy_registry with real backtest data"""
     try:
         # Query from StrategyRegistry (canonical source of truth from DE)
         query = db.query(StrategyRegistry)
@@ -3949,30 +3949,64 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
         # Filter by status - only active strategies
         query = query.filter(StrategyRegistry.status.in_(['ACTIVE', 'TESTING']))
         
-        # Note: asset_class filter can be added if DE adds that column to registry
-        # For now, we filter GOLDEN priority as the "JT-Ready" strategies
+        # Filter GOLDEN priority as the "JT-Ready" strategies
         query = query.filter(StrategyRegistry.priority.in_(['GOLDEN', 'NEAR_GOLDEN']))
         
         strategies = query.all()
         
+        # Fetch real backtest data from consumption
+        backtest_data = {}
+        try:
+            backtests = db.execute(text("""
+                SELECT 
+                    strategy_id,
+                    AVG(win_rate) as win_rate,
+                    AVG(profit_factor) as profit_factor,
+                    AVG(max_drawdown_pct) as max_drawdown,
+                    AVG(sharpe_ratio) as sharpe,
+                    SUM(total_trades) as total_trades,
+                    AVG(total_return_pct) as total_return
+                FROM consumption.Strategies_Backtest_Results
+                GROUP BY strategy_id
+            """)).fetchall()
+            
+            for bt in backtests:
+                backtest_data[bt.strategy_id] = {
+                    'win_rate': float(bt.win_rate) if bt.win_rate else None,
+                    'profit_factor': float(bt.profit_factor) if bt.profit_factor else None,
+                    'max_drawdown': float(bt.max_drawdown) if bt.max_drawdown else None,
+                    'sharpe': float(bt.sharpe) if bt.sharpe else None,
+                    'total_trades': int(bt.total_trades) if bt.total_trades else None,
+                    'total_return': float(bt.total_return) if bt.total_return else None
+                }
+        except Exception as e:
+            logger.error(f"Error fetching backtest data: {e}")
+        
         result = []
         for s in strategies:
             # Parse target_assets into universe array
-            tickers = s.target_assets.split(',') if s.target_assets else []
+            tickers = [t.strip() for t in s.target_assets.split(',')] if s.target_assets else []
+            
+            # Get backtest data for this strategy
+            bt = backtest_data.get(s.strategy_id, {})
             
             result.append({
                 "id": s.strategy_id,
                 "name": s.strategy_name,
                 "description": f"{s.priority} strategy v{s.version}",
-                "asset_class": "STOCK",  # Default - could be derived from target_assets
-                "direction": "LONG",  # Default - not in registry schema
-                "time_horizon": "5-10 days",  # Default - not in registry schema
-                "sharpe_ratio": 1.5,  # Placeholder - could be calculated from win_rate
-                "max_drawdown": -5.0,  # Placeholder
-                "win_rate": float(s.win_rate) / 100 if s.win_rate else 0.55,  # Convert from % to decimal
+                "asset_class": "STOCK",  # TODO: DE to add asset_class column
+                "direction": "LONG",  # TODO: DE to add direction column
+                "time_horizon": None,  # TODO: DE to add time_horizon column
+                # Real backtest data from consumption (null if not available)
+                "win_rate": bt.get('win_rate') or (float(s.win_rate) / 100 if s.win_rate else None),
+                "profit_factor": bt.get('profit_factor'),
+                "max_drawdown": bt.get('max_drawdown'),
+                "sharpe_ratio": bt.get('sharpe'),
+                "backtest_trades": bt.get('total_trades'),
+                "backtest_return": bt.get('total_return'),
                 "universe": tickers,
                 "universe_count": len(tickers),
-                "max_position_pct": 0.05,
+                "max_position_pct": 0.05,  # TODO: DE to add to registry
                 "venue": "IBKR",
                 "status": s.status,
                 "priority": s.priority,
@@ -3985,6 +4019,8 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
         return {"strategies": result, "count": len(result)}
     except Exception as e:
         logger.error(f"Error fetching from strategy_registry: {e}")
+        # Fallback to legacy table for backward compatibility during migration
+        return _get_strategies_from_definitions(db, asset_class)
         # Fallback to legacy table for backward compatibility during migration
         return _get_strategies_from_definitions(db, asset_class)
 

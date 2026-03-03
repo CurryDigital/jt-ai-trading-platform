@@ -2,10 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 
 /**
  * Strategy Lab - Advanced Strategy Screener with Backtest vs Live Comparison
- * Features:
- * - Filter tabs by asset class (Equity, FX, Crypto, Commodity)
- * - Sort by strategy score, WR, MDD, PF
- * - Side-by-side comparison: Backtest metrics vs Current Year Live metrics
+ * Uses REAL data only - no placeholders
  */
 
 const StrategyLab = () => {
@@ -15,7 +12,7 @@ const StrategyLab = () => {
   
   // Filter states
   const [activeAssetClass, setActiveAssetClass] = useState('ALL');
-  const [sortBy, setSortBy] = useState('strategy_score'); // strategy_score, win_rate, profit_factor, max_drawdown, trades_count
+  const [sortBy, setSortBy] = useState('win_rate');
   const [sortDirection, setSortDirection] = useState('desc');
   const [minWinRate, setMinWinRate] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,7 +29,7 @@ const StrategyLab = () => {
   ];
 
   useEffect(() => {
-    fetchStrategies(true);  // Initial load with loading
+    fetchStrategies(true);
     fetchLiveStats();
     
     // Refresh every 60 seconds
@@ -46,29 +43,10 @@ const StrategyLab = () => {
   const fetchStrategies = async (isInitial = false) => {
     if (isInitial) setLoading(true);
     try {
-      // Fetch all researcher strategies with backtest data
       const res = await fetch('/api/strategies/researcher');
       if (res.ok) {
         const data = await res.json();
-        
-        // Enrich with computed fields
-        const enriched = (data.strategies || []).map(s => ({
-          ...s,
-          // Backtest metrics (from strategy definition)
-          backtest_wr: (s.win_rate || 0) * 100,
-          backtest_mdd: s.max_drawdown || 0,
-          backtest_pf: calculateProfitFactor(s),
-          backtest_trades: s.backtest_trades || Math.floor(Math.random() * 500) + 100, // Fallback
-          backtest_sharpe: s.sharpe_ratio || 1.0,
-          
-          // Strategy score calculation
-          strategy_score: calculateStrategyScore(s),
-          
-          // Determine asset class if not set
-          asset_class: s.asset_class || detectAssetClass(s),
-        }));
-        
-        setStrategies(enriched);
+        setStrategies(data.strategies || []);
       }
     } catch (e) {
       console.error('Failed to fetch strategies:', e);
@@ -78,7 +56,6 @@ const StrategyLab = () => {
 
   const fetchLiveStats = async () => {
     try {
-      // Fetch actual live performance from paper strategies
       const res = await fetch('/api/strategies/stats');
       if (res.ok) {
         const data = await res.json();
@@ -89,63 +66,18 @@ const StrategyLab = () => {
     }
   };
 
-  // Helper: Calculate profit factor from available data
-  const calculateProfitFactor = (strategy) => {
-    // If we have actual profit factor, use it
-    if (strategy.profit_factor) return strategy.profit_factor;
-    
-    // Estimate from win rate and avg returns
-    const wr = strategy.win_rate || 0.55;
-    // Assume avg win is 2x avg loss for estimation
-    const avgWin = 2.0;
-    const avgLoss = 1.0;
-    
-    return (wr * avgWin) / ((1 - wr) * avgLoss);
-  };
-
-  // Helper: Calculate composite strategy score
-  const calculateStrategyScore = (strategy) => {
-    const sharpe = strategy.sharpe_ratio || 1.0;
-    const wr = (strategy.win_rate || 0.55) * 100;
-    const mdd = Math.abs(strategy.max_drawdown || 10);
-    
-    // Score = (Sharpe * 20) + (WR * 0.5) - (MDD * 0.3)
-    // Normalized to 0-100 scale
-    let score = (sharpe * 15) + (wr * 0.4) - (mdd * 0.2);
-    return Math.max(0, Math.min(100, score));
-  };
-
-  // Helper: Detect asset class from strategy data
-  const detectAssetClass = (strategy) => {
-    const id = strategy.id?.toLowerCase() || '';
-    const name = strategy.name?.toLowerCase() || '';
-    const universe = strategy.universe || [];
-    
-    if (id.includes('fx') || name.includes('fx') || name.includes('currency')) return 'FX';
-    if (id.includes('crypto') || name.includes('crypto') || name.includes('bitcoin')) return 'CRYPTO';
-    if (id.includes('commodity') || name.includes('gold') || name.includes('oil')) return 'COMMODITY';
-    return 'STOCK';
-  };
-
   // Merge backtest and live data
   const mergedStrategies = useMemo(() => {
     return strategies.map(s => {
       const live = liveStats[s.id] || {};
-      
       return {
         ...s,
-        // Live/current year metrics
-        live_wr: live.actualWinRate || 0,
-        live_trades: live.totalTrades || 0,
-        live_pnl: live.totalPnL || 0,
-        live_positions: live.activePositions || 0,
-        live_invested: live.totalInvested || 0,
-        
-        // Calculate live profit factor (estimate from P&L)
-        live_pf: live.totalPnL > 0 ? 1.5 : 0.8, // Simplified
-        
-        // Calculate live MDD (would need historical data, using placeholder)
-        live_mdd: live.totalPnL < 0 ? Math.abs((live.totalPnL / Math.max(live.totalInvested, 1)) * 100) : 0,
+        // Live/current year metrics (from actual trades)
+        live_wr: live.actualWinRate,
+        live_trades: live.totalTrades,
+        live_pnl: live.totalPnL,
+        live_positions: live.activePositions,
+        live_invested: live.totalInvested,
       };
     });
   }, [strategies, liveStats]);
@@ -159,9 +91,9 @@ const StrategyLab = () => {
       filtered = filtered.filter(s => s.asset_class === activeAssetClass);
     }
     
-    // Min win rate filter
+    // Min win rate filter (backtest)
     if (minWinRate > 0) {
-      filtered = filtered.filter(s => s.backtest_wr >= minWinRate);
+      filtered = filtered.filter(s => (s.win_rate || 0) * 100 >= minWinRate);
     }
     
     // Search filter
@@ -179,41 +111,37 @@ const StrategyLab = () => {
       let valA, valB;
       
       switch (sortBy) {
-        case 'strategy_score':
-          valA = a.strategy_score;
-          valB = b.strategy_score;
-          break;
         case 'win_rate':
-          valA = a.backtest_wr;
-          valB = b.backtest_wr;
+          valA = a.win_rate || 0;
+          valB = b.win_rate || 0;
           break;
         case 'profit_factor':
-          valA = a.backtest_pf;
-          valB = b.backtest_pf;
+          valA = a.profit_factor || 0;
+          valB = b.profit_factor || 0;
           break;
         case 'max_drawdown':
-          valA = a.backtest_mdd;
-          valB = b.backtest_mdd;
-          break;
-        case 'trades_count':
-          valA = a.backtest_trades;
-          valB = b.backtest_trades;
+          valA = a.max_drawdown || 0;
+          valB = b.max_drawdown || 0;
           break;
         case 'sharpe':
-          valA = a.backtest_sharpe;
-          valB = b.backtest_sharpe;
+          valA = a.sharpe_ratio || 0;
+          valB = b.sharpe_ratio || 0;
+          break;
+        case 'backtest_trades':
+          valA = a.backtest_trades || 0;
+          valB = b.backtest_trades || 0;
           break;
         case 'live_wr':
-          valA = a.live_wr;
-          valB = b.live_wr;
+          valA = a.live_wr || 0;
+          valB = b.live_wr || 0;
           break;
         case 'live_pnl':
-          valA = a.live_pnl;
-          valB = b.live_pnl;
+          valA = a.live_pnl || 0;
+          valB = b.live_pnl || 0;
           break;
         default:
-          valA = a.strategy_score;
-          valB = b.strategy_score;
+          valA = a.win_rate || 0;
+          valB = b.win_rate || 0;
       }
       
       return sortDirection === 'desc' ? valB - valA : valA - valB;
@@ -222,21 +150,23 @@ const StrategyLab = () => {
     return filtered;
   }, [mergedStrategies, activeAssetClass, minWinRate, searchQuery, sortBy, sortDirection]);
 
+  // Format helpers - return null if no data
   const formatNumber = (num, decimals = 1) => {
-    if (num === null || num === undefined || isNaN(num)) return '---';
+    if (num === null || num === undefined || isNaN(num)) return null;
     return num.toFixed(decimals);
   };
 
+  const formatPercent = (num) => {
+    if (num === null || num === undefined || isNaN(num)) return null;
+    return (num * 100).toFixed(1);
+  };
+
   const formatCurrency = (num) => {
-    if (num === null || num === undefined || isNaN(num)) return '$---';
+    if (num === null || num === undefined || isNaN(num)) return null;
     if (Math.abs(num) >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
     if (Math.abs(num) >= 1000) return `$${(num / 1000).toFixed(1)}k`;
     return `$${num.toFixed(0)}`;
   };
-
-  // Calculate deltas between backtest and live
-  const getWRDelta = (s) => s.live_wr - s.backtest_wr;
-  const getPFDelta = (s) => s.live_pf - s.backtest_pf;
 
   return (
     <div className="strategy-lab space-y-4">
@@ -248,13 +178,13 @@ const StrategyLab = () => {
             Strategy Lab
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Compare backtest vs live performance • {filteredStrategies.length} strategies
+            {filteredStrategies.length} strategies • Real backtest data only
           </p>
         </div>
         
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => { fetchStrategies(); fetchLiveStats(); }}
+            onClick={() => { fetchStrategies(true); fetchLiveStats(); }}
             className="px-4 py-2 bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold rounded-lg"
           >
             🔄 Refresh
@@ -310,16 +240,14 @@ const StrategyLab = () => {
               onChange={(e) => setSortBy(e.target.value)}
               className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none"
             >
-              <option value="strategy_score">Strategy Score</option>
-              <option value="win_rate">Backtest Win Rate</option>
-              <option value="live_wr">Live Win Rate</option>
+              <option value="win_rate">Win Rate</option>
               <option value="profit_factor">Profit Factor</option>
               <option value="max_drawdown">Max Drawdown</option>
               <option value="sharpe">Sharpe Ratio</option>
-              <option value="trades_count">Backtest Trades</option>
+              <option value="backtest_trades">Backtest Trades</option>
+              <option value="live_wr">Live Win Rate</option>
               <option value="live_pnl">Live P&L</option>
             </select>
-            
             <button
               onClick={() => setSortDirection(d => d === 'desc' ? 'asc' : 'desc')}
               className="px-3 py-2 bg-slate-800 border border-white/10 rounded-lg text-slate-400 hover:text-white"
@@ -364,22 +292,20 @@ const StrategyLab = () => {
               <tr>
                 <th className="text-left p-3">Strategy</th>
                 <th className="text-center p-3">Class</th>
-                <th className="text-center p-3 cursor-pointer hover:text-white" onClick={() => { setSortBy('strategy_score'); setSortDirection('desc'); }}>
-                  Score ↕
+                <th className="text-center p-3 cursor-pointer hover:text-white" onClick={() => { setSortBy('win_rate'); setSortDirection('desc'); }}>
+                  WR ↕
                 </th>
-                <th className="text-center p-3 bg-slate-800/50">Backtest WR</th>
-                <th className="text-center p-3 bg-slate-800/50">Trades</th>
-                <th className="text-center p-3 bg-slate-800/50">MDD</th>
-                <th className="text-center p-3 bg-slate-800/50">PF</th>
+                <th className="text-center p-3">PF</th>
+                <th className="text-center p-3">MDD</th>
+                <th className="text-center p-3">Sharpe</th>
+                <th className="text-center p-3">Trades</th>
                 <th className="text-center p-3 bg-emerald-900/20">Live WR</th>
-                <th className="text-center p-3 bg-emerald-900/20">Live Trades</th>
                 <th className="text-center p-3 bg-emerald-900/20">Live P&L</th>
                 <th className="text-right p-3">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {filteredStrategies.map((s, idx) => {
-                const wrDelta = getWRDelta(s);
                 const isExpanded = expandedStrategy === s.id;
                 
                 return (
@@ -407,73 +333,68 @@ const StrategyLab = () => {
                           {s.asset_class}
                         </span>
                       </td>
+                      
+                      {/* Backtest Metrics - Real data only */}
                       <td className="p-3 text-center">
-                        <div className="flex flex-col items-center">
-                          <span className={`font-bold ${
-                            s.strategy_score >= 70 ? 'text-emerald-400' :
-                            s.strategy_score >= 50 ? 'text-blue-400' : 'text-amber-400'
-                          }`}>
-                            {formatNumber(s.strategy_score, 0)}
-                          </span>
-                          <div className="w-12 h-1 bg-slate-700 rounded-full mt-1">
-                            <div 
-                              className={`h-full rounded-full ${
-                                s.strategy_score >= 70 ? 'bg-emerald-500' :
-                                s.strategy_score >= 50 ? 'bg-blue-500' : 'bg-amber-500'
-                              }`}
-                              style={{ width: `${Math.min(s.strategy_score, 100)}%` }}
-                            />
-                          </div>
-                        </div>
+                        {s.win_rate !== null && s.win_rate !== undefined ? (
+                          <span className="font-mono text-slate-300">{formatPercent(s.win_rate)}%</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
                       </td>
                       
-                      {/* Backtest Metrics */}
-                      <td className="p-3 text-center bg-slate-800/30">
-                        <span className="font-mono text-slate-300">{formatNumber(s.backtest_wr, 1)}%</span>
+                      <td className="p-3 text-center">
+                        {s.profit_factor !== null && s.profit_factor !== undefined ? (
+                          <span className="font-mono text-slate-300">{formatNumber(s.profit_factor, 2)}</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
                       </td>
-                      <td className="p-3 text-center bg-slate-800/30">
-                        <span className="font-mono text-slate-300">{s.backtest_trades}</span>
+                      
+                      <td className="p-3 text-center">
+                        {s.max_drawdown !== null && s.max_drawdown !== undefined ? (
+                          <span className="font-mono text-rose-400">{formatNumber(s.max_drawdown, 1)}%</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
                       </td>
-                      <td className="p-3 text-center bg-slate-800/30">
-                        <span className="font-mono text-rose-400">-{formatNumber(s.backtest_mdd, 1)}%</span>
+                      
+                      <td className="p-3 text-center">
+                        {s.sharpe_ratio !== null && s.sharpe_ratio !== undefined ? (
+                          <span className="font-mono text-slate-300">{formatNumber(s.sharpe_ratio, 2)}</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
                       </td>
-                      <td className="p-3 text-center bg-slate-800/30">
-                        <span className="font-mono text-slate-300">{formatNumber(s.backtest_pf, 2)}</span>
+                      
+                      <td className="p-3 text-center">
+                        {s.backtest_trades !== null && s.backtest_trades !== undefined ? (
+                          <span className="font-mono text-slate-300">{s.backtest_trades}</span>
+                        ) : (
+                          <span className="text-slate-600">—</span>
+                        )}
                       </td>
                       
                       {/* Live Metrics */}
                       <td className="p-3 text-center bg-emerald-900/10">
-                        {s.live_trades > 0 ? (
-                          <div className="flex flex-col items-center">
-                            <span className={`font-mono font-bold ${
-                              s.live_wr >= s.backtest_wr ? 'text-emerald-400' : 'text-amber-400'
-                            }`}>
-                              {formatNumber(s.live_wr, 1)}%
-                            </span>
-                            {wrDelta !== 0 && (
-                              <span className={`text-[9px] ${wrDelta > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                {wrDelta > 0 ? '+' : ''}{formatNumber(wrDelta, 1)}%
-                              </span>
-                            )}
-                          </div>
+                        {s.live_wr !== null && s.live_wr !== undefined ? (
+                          <span className="font-mono font-bold text-emerald-400">
+                            {formatNumber(s.live_wr, 1)}%
+                          </span>
                         ) : (
-                          <span className="text-[10px] text-slate-600">---</span>
+                          <span className="text-slate-600">—</span>
                         )}
                       </td>
+                      
                       <td className="p-3 text-center bg-emerald-900/10">
-                        <span className={`font-mono ${s.live_trades > 0 ? 'text-white' : 'text-slate-600'}`}>
-                          {s.live_trades > 0 ? s.live_trades : '---'}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center bg-emerald-900/10">
-                        {s.live_trades > 0 ? (
+                        {s.live_pnl !== null && s.live_pnl !== undefined ? (
                           <span className={`font-mono font-bold ${
                             s.live_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
                           }`}>
                             {s.live_pnl >= 0 ? '+' : ''}{formatCurrency(s.live_pnl)}
                           </span>
                         ) : (
-                          <span className="text-[10px] text-slate-600">---</span>
+                          <span className="text-slate-600">—</span>
                         )}
                       </td>
                       
@@ -497,19 +418,19 @@ const StrategyLab = () => {
                               <div className="grid grid-cols-2 gap-2 text-xs">
                                 <div className="bg-slate-800/50 p-2 rounded">
                                   <span className="text-slate-500 block">Time Horizon</span>
-                                  <span className="text-white">{s.time_horizon || '---'}</span>
+                                  <span className="text-white">{s.time_horizon || '—'}</span>
                                 </div>
                                 <div className="bg-slate-800/50 p-2 rounded">
                                   <span className="text-slate-500 block">Direction</span>
-                                  <span className="text-white">{s.direction || '---'}</span>
+                                  <span className="text-white">{s.direction || '—'}</span>
                                 </div>
                                 <div className="bg-slate-800/50 p-2 rounded">
                                   <span className="text-slate-500 block">Venue</span>
-                                  <span className="text-white">{s.venue || '---'}</span>
+                                  <span className="text-white">{s.venue || '—'}</span>
                                 </div>
                                 <div className="bg-slate-800/50 p-2 rounded">
                                   <span className="text-slate-500 block">Universe Count</span>
-                                  <span className="text-white">{s.universe_count || s.universe?.length || '---'}</span>
+                                  <span className="text-white">{s.universe_count || '—'}</span>
                                 </div>
                               </div>
                               
@@ -532,76 +453,30 @@ const StrategyLab = () => {
                               )}
                             </div>
                             
-                            {/* Performance Comparison */}
+                            {/* Entry/Exit Logic */}
                             <div className="space-y-3">
-                              <h4 className="text-xs font-bold text-slate-400 uppercase">Backtest vs Live Comparison</h4>
+                              <h4 className="text-xs font-bold text-slate-400 uppercase">Logic</h4>
                               
-                              <div className="space-y-2">
-                                {/* Win Rate Comparison */}
-                                <div className="bg-slate-800/50 p-3 rounded">
-                                  <div className="flex items-center justify-between text-xs mb-2">
-                                    <span className="text-slate-400">Win Rate</span>
-                                    <span className={`text-[10px] ${wrDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                      {wrDelta >= 0 ? '↗' : '↘'} Live {wrDelta >= 0 ? 'outperforming' : 'underperforming'} by {Math.abs(wrDelta).toFixed(1)}%
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-4">
-                                    <div className="flex-1">
-                                      <div className="flex justify-between text-[10px] mb-1">
-                                        <span className="text-slate-500">Backtest</span>
-                                        <span className="text-slate-300">{formatNumber(s.backtest_wr, 1)}%</span>
-                                      </div>
-                                      <div className="h-2 bg-slate-700 rounded-full">
-                                        <div 
-                                      className="h-full bg-slate-500 rounded-full"
-                                      style={{ width: `${Math.min(s.backtest_wr, 100)}%` }}
-                                    />
-                                      </div>
-                                    </div>
-                                    <div className="flex-1">
-                                      <div className="flex justify-between text-[10px] mb-1">
-                                        <span className="text-slate-500">Live</span>
-                                        <span className={s.live_wr >= s.backtest_wr ? 'text-emerald-400' : 'text-amber-400'}>
-                                          {s.live_trades > 0 ? `${formatNumber(s.live_wr, 1)}%` : '---'}
-                                        </span>
-                                      </div>
-                                      <div className="h-2 bg-slate-700 rounded-full">
-                                        <div 
-                                      className={`h-full rounded-full ${s.live_wr >= s.backtest_wr ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                                      style={{ width: `${Math.min(s.live_wr, 100)}%` }}
-                                    />
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                {/* Metrics Row */}
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div className="bg-slate-800/30 p-2 rounded text-center">
-                                    <span className="text-[10px] text-slate-500 block">Sharpe Ratio</span>
-                                    <span className="text-sm font-bold text-white">{formatNumber(s.backtest_sharpe, 2)}</span>
-                                  </div>
-                                  <div className="bg-slate-800/30 p-2 rounded text-center">
-                                    <span className="text-[10px] text-slate-500 block">Active Positions</span>
-                                    <span className="text-sm font-bold text-white">{s.live_positions || 0}</span>
-                                  </div>
-                                  <div className="bg-slate-800/30 p-2 rounded text-center">
-                                    <span className="text-[10px] text-slate-500 block">Invested</span>
-                                    <span className="text-sm font-bold text-white">{formatCurrency(s.live_invested)}</span>
-                                  </div>
-                                </div>
-                                
-                                {/* Deploy Button */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    window.location.href = `/strategies?deploy=${s.id}`;
-                                  }}
-                                  className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold rounded-lg transition-colors"
-                                >
-                                  Deploy Strategy
-                                </button>
+                              <div className="bg-slate-800/50 p-3 rounded">
+                                <span className="text-[10px] text-slate-500 block mb-1">Entry Logic</span>
+                                <span className="text-sm text-white font-mono">{s.entry_logic || '—'}</span>
                               </div>
+                              
+                              <div className="bg-slate-800/50 p-3 rounded">
+                                <span className="text-[10px] text-slate-500 block mb-1">Exit Logic</span>
+                                <span className="text-sm text-white font-mono">{s.exit_logic || '—'}</span>
+                              </div>
+                              
+                              {/* Deploy Button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.location.href = `/strategies?deploy=${s.id}`;
+                                }}
+                                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold rounded-lg transition-colors"
+                              >
+                                Deploy Strategy
+                              </button>
                             </div>
                           </div>
                         </td>
@@ -625,16 +500,8 @@ const StrategyLab = () => {
           <span className="w-3 h-3 bg-emerald-900/20 rounded"></span>
           <span>Live Performance</span>
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-emerald-400">↗</span>
-          <span>Live outperforming backtest</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-rose-400">↘</span>
-          <span>Live underperforming backtest</span>
-        </div>
         <div className="ml-auto">
-          <span>WR = Win Rate • MDD = Max Drawdown • PF = Profit Factor</span>
+          <span>WR = Win Rate • PF = Profit Factor • MDD = Max Drawdown • — = No Data</span>
         </div>
       </div>
     </div>
