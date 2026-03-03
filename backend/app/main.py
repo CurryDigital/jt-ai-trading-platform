@@ -51,7 +51,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.core_logic.agents.research_swarm import research_swarm
 import asyncio
 
 async def scheduler_loop():
@@ -228,16 +227,23 @@ async def run_deep_sell_analysis(db: Session):
                 "quantity": item.quantity,
                 "current_price": item.current_price
             }
-            # Execute Swarm Debate (async)
-            analysis_raw = await research_swarm.debate_sell_signal(inv_data, market_data)
-            
-            # The swarm returns a dict with "analysis" as a content string
-            # We try to parse the content string if it's JSON
-            try:
-                cleaned_content = analysis_raw['analysis'].replace('```json', '').replace('```', '').strip()
-                item.analysis = json.loads(cleaned_content)
-            except:
-                item.analysis = {"decision": "HOLD", "reasoning": analysis_raw['analysis']}
+            # Execute Swarm Debate (async) - only if research_swarm is available
+            if research_swarm:
+                try:
+                    analysis_raw = await research_swarm.debate_sell_signal(inv_data, market_data)
+                    
+                    # The swarm returns a dict with "analysis" as a content string
+                    # We try to parse the content string if it's JSON
+                    try:
+                        cleaned_content = analysis_raw['analysis'].replace('```json', '').replace('```', '').strip()
+                        item.analysis = json.loads(cleaned_content)
+                    except:
+                        item.analysis = {"decision": "HOLD", "reasoning": analysis_raw['analysis']}
+                except Exception as e:
+                    print(f"Sell analysis error for {item.ticker}: {e}")
+                    item.analysis = {"decision": "HOLD", "reasoning": f"Analysis unavailable: {e}"}
+            else:
+                item.analysis = {"decision": "HOLD", "reasoning": "Research swarm not configured"}
             
             db.commit()
         except Exception as e:

@@ -85,4 +85,19 @@ class ResearchSwarm:
         response = self.llm.invoke(prompt).content
         return {"ticker": inventory_item['ticker'], "analysis": response}
 
-research_swarm = ResearchSwarm()
+# Lazy initialization - only create when actually used
+_research_swarm_instance = None
+
+def get_research_swarm():
+    global _research_swarm_instance
+    if _research_swarm_instance is None:
+        _research_swarm_instance = ResearchSwarm()
+    return _research_swarm_instance
+
+# Backward compatibility - but this will fail if env vars not set
+# Use get_research_swarm() instead in new code
+try:
+    research_swarm = ResearchSwarm()
+except Exception as e:
+    print(f"Warning: Could not initialize research_swarm (Azure OpenAI not configured): {e}")
+    research_swarm = None
