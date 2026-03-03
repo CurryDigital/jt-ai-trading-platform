@@ -1154,17 +1154,95 @@ def get_volume_leaders(db: Session = Depends(get_db)):
 
 @app.get("/api/market/global")
 def get_global_markets(db: Session = Depends(get_db)):
-    """Get global market indices"""
-    markets = [
-        {"name": "S&P 500", "region": "US", "flag": "🇺🇸", "price": 4500, "change_percent": 0.5, "status": "Open"},
-        {"name": "Nasdaq", "region": "US", "flag": "🇺🇸", "price": 14000, "change_percent": 0.8, "status": "Open"},
-        {"name": "FTSE 100", "region": "Europe", "flag": "🇬🇧", "price": 7500, "change_percent": -0.2, "status": "Closed"},
-        {"name": "DAX", "region": "Europe", "flag": "🇩🇪", "price": 16000, "change_percent": 0.3, "status": "Closed"},
-        {"name": "Nikkei 225", "region": "Asia", "flag": "🇯🇵", "price": 29000, "change_percent": 1.2, "status": "Closed"},
-        {"name": "Hang Seng", "region": "Asia", "flag": "🇭🇰", "price": 17000, "change_percent": -0.5, "status": "Closed"},
-        {"name": "Shanghai", "region": "Asia", "flag": "🇨🇳", "price": 3200, "change_percent": 0.1, "status": "Closed"},
-        {"name": "ASX 200", "region": "Asia", "flag": "🇦🇺", "price": 7200, "change_percent": 0.4, "status": "Closed"},
-    ]
+    """Get global market indices with real data from database"""
+    from datetime import datetime, timedelta
+    
+    # Index mapping: ticker -> display info
+    indices = {
+        '^GSPC': {'name': 'S&P 500', 'region': 'US', 'flag': '🇺🇸'},
+        '^IXIC': {'name': 'Nasdaq', 'region': 'US', 'flag': '🇺🇸'},
+        '^FTSE': {'name': 'FTSE 100', 'region': 'Europe', 'flag': '🇬🇧'},
+        '^GDAXI': {'name': 'DAX', 'region': 'Europe', 'flag': '🇩🇪'},
+        '^N225': {'name': 'Nikkei 225', 'region': 'Asia', 'flag': '🇯🇵'},
+        '^HSI': {'name': 'Hang Seng', 'region': 'Asia', 'flag': '🇭🇰'},
+        '000001.SS': {'name': 'Shanghai', 'region': 'Asia', 'flag': '🇨🇳'},
+        '^AXJO': {'name': 'ASX 200', 'region': 'Asia', 'flag': '🇦🇺'},
+    }
+    
+    markets = []
+    
+    try:
+        for ticker, info in indices.items():
+            # Get latest price and previous day close for change calculation
+            rows = db.execute(text("""
+                SELECT close, date
+                FROM silver.unified_prices
+                WHERE ticker = :ticker
+                ORDER BY date DESC
+                LIMIT 2
+            """), {"ticker": ticker}).fetchall()
+            
+            if rows and len(rows) >= 1:
+                latest_close = float(rows[0].close) if rows[0].close else 0
+                latest_date = rows[0].date
+                
+                # Calculate change percent from previous day
+                change_percent = 0
+                if len(rows) >= 2 and rows[1].close:
+                    prev_close = float(rows[1].close)
+                    if prev_close > 0:
+                        change_percent = ((latest_close - prev_close) / prev_close) * 100
+                
+                # Determine market status based on region and time
+                # This is simplified - in production you'd use actual market hours
+                status = "Closed"
+                now = datetime.utcnow()
+                hour = now.hour
+                
+                if info['region'] == 'US':
+                    # US markets: 14:30 - 21:00 UTC
+                    status = "Open" if 14 <= hour < 21 else "Closed"
+                elif info['region'] == 'Europe':
+                    # European markets: 08:00 - 16:30 UTC
+                    status = "Open" if 8 <= hour < 16 else "Closed"
+                elif info['region'] == 'Asia':
+                    # Asian markets (varies by exchange, simplified)
+                    if info['name'] in ['Hang Seng', 'Shanghai']:
+                        # HK/China: 01:30 - 08:00 UTC (morning), 09:00 - 12:00 (afternoon)
+                        status = "Open" if (1 <= hour < 8) or (9 <= hour < 12) else "Closed"
+                    elif info['name'] == 'Nikkei 225':
+                        # Japan: 00:00 - 06:00 UTC (morning), 07:00 - 10:00 (afternoon)
+                        status = "Open" if (0 <= hour < 6) or (7 <= hour < 10) else "Closed"
+                    else:
+                        status = "Closed"
+                
+                markets.append({
+                    "name": info['name'],
+                    "region": info['region'],
+                    "flag": info['flag'],
+                    "ticker": ticker,
+                    "price": round(latest_close, 2),
+                    "change_percent": round(change_percent, 2),
+                    "status": status,
+                    "last_update": latest_date.isoformat() if latest_date else None
+                })
+            else:
+                # No data available - use placeholder
+                markets.append({
+                    "name": info['name'],
+                    "region": info['region'],
+                    "flag": info['flag'],
+                    "ticker": ticker,
+                    "price": None,
+                    "change_percent": None,
+                    "status": "No Data",
+                    "last_update": None
+                })
+    except Exception as e:
+        logger.error(f"Error fetching global markets: {e}")
+        # Return empty list on error
+        return {"data": [], "error": str(e)}
+    
     return {"data": markets}
 
 @app.get("/api/market/breadth")

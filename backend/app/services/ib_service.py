@@ -444,34 +444,6 @@ class IBKRQuantService:
             # Mark connection as potentially broken
             ib_threaded_service._connected = False
             return None
-                elif v.tag == "Currency":
-                    result["currency"] = v.value
-                
-                # HKD specific values (for HK accounts)
-                elif v.tag == "AvailableFunds" and v.currency == "HKD":
-                    result["available_funds_hkd"] = float(v.value)
-                elif v.tag == "NetLiquidation" and v.currency == "HKD":
-                    result["net_liquidation_hkd"] = float(v.value)
-                elif v.tag == "BuyingPower" and v.currency == "HKD":
-                    result["buying_power_hkd"] = float(v.value)
-                elif v.tag == "ExcessLiquidity" and v.currency == "HKD":
-                    result["excess_liquidity_hkd"] = float(v.value)
-                elif v.tag == "CashBalance" and v.currency == "HKD":
-                    result["cash_hkd"] = float(v.value)
-            
-            # If we have HKD values, prioritize those for HK accounts
-            # Otherwise use the base currency values
-            if result["currency"] == "HKD" or result["cash_hkd"] > 0:
-                result["currency"] = "HKD"
-                if result["available_funds_hkd"] == 0 and result["available_funds"] > 0:
-                    # Use base currency as HKD equivalent (approximate)
-                    result["available_funds_hkd"] = result["available_funds"]
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Failed to get account summary: {e}")
-            return None
     
     async def connect(self):
         """Connect - service auto-starts, just return status"""
