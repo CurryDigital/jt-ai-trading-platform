@@ -19,18 +19,29 @@ from app.db.session import (
     ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy
 )
 from app.core_logic.data.wholistic_pipeline import (
-    refresh_indices_and_mood, refresh_fx_layer, refresh_commodity_layer, refresh_crypto_layer, refresh_stock_layer, refresh_hft_layer,
-    refresh_etf_layer, refresh_accruals_quality
+    refresh_indices_and_mood, refresh_fx_layer, refresh_commodity_layer, refresh_crypto_layer, refresh_stock_layer, refresh_hft_layer
 )
+# Optional imports - may not exist in all versions
+try:
+    from app.core_logic.data.wholistic_pipeline import refresh_etf_layer, refresh_accruals_quality
+except ImportError:
+    refresh_etf_layer = None
+    refresh_accruals_quality = None
 from app.core_logic.agents.research_swarm import research_swarm
-from app.api.stock_detail import router as stock_detail_router
+try:
+    from app.api.stock_detail import router as stock_detail_router
+    HAS_STOCK_DETAIL_API = True
+except ImportError:
+    HAS_STOCK_DETAIL_API = False
+    stock_detail_router = None
 from app.services.ib_service import ib_quant_service
 from app.services.ib_web_service import ib_web_service
 
 app = FastAPI()
 
 # Include stock detail router
-app.include_router(stock_detail_router)
+if HAS_STOCK_DETAIL_API and stock_detail_router:
+    app.include_router(stock_detail_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -97,14 +108,18 @@ async def scheduler_loop():
                         await strategy_manager.run_tick()
                     elif comp == 'etfs':
                         # NEW: ETF daily data refresh
-                        from app.core_logic.data.wholistic_pipeline import refresh_etf_layer
-                        print("Scheduler: Refreshing ETF data...")
-                        await refresh_etf_layer()
+                        if refresh_etf_layer:
+                            print("Scheduler: Refreshing ETF data...")
+                            await refresh_etf_layer()
+                        else:
+                            print("Scheduler: ETF refresh not available")
                     elif comp == 'accruals':
                         # NEW: Accruals Quality weekly refresh
-                        from app.core_logic.data.wholistic_pipeline import refresh_accruals_quality
-                        print("Scheduler: Refreshing Accruals Quality data...")
-                        await refresh_accruals_quality()
+                        if refresh_accruals_quality:
+                            print("Scheduler: Refreshing Accruals Quality data...")
+                            await refresh_accruals_quality()
+                        else:
+                            print("Scheduler: Accruals refresh not available")
             
             # Force run tick every loop for testing responsiveness
             print("Scheduler: Force Running Quant Strategy Tick...")

@@ -9,6 +9,7 @@ import { MarketsTab } from './components/MarketsTab';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { SettingsTab } from './components/SettingsTab';
+import { StrategyLab } from './components/StrategyLab';
 
 // =============================================================================
 // JT AI TRADING PLATFORM v3.0 - QUANT REVAMP
@@ -358,6 +359,7 @@ function App() {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Icons.Dashboard },
     { id: 'strategies', label: 'Strategies', icon: Icons.Strategies },
+    { id: 'lab', label: 'Lab', icon: Icons.Chart },
     { id: 'research', label: 'Research', icon: Icons.Research },
     { id: 'performance', label: 'Performance', icon: Icons.Performance },
     { id: 'portfolio', label: 'Portfolio', icon: Icons.Portfolio },
@@ -1033,6 +1035,7 @@ function App() {
           <>
             {activeTab === 'dashboard' && <DashboardTab />}
             {activeTab === 'strategies' && <StrategiesTabContent />}
+            {activeTab === 'lab' && <StrategyLab />}
             {activeTab === 'research' && <ResearchTab key="research-tab" onTickerClick={handleTickerClick} />}
             {activeTab === 'performance' && <StrategyPerformance />}
             {activeTab === 'portfolio' && <PortfolioTab />}
