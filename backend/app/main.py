@@ -2360,26 +2360,64 @@ def get_hft_matrix(db: Session = Depends(get_db)):
 
 @app.get("/api/performance/strategy")
 def get_strategy_performance(db: Session = Depends(get_db)):
-    """Get strategy performance with both backtest and actual win rates + CURRENT SIGNAL"""
-    # Get strategy attribution
+    """Get strategy performance with both backtest and actual win rates + CURRENT SIGNAL
+    
+    Only returns strategies for the current execution mode (SIMULATION/PAPER_TRADING/LIVE_TRADING)
+    """
+    # Get current execution mode
+    mode_result = db.execute(text("""
+        SELECT value FROM gold.platform_settings 
+        WHERE key = 'global_execution_mode'
+    """)).fetchone()
+    
+    current_mode = mode_result.value if mode_result else 'SIMULATION'
+    
+    # Map execution mode to portfolio_type
+    portfolio_type_map = {
+        'SIMULATION': 'SIMULATION',
+        'PAPER_TRADING': 'PAPER',
+        'LIVE_TRADING': 'LIVE'
+    }
+    portfolio_type = portfolio_type_map.get(current_mode, 'SIMULATION')
+    
+    # Get strategy attribution for CURRENT MODE ONLY
     attribution = db.execute(text("""
         SELECT strategy_id, strategy_name, allocated_capital_pct as allocation,
                contribution_pct as contribution, return_pct as returns, num_trades,
                win_rate, sharpe_ratio
         FROM consumption.Performance_Strategy_Attribution
-        WHERE portfolio_type = 'PAPER' ORDER BY return_pct DESC
-    """)).fetchall()
+        WHERE portfolio_type = :portfolio_type 
+        ORDER BY return_pct DESC
+    """), {"portfolio_type": portfolio_type}).fetchall()
+    
+    # If no data for current mode, return empty (not historical data from other modes)
+    if not attribution:
+        return {
+            "strategies": [],
+            "monthly_returns": [],
+            "summary": {
+                "total_return": 0,
+                "sharpe": 0,
+                "max_drawdown": 0,
+                "win_rate": 0
+            },
+            "execution_mode": current_mode,
+            "note": f"No strategies deployed in {current_mode} mode"
+        }
     
     # Get backtest win rates
     backtests = db.execute(text("""
         SELECT strategy_id, AVG(win_rate) as backtest_win_rate,
-               AVG(total_return_pct) as backtest_return,
-               SUM(total_trades) as backtest_total_trades
+               AVG(profit_factor) as profit_factor,
+               AVG(max_drawdown_pct) as max_drawdown,
+               AVG(sharpe_ratio) as sharpe,
+               SUM(total_trades) as backtest_total_trades,
+               AVG(total_return_pct) as backtest_return
         FROM consumption.Strategies_Backtest_Results
         GROUP BY strategy_id
     """)).fetchall()
     
-    # Get actual/live win rates from trade history
+    # Get actual/live win rates from trade history (all closed trades)
     live_stats = db.execute(text("""
         SELECT strategy_id,
                COUNT(*) as total_trades,
@@ -2435,7 +2473,7 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             "backtest_win_rate": round((bt.backtest_win_rate or 0) * 100, 1) if bt and bt.backtest_win_rate else None,
             "backtest_return": round(bt.backtest_return or 0, 2) if bt else None,
             "backtest_trades": bt.backtest_total_trades if bt else 0,
-            # CURRENT SIGNAL - This is the critical key!
+            # CURRENT SIGNAL
             "current_signal": {
                 "action": sig.signal if sig else "HOLD",
                 "ticker": sig.ticker if sig else None,
@@ -2445,18 +2483,31 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             } if sig else None
         })
     
-    # Get monthly returns
+    # Get monthly returns for CURRENT MODE
     monthly = db.execute(text("""
         SELECT year, month, return_pct
         FROM consumption.Performance_Monthly_Returns
-        WHERE portfolio_type = 'PAPER' ORDER BY year DESC, month DESC LIMIT 12
-    """)).fetchall()
+        WHERE portfolio_type = :portfolio_type 
+        ORDER BY year DESC, month DESC LIMIT 12
+    """), {"portfolio_type": portfolio_type}).fetchall()
     
-    # Get summary
+    # Get summary for CURRENT MODE
     summary = db.execute(text("""
         SELECT * FROM consumption.Performance_Portfolio_Summary
-        WHERE portfolio_type = 'PAPER'
-    """)).fetchone()
+        WHERE portfolio_type = :portfolio_type
+    """), {"portfolio_type": portfolio_type}).fetchone()
+    
+    return {
+        "strategies": strategies,
+        "monthly_returns": [{"year": r.year, "month": r.month, "return": float(r.return_pct or 0)} for r in monthly],
+        "summary": {
+            "total_return": float(summary.total_pnl_pct or 0) if summary else 0,
+            "sharpe": float(summary.sharpe_ratio or 0) if summary else 0,
+            "max_drawdown": float(summary.max_drawdown_pct or 0) if summary else 0,
+            "win_rate": float(summary.win_rate or 0) * 100 if summary else 0
+        },
+        "execution_mode": current_mode
+    }
     
     return {
         "strategies": strategies,
