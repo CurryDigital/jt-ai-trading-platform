@@ -3762,6 +3762,139 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/api/strategies/deploy-auto")
+def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
+    """
+    Auto-deploy strategy with full universe.
+    Only deploys tickers that have BUY signals.
+    Max 5 positions.
+    """
+    strategy_id = payload.get("strategy_id")
+    total_pool = payload.get("total_pool", 100000)
+    trade_size_pct = payload.get("trade_size_pct", 0.25)
+    max_positions = payload.get("max_positions", 5)
+    
+    if not strategy_id:
+        raise HTTPException(status_code=400, detail="strategy_id required")
+    
+    # Get current execution mode
+    mode_result = db.execute(text("""
+        SELECT value FROM gold.platform_settings 
+        WHERE key = 'global_execution_mode'
+    """)).fetchone()
+    current_mode = mode_result.value if mode_result else 'SIMULATION'
+    
+    # Get strategy from registry
+    strategy = db.query(StrategyRegistry).filter(
+        StrategyRegistry.strategy_id == strategy_id,
+        StrategyRegistry.status.in_(['ACTIVE', 'TESTING'])
+    ).first()
+    
+    if not strategy:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+    
+    # Parse universe
+    universe = [t.strip() for t in strategy.target_assets.split(',')] if strategy.target_assets else []
+    
+    if not universe:
+        return {
+            "success": False,
+            "error": "Strategy has no universe defined",
+            "strategy_id": strategy_id
+        }
+    
+    # Check which tickers in universe have BUY signals
+    # Query consumption signals view
+    placeholders = ','.join([f':t{i}' for i in range(len(universe))])
+    params = {f't{i}': t for i, t in enumerate(universe)}
+    params['strategy_id'] = strategy_id
+    
+    signals_result = db.execute(text(f"""
+        SELECT ticker, signal, confidence_score, signal_strength
+        FROM consumption.Strategies_Signals_Current
+        WHERE strategy_id = :strategy_id 
+        AND ticker IN ({placeholders})
+        AND signal = 'BUY'
+        ORDER BY confidence_score DESC
+        LIMIT :max_pos
+    """), {**params, "max_pos": max_positions}).fetchall()
+    
+    tickers_with_buy = [s.ticker for s in signals_result]
+    
+    if not tickers_with_buy:
+        return {
+            "success": False,
+            "error": "No tickers in universe have BUY signals currently",
+            "strategy_id": strategy_id,
+            "universe_checked": universe,
+            "universe_size": len(universe)
+        }
+    
+    # Check pool availability
+    pool_status = db.execute(text("""
+        SELECT COALESCE(SUM(capital), 0) as used, COUNT(*) as position_count 
+        FROM gold.paper_strategies
+        WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
+    """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
+    
+    current_used = float(pool_status.used) if pool_status else 0
+    current_positions = int(pool_status.position_count) if pool_status else 0
+    available = total_pool - current_used
+    trade_size = total_pool * trade_size_pct
+    
+    # Respect max positions limit
+    positions_remaining = max_positions - current_positions
+    if positions_remaining <= 0:
+        return {
+            "success": False,
+            "error": f"Max positions ({max_positions}) already reached",
+            "current_positions": current_positions,
+            "max_positions": max_positions
+        }
+    
+    # Deploy up to max positions
+    created = []
+    skipped = []
+    for ticker in tickers_with_buy:
+        if len(created) >= positions_remaining:
+            skipped.append(f"{ticker} (max positions reached)")
+            continue
+        if available < trade_size:
+            skipped.append(f"{ticker} (insufficient capital)")
+            continue
+        
+        try:
+            db.execute(text("""
+                INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
+                VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', :mode, NOW(), NOW())
+                ON CONFLICT (strategy_id, ticker) DO UPDATE SET 
+                    status = 'ACTIVE', 
+                    capital = EXCLUDED.capital, 
+                    execution_mode = EXCLUDED.execution_mode,
+                    updated_at = NOW()
+            """), {"strategy_id": strategy_id, "ticker": ticker.upper(), "capital": trade_size, "mode": current_mode})
+            available -= trade_size
+            created.append(ticker)
+        except Exception as e:
+            skipped.append(f"{ticker} (error: {str(e)})")
+    
+    db.commit()
+    
+    return {
+        "success": len(created) > 0,
+        "strategy_id": strategy_id,
+        "execution_mode": current_mode,
+        "positions_created": len(created),
+        "tickers_deployed": created,
+        "tickers_skipped": skipped,
+        "universe_size": len(universe),
+        "tickers_with_buy_signal": len(tickers_with_buy),
+        "pool_remaining": available,
+        "total_pool": total_pool,
+        "trade_size": trade_size
+    }
+
+
 @app.get("/api/positions/cash-summary")
 def get_cash_position_summary(db: Session = Depends(get_db)):
     """Get summary of cash positions that need closing"""
