@@ -1105,18 +1105,64 @@ def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
 
 @app.get("/api/market/sectors")
 def get_market_sectors(db: Session = Depends(get_db)):
-    """Get sector performance"""
-    # Return mock data for now - could be enhanced with real sector ETFs
-    sectors = [
-        {"name": "Technology", "change_percent": 1.2, "icon": "💻", "top_mover": "AAPL", "market_cap": 12e12},
-        {"name": "Healthcare", "change_percent": -0.3, "icon": "🏥", "top_mover": "JNJ", "market_cap": 6e12},
-        {"name": "Finance", "change_percent": 0.8, "icon": "🏦", "top_mover": "JPM", "market_cap": 8e12},
-        {"name": "Energy", "change_percent": -1.2, "icon": "⛽", "top_mover": "XOM", "market_cap": 4e12},
-        {"name": "Consumer", "change_percent": 0.5, "icon": "🛒", "top_mover": "WMT", "market_cap": 5e12},
-        {"name": "Industrial", "change_percent": 0.2, "icon": "🏭", "top_mover": "GE", "market_cap": 3e12},
-        {"name": "Materials", "change_percent": -0.5, "icon": "🏗️", "top_mover": "CAT", "market_cap": 2e12},
-        {"name": "Utilities", "change_percent": 0.1, "icon": "💡", "top_mover": "NEE", "market_cap": 1.5e12},
-    ]
+    """Get sector performance from sector ETFs"""
+    # Policy: No mock data - return empty/null if real data unavailable
+    
+    # Sector ETFs to track performance
+    sector_etfs = {
+        'XLK': {'name': 'Technology', 'icon': '💻'},
+        'XLV': {'name': 'Healthcare', 'icon': '🏥'},
+        'XLF': {'name': 'Finance', 'icon': '🏦'},
+        'XLE': {'name': 'Energy', 'icon': '⛽'},
+        'XLY': {'name': 'Consumer', 'icon': '🛒'},
+        'XLI': {'name': 'Industrial', 'icon': '🏭'},
+        'XLB': {'name': 'Materials', 'icon': '🏗️'},
+        'XLU': {'name': 'Utilities', 'icon': '💡'},
+    }
+    
+    sectors = []
+    
+    try:
+        for ticker, info in sector_etfs.items():
+            # Get latest price and previous close
+            rows = db.execute(text("""
+                SELECT close, date,
+                       LAG(close) OVER (ORDER BY date) as prev_close
+                FROM silver.unified_prices
+                WHERE ticker = :ticker
+                ORDER BY date DESC
+                LIMIT 1
+            """), {"ticker": ticker}).fetchall()
+            
+            if rows and rows[0].close:
+                latest = rows[0]
+                change_pct = 0
+                if latest.prev_close and latest.prev_close > 0:
+                    change_pct = ((float(latest.close) - float(latest.prev_close)) / float(latest.prev_close)) * 100
+                
+                sectors.append({
+                    "name": info['name'],
+                    "ticker": ticker,
+                    "change_percent": round(change_pct, 2),
+                    "icon": info['icon'],
+                    "price": float(latest.close),
+                    "last_update": latest.date.isoformat() if latest.date else None
+                })
+            else:
+                # No data - include sector with null values
+                sectors.append({
+                    "name": info['name'],
+                    "ticker": ticker,
+                    "change_percent": None,
+                    "icon": info['icon'],
+                    "price": None,
+                    "last_update": None
+                })
+    except Exception as e:
+        logger.error(f"Error fetching sector data: {e}")
+        # Return empty rather than mock data
+        return {"data": [], "error": str(e)}
+    
     return {"data": sectors}
 
 @app.get("/api/market/volume-leaders")
@@ -1287,7 +1333,7 @@ def get_market_breadth(db: Session = Depends(get_db)):
 
 @app.get("/api/market/sentiment")
 def get_market_sentiment(db: Session = Depends(get_db)):
-    """Get market sentiment indicators"""
+    """Get market sentiment indicators - returns null if VIX data unavailable"""
     try:
         # Try to fetch real VIX data
         vix_row = db.execute(text("""
@@ -1297,9 +1343,18 @@ def get_market_sentiment(db: Session = Depends(get_db)):
             LIMIT 1
         """)).fetchone()
         
-        vix = float(vix_row.close) if vix_row and vix_row.close else 20.0
+        # Policy: Return null if no real data available (no mock data)
+        if not vix_row or not vix_row.close:
+            return {
+                "fearGreed": None,
+                "vix": None,
+                "putCall": None,
+                "note": "VIX data unavailable"
+            }
         
-        # Calculate fear/greed index based on VIX and market breadth
+        vix = float(vix_row.close)
+        
+        # Calculate fear/greed index based on VIX
         # VIX < 15 = Greed, VIX > 30 = Fear
         if vix < 15:
             fear_greed = 75  # Greed
@@ -1315,15 +1370,16 @@ def get_market_sentiment(db: Session = Depends(get_db)):
         return {
             "fearGreed": fear_greed,
             "vix": vix,
-            "putCall": 1.0  # Would need options data
+            "putCall": None  # Would need options data
         }
     except Exception as e:
         logger.error(f"Error in market sentiment: {e}")
-        # Return defaults
+        # Return null rather than defaults
         return {
-            "fearGreed": 50,
-            "vix": 20.0,
-            "putCall": 1.0
+            "fearGreed": None,
+            "vix": None,
+            "putCall": None,
+            "error": str(e)
         }
 
 @app.get("/api/inventory/evaluate")
