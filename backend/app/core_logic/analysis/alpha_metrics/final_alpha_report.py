@@ -1,11 +1,15 @@
+import os
 import pandas as pd
 import requests
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Azure OpenAI removed - stub for future implementation
 # TODO: Replace with appropriate LLM service if needed
 
-SERPER_KEY = "fbccff7e2b07f4c417387bafadd141b97f1583be"
+SERPER_KEY = os.getenv("SERPER_KEY")
 
 def get_ticker_news(ticker):
     url = "https://google.serper.dev/news"

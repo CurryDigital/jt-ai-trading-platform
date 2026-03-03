@@ -1,0 +1,7 @@
+tunnel: temp-trading-tunnel
+credentials-file: /home/ubuntu/.cloudflared/temp-trading-tunnel.json
+
+ingress:
+  - hostname: trade.jtcml.com
+    service: http://localhost:8000
+  - service: http_status:404

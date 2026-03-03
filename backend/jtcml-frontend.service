@@ -1,0 +1,18 @@
+[Unit]
+Description=JTCML Trading Platform Frontend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/.openclaw/workspace/agents/jtcml_platform/jt-ai-trading-platform/frontend
+Environment=NODE_ENV=development
+Environment=PATH=/usr/bin:/home/ubuntu/.local/bin
+ExecStart=/usr/bin/npm run dev -- --host 127.0.0.1 --port 5173
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
