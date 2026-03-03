@@ -737,13 +737,12 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
     fetchPaperStrategies(); 
     fetchStrategyStats();
     
-    // Refresh every 5 minutes instead of continuously
-    const interval = setInterval(() => {
-      fetchPaperStrategies();
-      fetchStrategyStats();
-    }, 300000); // 5 minutes
-    
-    return () => clearInterval(interval);
+    // Auto-refresh disabled - use manual refresh only
+    // const interval = setInterval(() => {
+    //   fetchPaperStrategies();
+    //   fetchStrategyStats();
+    // }, 300000);
+    // return () => clearInterval(interval);
   }, []);
 
   const fetchStrategies = () => {

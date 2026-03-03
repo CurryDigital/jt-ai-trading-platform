@@ -35,12 +35,11 @@ const StrategyLab = () => {
     fetchStrategies();
     fetchLiveStats();
     
-    // Refresh every 30 seconds for live data
-    const interval = setInterval(() => {
-      fetchLiveStats();
-    }, 30000);
-    
-    return () => clearInterval(interval);
+    // Auto-refresh disabled - use manual refresh only
+    // const interval = setInterval(() => {
+    //   fetchLiveStats();
+    // }, 30000);
+    // return () => clearInterval(interval);
   }, []);
 
   const fetchStrategies = async () => {

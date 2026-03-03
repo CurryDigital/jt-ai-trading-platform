@@ -45,8 +45,9 @@ export const MarketsTab = ({ onTickerClick }) => {
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
+    // Auto-refresh disabled - use manual refresh only
+    // const interval = setInterval(fetchMarketData, 30000);
+    // return () => clearInterval(interval);
   }, [selectedTimeframe]);
 
   const fetchMarketData = async () => {

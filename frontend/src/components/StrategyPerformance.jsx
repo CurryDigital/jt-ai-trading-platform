@@ -1185,12 +1185,13 @@ export const StrategyPerformance = () => {
   useEffect(() => {
     fetchData();
     fetchGlobalMode();
-    const interval = setInterval(fetchData, 30000);
-    const modeInterval = setInterval(fetchGlobalMode, 60000);
-    return () => {
-      clearInterval(interval);
-      clearInterval(modeInterval);
-    };
+    // Auto-refresh disabled - use manual refresh only
+    // const interval = setInterval(fetchData, 30000);
+    // const modeInterval = setInterval(fetchGlobalMode, 60000);
+    // return () => {
+    //   clearInterval(interval);
+    //   clearInterval(modeInterval);
+    // };
   }, []);
 
   const fetchGlobalMode = async () => {
@@ -1227,12 +1228,13 @@ export const StrategyPerformance = () => {
     if (paperStrategies.length > 0) {
       fetchPrices();
       fetchSignals();
-      const priceInterval = setInterval(fetchPrices, 10000); // Reduced from 15s to 10s
-      const signalInterval = setInterval(fetchSignals, 30000);
-      return () => {
-        clearInterval(priceInterval);
-        clearInterval(signalInterval);
-      };
+      // Auto-refresh disabled - use manual refresh only
+      // const priceInterval = setInterval(fetchPrices, 10000);
+      // const signalInterval = setInterval(fetchSignals, 30000);
+      // return () => {
+      //   clearInterval(priceInterval);
+      //   clearInterval(signalInterval);
+      // };
     }
   }, [paperStrategies]);
 
