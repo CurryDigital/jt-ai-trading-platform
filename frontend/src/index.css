@@ -11,12 +11,30 @@
   --border-glass: rgba(255, 255, 255, 0.05);
 }
 
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  height: 100%;
+  overflow-x: hidden;
+}
+
 body {
   @apply bg-[#05070a] text-slate-300 font-sans;
   margin: 0;
   padding: 0;
+  min-height: 100%;
   -webkit-font-smoothing: antialiased;
   font-family: 'Plus Jakarta Sans', sans-serif;
+  overflow-x: hidden;
+  /* Fix for mobile viewport with dynamic toolbars */
+  height: 100vh;
+  height: 100dvh;
+}
+
+#root {
+  min-height: 100%;
 }
 
 .font-outfit { font-family: 'Outfit', sans-serif; }
@@ -78,3 +96,57 @@ body {
 /* Tab Transitions */
 .tab-content-enter { opacity: 0; transform: translateY(10px); }
 .tab-content-enter-active { opacity: 1; transform: translateY(0); transition: all 400ms ease-out; }
+
+/* Mobile-specific utilities */
+@layer utilities {
+  .safe-top { padding-top: env(safe-area-inset-top); }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-left { padding-left: env(safe-area-inset-left); }
+  .safe-right { padding-right: env(safe-area-inset-right); }
+  
+  /* Touch-friendly tap targets */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Mobile card layout for tables */
+  .mobile-card {
+    @apply block w-full;
+  }
+  .mobile-card tr {
+    @apply block mb-2 rounded-lg border border-white/5 bg-slate-900/30 p-3;
+  }
+  .mobile-card td, .mobile-card th {
+    @apply block w-full text-left py-1;
+  }
+  .mobile-card th {
+    @apply text-[9px] uppercase text-slate-500;
+  }
+  .mobile-card td {
+    @apply text-sm;
+  }
+  .mobile-card thead {
+    @apply hidden;
+  }
+  .mobile-card td::before {
+    content: attr(data-label);
+    @apply text-[9px] uppercase text-slate-500 block mb-0.5;
+  }
+}
+
+/* Horizontal scroll containers for mobile */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.scroll-x::-webkit-scrollbar {
+  display: none;
+}
+
+/* Bottom nav for mobile */
+.bottom-nav {
+  @apply fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-white/5;
+  padding-bottom: env(safe-area-inset-bottom);
+}

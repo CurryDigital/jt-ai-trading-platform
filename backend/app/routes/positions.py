@@ -20,12 +20,11 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     """Get current portfolio positions from consumption layer."""
     try:
         positions = db.execute(text("""
-            SELECT position_id, ticker, strategy_id, strategy_name, side, entry_date,
-                   entry_price, current_price, quantity, market_value, unrealized_pnl,
-                   unrealized_pnl_pct, weight_pct, stop_loss_price, take_profit_price, execution_mode
-            FROM consumption.Portfolio_Positions_Current ORDER BY unrealized_pnl DESC
+            SELECT ticker, market_value, weight_pct
+            FROM consumption.Portfolio_Positions_Current ORDER BY market_value DESC
         """)).fetchall()
-        return [dict(r._mapping) for r in positions]
+        return [{"ticker": p.ticker, "market_value": float(p.market_value or 0), 
+                 "weight_pct": float(p.weight_pct or 0)} for p in positions]
     except Exception as e:
         logger.error(f"Portfolio Positions Error: {e}")
         return []
@@ -157,9 +156,13 @@ class InventoryAdd(BaseModel):
 
 @router.get("/inventory")
 def get_inventory(db: Session = Depends(get_db)):
-    items = db.query(Inventory).all()
-    return [{"id": i.id, "ticker": i.ticker, "name": i.name, "buy_price": float(i.buy_price),
-             "quantity": float(i.quantity), "sector": i.sector, "source": "manual"} for i in items]
+    try:
+        items = db.query(Inventory).all()
+        return [{"id": i.id, "ticker": i.ticker, "name": i.name, "buy_price": float(i.buy_price),
+                 "quantity": float(i.quantity), "sector": i.sector, "source": "manual"} for i in items]
+    except Exception as e:
+        logger.error(f"Inventory get error: {e}")
+        return []
 
 
 @router.post("/inventory/add")
@@ -183,25 +186,29 @@ def delete_inventory(item_id: int, db: Session = Depends(get_db)):
     return {"status": "deleted"}
 
 
-@router.post("/inventory/evaluate")
+@router.get("/inventory/evaluate")
 def evaluate_inventory(db: Session = Depends(get_db)):
     """Evaluate inventory — reads current prices from DB."""
-    items = db.query(Inventory).all()
-    evaluated = []
-    for item in items:
-        price_row = db.execute(text("""
-            SELECT close FROM silver.unified_prices WHERE ticker = :ticker ORDER BY date DESC LIMIT 1
-        """), {"ticker": item.ticker}).fetchone()
-        current_price = float(price_row.close) if price_row else float(item.buy_price)
-        pnl = (current_price - float(item.buy_price)) * float(item.quantity)
-        pnl_pct = ((current_price - float(item.buy_price)) / float(item.buy_price) * 100) if float(item.buy_price) > 0 else 0
-        evaluated.append({
-            "id": item.id, "ticker": item.ticker, "name": item.name,
-            "buy_price": float(item.buy_price), "current_price": current_price,
-            "quantity": float(item.quantity), "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
-        })
-    total_pnl = sum(e["pnl"] for e in evaluated)
-    return {"positions": evaluated, "total_pnl": round(total_pnl, 2)}
+    try:
+        items = db.query(Inventory).all()
+        evaluated = []
+        for item in items:
+            price_row = db.execute(text("""
+                SELECT close FROM silver.unified_prices WHERE ticker = :ticker ORDER BY date DESC LIMIT 1
+            """), {"ticker": item.ticker}).fetchone()
+            current_price = float(price_row.close) if price_row else float(item.buy_price)
+            pnl = (current_price - float(item.buy_price)) * float(item.quantity)
+            pnl_pct = ((current_price - float(item.buy_price)) / float(item.buy_price) * 100) if float(item.buy_price) > 0 else 0
+            evaluated.append({
+                "id": item.id, "ticker": item.ticker, "name": item.name,
+                "buy_price": float(item.buy_price), "current_price": current_price,
+                "quantity": float(item.quantity), "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
+            })
+        total_pnl = sum(e["pnl"] for e in evaluated)
+        return {"positions": evaluated, "total_pnl": round(total_pnl, 2)}
+    except Exception as e:
+        logger.error(f"Inventory evaluate error: {e}")
+        return {"positions": [], "total_pnl": 0}
 
 
 # =============================================================================

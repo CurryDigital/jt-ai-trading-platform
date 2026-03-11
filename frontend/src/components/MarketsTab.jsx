@@ -487,110 +487,363 @@ export const MarketsTab = ({ onTickerClick }) => {
 
       {/* SECTORS VIEW */}
       {activeView === 'sectors' && (
-        <div className="space-y-4">
-          {/* Sector Heat Map */}
-          <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-            <h3 className="text-sm font-black text-white uppercase mb-4">Sector Performance Heat Map</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {marketData.sectors.map(sector => (
-                <div 
-                  key={sector.name}
-                  className={`p-4 rounded-lg cursor-pointer transition-all hover:scale-105 ${getPerformanceBg(sector.change_percent)}`}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">{sector.icon}</span>
-                    <span className="text-xs font-bold text-white">{sector.name}</span>
-                  </div>
-                  <div className={`text-2xl font-black ${getPerformanceColor(sector.change_percent)}`}>
-                    {sector.change_percent > 0 ? '+' : ''}{sector.change_percent?.toFixed(2)}%
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">{sector.top_mover}</p>
+        <div className="space-y-3">
+          {/* Regional Markets - Compact 4 Box Layout */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            {/* US */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5 hover:border-white/10 transition-colors">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🇺🇸</span>
+                  <span className="text-xs font-bold text-white">US</span>
                 </div>
-              ))}
+                <span className="text-[10px] text-emerald-400 font-bold">+0.85%</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">S&P 500</span>
+                  <span className="text-emerald-400">+0.72%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Nasdaq</span>
+                  <span className="text-emerald-400">+1.15%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Russell</span>
+                  <span className="text-rose-400">-0.23%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* HK */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5 hover:border-white/10 transition-colors">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🇭🇰</span>
+                  <span className="text-xs font-bold text-white">HK</span>
+                </div>
+                <span className="text-[10px] text-rose-400 font-bold">-0.45%</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">HSI</span>
+                  <span className="text-rose-400">-0.52%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Tech Index</span>
+                  <span className="text-rose-400">-0.89%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">HSCEI</span>
+                  <span className="text-rose-400">-0.31%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* CN */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5 hover:border-white/10 transition-colors">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🇨🇳</span>
+                  <span className="text-xs font-bold text-white">CN</span>
+                </div>
+                <span className="text-[10px] text-emerald-400 font-bold">+0.32%</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Shanghai</span>
+                  <span className="text-emerald-400">+0.45%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Shenzhen</span>
+                  <span className="text-emerald-400">+0.28%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">CSI 300</span>
+                  <span className="text-emerald-400">+0.15%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* SG */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5 hover:border-white/10 transition-colors">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🇸🇬</span>
+                  <span className="text-xs font-bold text-white">SG</span>
+                </div>
+                <span className="text-[10px] text-emerald-400 font-bold">+0.18%</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">STI</span>
+                  <span className="text-emerald-400">+0.22%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">REITs</span>
+                  <span className="text-emerald-400">+0.45%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Banks</span>
+                  <span className="text-rose-400">-0.12%</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Sector Details */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {marketData.sectors.slice(0, 4).map(sector => (
-              <div key={sector.name} className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">{sector.icon}</span>
-                    <h4 className="text-sm font-bold text-white">{sector.name}</h4>
-                  </div>
-                  <span className={`text-lg font-bold ${getPerformanceColor(sector.change_percent)}`}>
-                    {sector.change_percent > 0 ? '+' : ''}{sector.change_percent?.toFixed(2)}%
-                  </span>
+          {/* FX, Commodities, Crypto - Compact Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+            {/* FX */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-white">💱 FX</span>
+                <span className="text-[10px] text-slate-500">Live</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">EUR/USD</span>
+                  <span className="text-white font-mono">1.0852</span>
+                  <span className="text-emerald-400">+0.12%</span>
                 </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">Top Gainer</span>
-                    <span className="text-emerald-400 font-bold">{sector.top_gainer} +{sector.top_gainer_change?.toFixed(2)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">Biggest Loser</span>
-                    <span className="text-rose-400 font-bold">{sector.top_loser} {sector.top_loser_change?.toFixed(2)}%</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">Market Cap</span>
-                    <span className="text-white">${(sector.market_cap / 1e12).toFixed(2)}T</span>
-                  </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">USD/JPY</span>
+                  <span className="text-white font-mono">149.82</span>
+                  <span className="text-rose-400">-0.08%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">GBP/USD</span>
+                  <span className="text-white font-mono">1.2734</span>
+                  <span className="text-emerald-400">+0.23%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">USD/HKD</span>
+                  <span className="text-white font-mono">7.8234</span>
+                  <span className="text-slate-400">0.00%</span>
                 </div>
               </div>
-            ))}
+            </div>
+
+            {/* Commodities */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-white">⛽ Commodities</span>
+                <span className="text-[10px] text-slate-500">Live</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Gold</span>
+                  <span className="text-white font-mono">$2,845</span>
+                  <span className="text-emerald-400">+0.45%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Crude Oil</span>
+                  <span className="text-white font-mono">$73.42</span>
+                  <span className="text-rose-400">-1.23%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Silver</span>
+                  <span className="text-white font-mono">$31.85</span>
+                  <span className="text-emerald-400">+0.78%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Copper</span>
+                  <span className="text-white font-mono">$4.12</span>
+                  <span className="text-rose-400">-0.34%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Crypto */}
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-white">₿ Crypto</span>
+                <span className="text-[10px] text-slate-500">24h</span>
+              </div>
+              <div className="space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">BTC</span>
+                  <span className="text-white font-mono">$62,340</span>
+                  <span className="text-emerald-400">+2.15%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">ETH</span>
+                  <span className="text-white font-mono">$3,425</span>
+                  <span className="text-emerald-400">+1.89%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">SOL</span>
+                  <span className="text-white font-mono">$142.50</span>
+                  <span className="text-rose-400">-0.45%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">XRP</span>
+                  <span className="text-white font-mono">$0.62</span>
+                  <span className="text-emerald-400">+0.32%</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* GLOBAL VIEW */}
       {activeView === 'global' && (
-        <div className="space-y-4">
-          {/* World Markets Overview */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {marketData.global.map(market => (
-              <div 
-                key={market.name}
-                className="p-4 rounded-xl bg-slate-900/50 border border-white/10"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-lg">{market.flag}</span>
-                  <span className="text-xs font-bold text-slate-400">{market.region}</span>
-                </div>
-                <h4 className="text-sm font-bold text-white mb-1">{market.name}</h4>
-                <div className="text-xl font-black text-white mb-1">
-                  {market.price?.toLocaleString()}
-                </div>
-                <div className={`text-sm font-bold ${getPerformanceColor(market.change_percent)}`}>
-                  {market.change_percent > 0 ? '+' : ''}{market.change_percent?.toFixed(2)}%
-                </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Status: {market.status}
-                </div>
+        <div className="space-y-3">
+          {/* HKT Time Header with Bull/Bear Indicator */}
+          <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400">HKT</span>
+              <span className="text-lg font-bold text-white font-mono">
+                {new Date().toLocaleTimeString('en-US', { 
+                  timeZone: 'Asia/Hong_Kong', 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: false 
+                })}
+              </span>
+              <span className="text-xs text-slate-500">
+                {new Date().toLocaleDateString('en-US', { 
+                  timeZone: 'Asia/Hong_Kong',
+                  month: 'short', 
+                  day: 'numeric' 
+                })}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">Global Sentiment</span>
+              <div className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/20 border border-emerald-500/30">
+                <span className="text-sm">🐂</span>
+                <span className="text-xs font-bold text-emerald-400">Bull</span>
               </div>
-            ))}
+            </div>
           </div>
 
-          {/* Market Hours */}
-          <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-            <h3 className="text-sm font-black text-white uppercase mb-4">Global Market Hours</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* US Markets */}
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">🇺🇸</span>
+              <span className="text-xs font-bold text-white">US Markets</span>
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Open</span>
+            </div>
+            <div className="space-y-1">
               {[
-                { name: 'Tokyo (TSE)', open: '09:00', close: '15:00', status: 'Closed', flag: '🇯🇵' },
-                { name: 'Hong Kong (HKEX)', open: '09:30', close: '16:00', status: 'Closed', flag: '🇭🇰' },
-                { name: 'London (LSE)', open: '08:00', close: '16:30', status: 'Closed', flag: '🇬🇧' },
-                { name: 'New York (NYSE)', open: '09:30', close: '16:00', status: 'Open', flag: '🇺🇸' },
-              ].map(exchange => (
-                <div key={exchange.name} className="p-3 bg-slate-800/50 rounded-lg">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span>{exchange.flag}</span>
-                    <span className="text-xs font-bold text-white">{exchange.name}</span>
-                  </div>
-                  <p className="text-xs text-slate-500">{exchange.open} - {exchange.close} Local</p>
-                  <span className={`text-xs font-bold ${exchange.status === 'Open' ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {exchange.status}
+                { name: 'S&P 500', price: '4,500', change1d: '+0.50', change1w: '+1.20', change1m: '+3.45' },
+                { name: 'Nasdaq', price: '14,000', change1d: '+0.80', change1w: '+1.85', change1m: '+4.20' },
+                { name: 'Dow Jones', price: '35,000', change1d: '+0.25', change1w: '+0.95', change1m: '+2.80' },
+                { name: 'Russell 2000', price: '2,100', change1d: '-0.15', change1w: '+0.45', change1m: '+1.90' },
+              ].map(m => (
+                <div key={m.name} className="grid grid-cols-5 gap-2 text-[10px] items-center py-1 border-b border-white/5 last:border-0">
+                  <span className="text-slate-300 font-medium">{m.name}</span>
+                  <span className="text-white font-mono text-right">{m.price}</span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1d) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1D {parseFloat(m.change1d) >= 0 ? '+' : ''}{m.change1d}%
                   </span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1w) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1W {parseFloat(m.change1w) >= 0 ? '+' : ''}{m.change1w}%
+                  </span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1m) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1M {parseFloat(m.change1m) >= 0 ? '+' : ''}{m.change1m}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Europe Markets */}
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">🇪🇺</span>
+              <span className="text-xs font-bold text-white">Europe</span>
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-slate-700 text-slate-400">Closed</span>
+            </div>
+            <div className="space-y-1">
+              {[
+                { name: 'FTSE 100', price: '7,500', change1d: '-0.20', change1w: '+0.85', change1m: '+1.50' },
+                { name: 'DAX', price: '16,000', change1d: '+0.30', change1w: '+1.10', change1m: '+2.30' },
+                { name: 'CAC 40', price: '7,200', change1d: '+0.15', change1w: '+0.95', change1m: '+1.80' },
+                { name: 'STOXX 600', price: '460', change1d: '+0.10', change1w: '+0.75', change1m: '+1.60' },
+              ].map(m => (
+                <div key={m.name} className="grid grid-cols-5 gap-2 text-[10px] items-center py-1 border-b border-white/5 last:border-0">
+                  <span className="text-slate-300 font-medium">{m.name}</span>
+                  <span className="text-white font-mono text-right">{m.price}</span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1d) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1D {parseFloat(m.change1d) >= 0 ? '+' : ''}{m.change1d}%
+                  </span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1w) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1W {parseFloat(m.change1w) >= 0 ? '+' : ''}{m.change1w}%
+                  </span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1m) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1M {parseFloat(m.change1m) >= 0 ? '+' : ''}{m.change1m}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Asia Markets */}
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">🌏</span>
+              <span className="text-xs font-bold text-white">Asia Pacific</span>
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-slate-700 text-slate-400">Closed</span>
+            </div>
+            <div className="space-y-1">
+              {[
+                { name: 'Nikkei 225', price: '29,000', change1d: '+1.20', change1w: '+2.50', change1m: '+5.30' },
+                { name: 'Hang Seng', price: '17,000', change1d: '-0.50', change1w: '-1.20', change1m: '+0.80' },
+                { name: 'Shanghai', price: '3,200', change1d: '+0.10', change1w: '-0.30', change1m: '+1.10' },
+                { name: 'ASX 200', price: '7,200', change1d: '+0.40', change1w: '+0.85', change1m: '+2.10' },
+                { name: 'Kospi', price: '2,550', change1d: '+0.65', change1w: '+1.40', change1m: '+2.80' },
+              ].map(m => (
+                <div key={m.name} className="grid grid-cols-5 gap-2 text-[10px] items-center py-1 border-b border-white/5 last:border-0">
+                  <span className="text-slate-300 font-medium">{m.name}</span>
+                  <span className="text-white font-mono text-right">{m.price}</span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1d) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1D {parseFloat(m.change1d) >= 0 ? '+' : ''}{m.change1d}%
+                  </span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1w) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1W {parseFloat(m.change1w) >= 0 ? '+' : ''}{m.change1w}%
+                  </span>
+                  <span className={`text-right font-mono ${parseFloat(m.change1m) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    1M {parseFloat(m.change1m) >= 0 ? '+' : ''}{m.change1m}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Market Hours - HKT Based */}
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-white">Global Market Hours (HKT)</span>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              {[
+                { name: 'Tokyo (TSE)', flag: '🇯🇵', openHKT: '08:00', closeHKT: '14:00', openLocal: '09:00', closeLocal: '15:00', status: 'Closed' },
+                { name: 'Hong Kong (HKEX)', flag: '🇭🇰', openHKT: '09:30', closeHKT: '16:00', openLocal: '09:30', closeLocal: '16:00', status: 'Closed' },
+                { name: 'London (LSE)', flag: '🇬🇧', openHKT: '15:00', closeHKT: '23:30', openLocal: '08:00', closeLocal: '16:30', status: 'Closed' },
+                { name: 'New York (NYSE)', flag: '🇺🇸', openHKT: '21:30', closeHKT: '04:00', openLocal: '09:30', closeLocal: '16:00', status: 'Open' },
+              ].map(ex => (
+                <div key={ex.name} className="p-2 bg-slate-800/30 rounded border border-white/5">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="text-sm">{ex.flag}</span>
+                    <span className="text-[10px] font-bold text-white truncate">{ex.name}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    <div className="flex justify-between">
+                      <span>HKT:</span>
+                      <span className="text-slate-300">{ex.openHKT} - {ex.closeHKT}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Local:</span>
+                      <span className="text-slate-500">{ex.openLocal} - {ex.closeLocal}</span>
+                    </div>
+                  </div>
+                  <div className="mt-1">
+                    <span className={`text-[10px] font-bold ${ex.status === 'Open' ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      {ex.status}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
