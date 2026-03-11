@@ -1,354 +1,498 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { ProfessionalLiveTrading } from './ProfessionalLiveTrading';
-import { ProfessionalSimulationLab } from './ProfessionalSimulationLab';
-import { StockDetailModal } from './components/StockDetailModal';
-import { StrategyDashboard } from './components/StrategyDashboard';
-import { GoldenStrategies } from './components/GoldenStrategies';
-import { ResearchTab } from './components/ResearchTab';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { MarketsTab } from './components/MarketsTab';
-import { StrategyPerformance } from './components/StrategyPerformance';
-import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { SettingsTab } from './components/SettingsTab';
 import { StrategyLab } from './components/StrategyLab';
 
 // =============================================================================
-// JT AI TRADING PLATFORM v3.0 - QUANT REVAMP
+// JTCML TRADING PLATFORM v4.1 — COMPACT AUTO-TRADING DASHBOARD
 // =============================================================================
 
-// --- UTILS & HELPERS ---
-const formatNumber = (num, decimals = 2) => {
-  if (num === null || num === undefined || isNaN(num)) return '---';
-  return num.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-};
+// --- UTILS ---
+const fmt = (n, d = 2) => n == null || isNaN(n) ? '—' : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(0)}`;
+const fmtPct = (n) => n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+const pnlCl = (v) => v == null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
+const pnlBg = (v) => v == null ? 'bg-slate-800' : v >= 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10';
 
-const formatCurrency = (num, currency = '$') => {
-  if (num === null || num === undefined || isNaN(num)) return '---';
-  const absVal = Math.abs(num);
-  if (absVal >= 1e9) return `${currency}${(num / 1e9).toFixed(2)}B`;
-  if (absVal >= 1e6) return `${currency}${(num / 1e6).toFixed(2)}M`;
-  if (absVal >= 1e3) return `${currency}${(num / 1e3).toFixed(2)}K`;
-  return `${currency}${num.toFixed(2)}`;
-};
+// --- MOBILE COMPONENTS ---
+const MobileBottomNav = ({ view, setView, navItems }) => (
+  <nav className="bottom-nav md:hidden">
+    <div className="flex items-center justify-around px-2 py-1">
+      {navItems.slice(0, 5).map(n => (
+        <button
+          key={n.id}
+          onClick={() => setView(n.id)}
+          className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition-all ${
+            view === n.id 
+              ? 'text-blue-400' 
+              : 'text-slate-500'
+          }`}
+        >
+          <span className="text-lg">{n.icon}</span>
+          <span className="text-[9px] font-medium">{n.label}</span>
+        </button>
+      ))}
+    </div>
+  </nav>
+);
 
-const formatPercent = (num, decimals = 2) => {
-  if (num === null || num === undefined || isNaN(num)) return '---';
-  const sign = num >= 0 ? '+' : '';
-  return `${sign}${num.toFixed(decimals)}%`;
-};
-
-const getPnLColor = (val) => {
-  if (val === null || val === undefined) return 'text-slate-400';
-  return val >= 0 ? 'text-emerald-400' : 'text-rose-400';
-};
-
-const getPnLBg = (val) => {
-  if (val === null || val === undefined) return 'bg-slate-500/10';
-  return val >= 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10';
-};
-
-// --- ICONS (SVG Components) ---
-const Icons = {
-  Dashboard: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z" />
-    </svg>
-  ),
-  Portfolio: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-    </svg>
-  ),
-  Research: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  ),
-  Markets: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
-    </svg>
-  ),
-  Strategies: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-  ),
-  Settings: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  ),
-  Alert: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-    </svg>
-  ),
-  TrendUp: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-    </svg>
-  ),
-  TrendDown: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
-    </svg>
-  ),
-  Chart: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  Performance: () => (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
-    </svg>
-  ),
-  Menu: () => (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-    </svg>
-  ),
-  Close: () => (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  ),
-};
-
-// --- ANALYST TARGET COMPONENT ---
-const AnalystTargetCell = ({ ticker }) => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!ticker) return;
-    
-    fetch(`/api/stocks/${ticker}/institutional`)
-      .then(r => r.json())
-      .then(d => {
-        setData(d.consensus);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [ticker]);
-
-  if (loading) return <span className="text-xs text-slate-500">...</span>;
-  if (!data || !data.target_mean) return <span className="text-xs text-slate-500">—</span>;
-
-  const upside = data.upside_pct;
-  const color = upside > 20 ? 'text-emerald-400' : upside > 0 ? 'text-blue-400' : 'text-rose-400';
-  
+const MobilePositionCard = ({ p, onClose }) => {
+  const pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100) : 0;
+  const unrealized = (p.current_price - p.entry_price) * (p.quantity || 0);
   return (
-    <div className="flex flex-col items-center">
-      <span className="text-xs font-mono text-white">${data.target_mean.toFixed(0)}</span>
-      <span className={`text-[10px] ${color}`}>{upside > 0 ? '+' : ''}{upside.toFixed(1)}%</span>
-      <span className="text-[9px] text-slate-500">{data.total_analysts} analysts</span>
+    <div className="bg-slate-900/50 rounded-lg p-3 border border-white/5 mb-2">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <div className="font-bold text-white">{p.ticker}</div>
+          <div className="text-[10px] text-slate-500">{p.strategy_name || p.strategy_id || '—'}</div>
+        </div>
+        <button
+          onClick={() => onClose?.(p.position_id, p.ticker)}
+          className="px-2 py-1 bg-rose-600/20 text-rose-400 text-[9px] font-bold rounded"
+        >
+          Close
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div>
+          <div className="text-[9px] text-slate-500">Entry</div>
+          <div className="font-mono text-slate-400">${fmt(p.entry_price)}</div>
+        </div>
+        <div>
+          <div className="text-[9px] text-slate-500">Current</div>
+          <div className="font-mono text-white">${fmt(p.current_price)}</div>
+        </div>
+        <div>
+          <div className="text-[9px] text-slate-500">Qty</div>
+          <div className="font-mono text-slate-400">{fmt(p.quantity, 0)}</div>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
+        <div>
+          <span className="text-[9px] text-slate-500 mr-1">P&L:</span>
+          <span className={`font-mono font-bold ${pnlCl(unrealized)}`}>{fmtK(unrealized)}</span>
+        </div>
+        <div className={`font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</div>
+      </div>
     </div>
   );
 };
 
-// --- SPARKLINE COMPONENT ---
-const Sparkline = ({ data, color = "#10b981", width = 80, height = 28 }) => {
-  if (!data || data.length === 0) return <div style={{width, height}} className="bg-slate-800/50 rounded" />;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const points = data.map((val, i) => 
-    `${(i / (data.length - 1)) * width},${height - ((val - min) / range) * height}`
-  ).join(' ');
-  const isPositive = data[data.length - 1] >= data[0];
-  const strokeColor = isPositive ? '#10b981' : '#f43f5e';
+const MobileStrategyRow = ({ s, onDeploy, onViewDetail }) => {
+  const wr = s.live_win_rate ?? s.backtest_win_rate;
+  const sig = s.current_signal;
   return (
-    <svg width={width} height={height} className="overflow-visible">
-      <defs>
-        <linearGradient id={`grad-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor={strokeColor} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon 
-        points={`0,${height} ${points} ${width},${height}`} 
-        fill={`url(#grad-${color})`} 
-      />
-      <polyline 
-        fill="none" 
-        stroke={strokeColor} 
-        strokeWidth="2" 
-        points={points} 
-        strokeLinejoin="round" 
-        strokeLinecap="round" 
-      />
-    </svg>
-  );
-};
-
-// --- METRIC CARD COMPONENT ---
-const MetricCard = ({ label, value, subtext, trend, isPositive, icon: Icon, color = 'blue', large = false }) => {
-  const colorClasses = {
-    blue: 'from-blue-500/20 to-blue-600/5 border-blue-500/30',
-    emerald: 'from-emerald-500/20 to-emerald-600/5 border-emerald-500/30',
-    rose: 'from-rose-500/20 to-rose-600/5 border-rose-500/30',
-    amber: 'from-amber-500/20 to-amber-600/5 border-amber-500/30',
-    violet: 'from-violet-500/20 to-violet-600/5 border-violet-500/30',
-  }[color];
-
-  return (
-    <div className={`relative overflow-hidden rounded-xl bg-gradient-to-br ${colorClasses} border p-4 ${large ? 'p-6' : ''}`}>
-      <div className="flex items-start justify-between">
+    <div className="bg-slate-900/50 rounded-lg p-3 border border-white/5 mb-2" onClick={() => onViewDetail?.(s)}>
+      <div className="flex items-center justify-between mb-2">
         <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
-          <p className={`${large ? 'text-3xl' : 'text-xl'} font-black text-white mt-1 font-mono tracking-tight`}>
-            {value}
-          </p>
-          {subtext && (
-            <p className={`text-xs mt-1 font-medium ${isPositive !== undefined ? (isPositive ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400'}`}>
-              {subtext}
-            </p>
-          )}
+          <div className="font-bold text-white text-sm">{s.strategy_name || s.strategy_id}</div>
+          <div className="text-[10px] text-slate-500">{s.asset_class || '—'}</div>
         </div>
-        {Icon && (
-          <div className={`p-2 rounded-lg bg-white/5 ${isPositive !== undefined ? (isPositive ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400'}`}>
-            <Icon />
-          </div>
-        )}
+        <button
+          onClick={e => { e.stopPropagation(); onDeploy?.(s); }}
+          className="px-3 py-1.5 bg-blue-600 text-white text-[10px] font-bold rounded"
+        >
+          Deploy
+        </button>
       </div>
-      {trend && (
-        <div className="absolute bottom-0 left-0 right-0 h-16 opacity-20">
-          <Sparkline data={trend} width={200} height={64} />
+      <div className="grid grid-cols-4 gap-2 text-xs mb-2">
+        <div className="text-center p-1.5 bg-slate-800/30 rounded">
+          <div className="text-[9px] text-slate-500">WR</div>
+          <div className={`font-mono font-bold ${pnlCl(wr != null ? wr - 50 : null)}`}>
+            {wr != null ? `${wr.toFixed(0)}%` : '—'}
+          </div>
+        </div>
+        <div className="text-center p-1.5 bg-slate-800/30 rounded">
+          <div className="text-[9px] text-slate-500">Sharpe</div>
+          <div className="font-mono text-slate-300">{s.sharpe_ratio ? s.sharpe_ratio.toFixed(2) : '—'}</div>
+        </div>
+        <div className="text-center p-1.5 bg-slate-800/30 rounded">
+          <div className="text-[9px] text-slate-500">Trades</div>
+          <div className="font-mono text-slate-300">{s.live_trades || 0}</div>
+        </div>
+        <div className="text-center p-1.5 bg-slate-800/30 rounded">
+          <div className="text-[9px] text-slate-500">Return</div>
+          <div className={`font-mono font-bold ${pnlCl(s.returns)}`}>
+            {s.returns != null ? fmtPct(s.returns) : '—'}
+          </div>
+        </div>
+      </div>
+      {sig && (
+        <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+          <span className="text-[10px] text-slate-500">Signal:</span>
+          <Pill color={sig.action === 'BUY' ? 'emerald' : sig.action === 'SELL' ? 'rose' : 'slate'}>{sig.action}</Pill>
+          <span className="text-[10px] text-slate-500 font-mono">{sig.ticker}</span>
         </div>
       )}
     </div>
   );
 };
+const Pill = ({ children, color = 'slate' }) => {
+  const cls = { emerald: 'bg-emerald-500/15 text-emerald-400', rose: 'bg-rose-500/15 text-rose-400', blue: 'bg-blue-500/15 text-blue-400', amber: 'bg-amber-500/15 text-amber-400', slate: 'bg-slate-700/50 text-slate-400', violet: 'bg-violet-500/15 text-violet-400' };
+  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${cls[color] || cls.slate}`}>{children}</span>;
+};
 
-// --- P&L BADGE ---
-const PnLBadge = ({ value, size = 'md', showSign = true }) => {
-  const isPos = value >= 0;
-  const sizeClasses = {
-    sm: 'text-xs px-2 py-0.5',
-    md: 'text-sm px-2.5 py-1',
-    lg: 'text-base px-3 py-1.5'
-  };
+const Dot = ({ on }) => <span className={`inline-block w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />;
+
+const SparkBars = ({ data = [], height = 24 }) => {
+  if (!data.length) return <div className="h-6 text-[10px] text-slate-600 flex items-center">No data</div>;
+  const mx = Math.max(...data.map(d => Math.abs(d)), 1);
   return (
-    <span className={`inline-flex items-center gap-1 font-mono font-bold rounded-lg ${sizeClasses[size]} ${
-      isPos ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-    }`}>
-      {isPos ? '▲' : '▼'}
-      {showSign && isPos ? '+' : ''}{formatPercent(value)}
-    </span>
+    <div className="flex items-end gap-px" style={{ height }}>
+      {data.map((v, i) => (
+        <div key={i} className={`flex-1 rounded-t ${v >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+          style={{ height: `${Math.max(8, (Math.abs(v) / mx) * 100)}%`, minWidth: 3 }}
+          title={`$${v.toFixed(0)}`} />
+      ))}
+    </div>
   );
 };
 
-// --- STATUS BADGE ---
-const StatusBadge = ({ status, text }) => {
-  const colors = {
-    live: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    paper: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    simulation: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    offline: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
-    error: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
-  };
+// --- KPI CARD ---
+const KPI = ({ label, value, sub, positive }) => (
+  <div className="px-3 py-2 bg-slate-900/60 rounded-lg border border-white/5 min-w-0">
+    <div className="text-[9px] text-slate-500 uppercase tracking-wider truncate">{label}</div>
+    <div className="text-base font-bold text-white font-mono leading-tight mt-0.5">{value}</div>
+    {sub && <div className={`text-[10px] mt-0.5 ${positive != null ? (positive ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}`}>{sub}</div>}
+  </div>
+);
+
+// =============================================================================
+// STRATEGY ROW — Compact card for each strategy
+// =============================================================================
+const StrategyRow = ({ s, onDeploy, onViewDetail }) => {
+  const wr = s.live_win_rate ?? s.backtest_win_rate;
+  const sig = s.current_signal;
+
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${colors[status] || colors.offline}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'animate-pulse bg-emerald-400' : 'bg-current'}`} />
-      {text || status}
-    </span>
+    <div className="grid grid-cols-12 gap-2 items-center px-3 py-2 hover:bg-white/[0.02] border-b border-white/5 text-xs cursor-pointer"
+      onClick={() => onViewDetail?.(s)}>
+      <div className="col-span-3 min-w-0">
+        <div className="font-bold text-white truncate">{s.strategy_name || s.strategy_id}</div>
+        <div className="text-[10px] text-slate-500">{s.asset_class || '—'}</div>
+      </div>
+      <div className="col-span-1 text-right">
+        <span className={`font-mono font-bold ${pnlCl(wr != null ? wr - 50 : null)}`}>{wr != null ? `${wr.toFixed(0)}%` : '—'}</span>
+      </div>
+      <div className="col-span-1 text-right font-mono text-slate-300">{s.sharpe_ratio ? s.sharpe_ratio.toFixed(2) : '—'}</div>
+      <div className="col-span-1 text-right font-mono text-slate-400">{s.live_trades || 0}</div>
+      <div className="col-span-1 text-right">
+        <span className={`font-mono font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</span>
+      </div>
+      <div className="col-span-1 text-right text-slate-500 font-mono">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '—'}</div>
+      <div className="col-span-2 text-center">
+        {sig ? (
+          <div className="flex items-center gap-1 justify-center">
+            <Pill color={sig.action === 'BUY' ? 'emerald' : sig.action === 'SELL' ? 'rose' : 'slate'}>{sig.action}</Pill>
+            <span className="text-[10px] text-slate-500 font-mono">{sig.ticker}</span>
+          </div>
+        ) : <span className="text-slate-600">—</span>}
+      </div>
+      <div className="col-span-2 text-right">
+        <button onClick={e => { e.stopPropagation(); onDeploy?.(s); }}
+          className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-[10px] font-bold rounded transition-colors">
+          Deploy
+        </button>
+      </div>
+    </div>
   );
 };
 
 // =============================================================================
-// MAIN APP COMPONENT
+// POSITION TABLE — Live positions with P&L (Responsive: cards on mobile)
 // =============================================================================
+const PositionTable = ({ positions = [], onClose }) => (
+  <div className="overflow-x-auto">
+    {/* Desktop Table */}
+    <table className="w-full text-xs hidden md:table">
+      <thead>
+        <tr className="text-[9px] text-slate-500 uppercase tracking-wider border-b border-white/10">
+          <th className="text-left py-1.5 px-2">Ticker</th>
+          <th className="text-left py-1.5 px-2">Strategy</th>
+          <th className="text-right py-1.5 px-2">Entry</th>
+          <th className="text-right py-1.5 px-2">Current</th>
+          <th className="text-right py-1.5 px-2">Qty</th>
+          <th className="text-right py-1.5 px-2">Unrealized</th>
+          <th className="text-right py-1.5 px-2">%</th>
+          <th className="text-right py-1.5 px-2">Days</th>
+          <th className="text-center py-1.5 px-2"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {positions.map((p, i) => {
+          const pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100) : 0;
+          const unrealized = (p.current_price - p.entry_price) * (p.quantity || 0);
+          return (
+            <tr key={p.position_id || i} className="border-b border-white/5 hover:bg-white/[0.02]">
+              <td className="py-1.5 px-2 font-bold text-white">{p.ticker}</td>
+              <td className="py-1.5 px-2 text-slate-400 truncate max-w-[100px]">{p.strategy_name || p.strategy_id || '—'}</td>
+              <td className="py-1.5 px-2 text-right font-mono text-slate-400">${fmt(p.entry_price)}</td>
+              <td className="py-1.5 px-2 text-right font-mono text-white">${fmt(p.current_price)}</td>
+              <td className="py-1.5 px-2 text-right font-mono text-slate-400">{fmt(p.quantity, 0)}</td>
+              <td className={`py-1.5 px-2 text-right font-mono font-bold ${pnlCl(unrealized)}`}>{fmtK(unrealized)}</td>
+              <td className={`py-1.5 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+              <td className="py-1.5 px-2 text-right font-mono text-slate-500">{p.holding_days ?? '—'}</td>
+              <td className="py-1.5 px-2 text-center">
+                <button onClick={() => onClose?.(p.position_id, p.ticker)}
+                  className="px-1.5 py-0.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white text-[9px] font-bold rounded transition-all">
+                  ✕
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+        {!positions.length && (
+          <tr><td colSpan={9} className="py-6 text-center text-slate-600">No positions</td></tr>
+        )}
+      </tbody>
+    </table>
+    
+    {/* Mobile Cards */}
+    <div className="md:hidden">
+      {positions.map((p, i) => (
+        <MobilePositionCard key={p.position_id || i} p={p} onClose={onClose} />
+      ))}
+      {!positions.length && (
+        <div className="py-6 text-center text-slate-600 text-xs">No positions</div>
+      )}
+    </div>
+  </div>
+);
 
+// =============================================================================
+// P&L SUMMARY — Daily / Weekly / Monthly breakdown
+// =============================================================================
+const PnLSummary = ({ dailyPnl = [], trades = [] }) => {
+  const today = new Date();
+  const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+  const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
+
+  const todayPnl = dailyPnl.find(d => d.date === today.toISOString().slice(0, 10))?.pnl || 0;
+  const weekPnl = dailyPnl.filter(d => new Date(d.date) >= weekAgo).reduce((s, d) => s + (d.pnl || 0), 0);
+  const monthPnl = dailyPnl.filter(d => new Date(d.date) >= monthAgo).reduce((s, d) => s + (d.pnl || 0), 0);
+  const totalRealized = trades.reduce((s, t) => s + (t.pnl || 0), 0);
+
+  return (
+    <>
+      <div className={`rounded-lg px-2.5 py-2 ${pnlBg(todayPnl)} border border-white/5`}>
+        <div className="text-[9px] text-slate-500 uppercase">Today</div>
+        <div className={`text-sm font-bold font-mono ${pnlCl(todayPnl)}`}>{fmtK(todayPnl)}</div>
+      </div>
+      <div className={`rounded-lg px-2.5 py-2 ${pnlBg(weekPnl)} border border-white/5`}>
+        <div className="text-[9px] text-slate-500 uppercase">This Week</div>
+        <div className={`text-sm font-bold font-mono ${pnlCl(weekPnl)}`}>{fmtK(weekPnl)}</div>
+      </div>
+      <div className={`rounded-lg px-2.5 py-2 ${pnlBg(monthPnl)} border border-white/5`}>
+        <div className="text-[9px] text-slate-500 uppercase">This Month</div>
+        <div className={`text-sm font-bold font-mono ${pnlCl(monthPnl)}`}>{fmtK(monthPnl)}</div>
+      </div>
+      <div className={`rounded-lg px-2.5 py-2 ${pnlBg(totalRealized)} border border-white/5`}>
+        <div className="text-[9px] text-slate-500 uppercase">Realized</div>
+        <div className={`text-sm font-bold font-mono ${pnlCl(totalRealized)}`}>{fmtK(totalRealized)}</div>
+      </div>
+    </>
+  );
+};
+
+// =============================================================================
+// STRATEGY DETAIL PANEL — Slide-out detail view
+// =============================================================================
+const StrategyDetail = ({ strategy, onClose }) => {
+  const [detail, setDetail] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [dailyPnl, setDailyPnl] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!strategy) return;
+    const sid = encodeURIComponent(strategy.strategy_id);
+    Promise.all([
+      fetch(`/api/strategies/${sid}`).then(r => r.json()).catch(() => null),
+      fetch(`/api/paper-strategies/${sid}/daily-pnl?days=30`).then(r => r.json()).catch(() => null),
+      fetch(`/api/portfolio/positions`).then(r => r.json()).catch(() => []),
+    ]).then(([det, pnl, pos]) => {
+      setDetail(det);
+      setDailyPnl(pnl?.daily || []);
+      const allPos = Array.isArray(pos) ? pos : (pos?.positions || pos || []);
+      setPositions(allPos.filter(p => p.strategy_id === strategy.strategy_id));
+      setLoading(false);
+    });
+  }, [strategy]);
+
+  if (!strategy) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/60" onClick={onClose} />
+      <div className="w-full max-w-lg bg-slate-950 border-l border-white/10 overflow-y-auto">
+        <div className="sticky top-0 bg-slate-950/95 backdrop-blur border-b border-white/10 p-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-white">{strategy.strategy_name || strategy.strategy_id}</h3>
+            <div className="flex items-center gap-2 mt-0.5">
+              <Pill color="blue">{strategy.asset_class || '—'}</Pill>
+              <Pill>{strategy.direction || '—'}</Pill>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-1">✕</button>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-slate-500">Loading...</div>
+        ) : (
+          <div className="p-3 space-y-4">
+            {detail?.description && (
+              <p className="text-xs text-slate-400 leading-relaxed">{detail.description}</p>
+            )}
+
+            <div className="grid grid-cols-3 gap-2">
+              <KPI label="Win Rate" value={strategy.live_win_rate != null ? `${strategy.live_win_rate.toFixed(0)}%` : '—'} sub={strategy.backtest_win_rate != null ? `BT: ${strategy.backtest_win_rate.toFixed(0)}%` : undefined} />
+              <KPI label="Sharpe" value={strategy.sharpe_ratio?.toFixed(2) || '—'} />
+              <KPI label="Returns" value={fmtPct(strategy.returns)} positive={strategy.returns >= 0} />
+            </div>
+
+            {detail?.signal_logic && (
+              <div className="bg-slate-900/50 rounded-lg p-3 border border-white/5">
+                <div className="text-[9px] text-slate-500 uppercase mb-1">Buy Signal</div>
+                <div className="text-xs text-emerald-400">{detail.signal_logic}</div>
+                {detail?.exit_logic && (
+                  <>
+                    <div className="text-[9px] text-slate-500 uppercase mt-2 mb-1">Exit Logic</div>
+                    <div className="text-xs text-rose-400">{detail.exit_logic}</div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="bg-slate-900/50 rounded-lg p-3 border border-white/5">
+              <div className="text-[9px] text-slate-500 uppercase mb-2">Daily P&L (30D)</div>
+              <SparkBars data={dailyPnl.map(d => d.total_pnl || d.pnl || 0)} height={40} />
+            </div>
+
+            <div>
+              <div className="text-[9px] text-slate-500 uppercase mb-1">Active Positions ({positions.length})</div>
+              <PositionTable positions={positions} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// =============================================================================
+// DEPLOY MODAL
+// =============================================================================
+const DeployModal = ({ strategy, onClose, onDone }) => {
+  const [tickers, setTickers] = useState('');
+  const [pool, setPool] = useState(100000);
+  const [deploying, setDeploying] = useState(false);
+  const [result, setResult] = useState(null);
+
+  if (!strategy) return null;
+
+  const handleDeploy = async () => {
+    setDeploying(true);
+    try {
+      const tickerList = tickers.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+      const res = await fetch('/api/strategies/deploy-with-pool', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategy.strategy_id, tickers: tickerList, total_pool: pool })
+      });
+      const data = await res.json();
+      setResult(data);
+      if (data.success) setTimeout(() => { onDone?.(); onClose(); }, 1500);
+    } catch (e) { setResult({ success: false, error: e.message }); }
+    finally { setDeploying(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-slate-900 border border-white/10 rounded-xl p-4 w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <h3 className="text-sm font-bold text-white mb-1">Deploy: {strategy.strategy_name || strategy.strategy_id}</h3>
+        <p className="text-[10px] text-slate-500 mb-3">{strategy.asset_class} • Sharpe {strategy.sharpe_ratio?.toFixed(2)} • WR {strategy.backtest_win_rate?.toFixed(0)}%</p>
+
+        <label className="text-[10px] text-slate-400 uppercase">Tickers (comma separated)</label>
+        <input value={tickers} onChange={e => setTickers(e.target.value)} placeholder="AAPL, MSFT, GOOGL"
+          className="w-full mt-1 mb-3 px-3 py-2 bg-slate-800 border border-white/10 rounded-lg text-xs text-white placeholder-slate-600 focus:border-blue-500/50 focus:outline-none" />
+
+        <label className="text-[10px] text-slate-400 uppercase">Capital Pool</label>
+        <div className="flex gap-2 mt-1 mb-3">
+          {[50000, 100000, 250000, 500000].map(v => (
+            <button key={v} onClick={() => setPool(v)}
+              className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${pool === v ? 'bg-blue-500 border-blue-500 text-white' : 'bg-slate-800 border-white/10 text-slate-400 hover:border-blue-500/50'}`}>
+              {fmtK(v)}
+            </button>
+          ))}
+        </div>
+
+        {result && (
+          <div className={`mb-3 p-2 rounded-lg text-xs ${result.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+            {result.success ? `✓ Deployed ${result.positions_created} positions` : `✗ ${result.error}`}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2 bg-slate-800 text-slate-400 text-xs font-bold rounded-lg hover:bg-slate-700">Cancel</button>
+          <button onClick={handleDeploy} disabled={deploying || !tickers}
+            className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors">
+            {deploying ? 'Deploying...' : 'Deploy'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// =============================================================================
+// MAIN APP - URL Based Routing
+// =============================================================================
 function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [marketAsset, setMarketAsset] = useState('fx'); // fx, crypto, commodities, stocks
-  const [timeRange, setTimeRange] = useState('1D');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { mode: urlMode, tab: urlTab } = useParams();
+  
   const [data, setData] = useState({
-    portfolio: { value: 0, pnl: 0, positions: [] },
-    signals: [],
-    fx: [],
-    crypto: [],
-    commodities: [],
-    macro: {},
-    performance: {}
+    strategies: [], positions: [], paperStrategies: [],
+    dailyPnl: [], trades: [], summary: {},
+    mode: 'SIMULATION', ibStatus: {}
   });
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [ibStatus, setIbStatus] = useState({ socket: 'Offline', web: 'Unauthorized' });
-  const [recentTrades, setRecentTrades] = useState([]);
-  const [dailyPnL, setDailyPnL] = useState([]);
-  const [tradePrices, setTradePrices] = useState({}); // Store current prices for recent trades
-  
-  // Stock detail modal state
-  const [selectedTicker, setSelectedTicker] = useState(null);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  
-  // Mobile menu state
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [detailStrategy, setDetailStrategy] = useState(null);
+  const [deployStrategy, setDeployStrategy] = useState(null);
+  const [tickerModal, setTickerModal] = useState(null);
 
-  // Memoized handlers to prevent re-renders
-  const handleTickerClick = useCallback((ticker) => {
-    setSelectedTicker(ticker);
-    setIsDetailModalOpen(true);
-  }, []);
+  // Derive current view from URL or default
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const currentMode = pathParts[0] || 'sim'; // 'paper' or 'sim'
+  const currentTab = pathParts[1] || 'command'; // 'command', 'lab', 'portfolio', etc.
 
-  // --- DATA FETCHING ---
+  // Sync URL mode with backend mode on load
   useEffect(() => {
-    const fetchData = async () => {
+    const syncMode = async () => {
       try {
-        const endpoints = [
-          'macro/pulse', 'signals/1', 'fx/pairs', 'crypto/pairs', 
-          'commodities/all', 'inventory/evaluate', 'performance/strategy',
-          'velocity/ib/status', 'velocity/summary', 'velocity/trades', 'performance/daily-pnl'
-        ];
-        const responses = await Promise.all(
-          endpoints.map(e => fetch(`/api/${e}`).then(r => r.json()).catch(() => null))
-        );
+        const res = await fetch('/api/execution/global-mode');
+        const modeData = await res.json();
+        const backendMode = modeData.execution_mode || 'SIMULATION';
         
-        setData({
-          macro: responses[0] || {},
-          signals: responses[1] || [],
-          fx: responses[2] || [],
-          crypto: responses[3] || [],
-          commodities: responses[4] || [],
-          portfolio: { positions: responses[5] || [], ...responses[7] },
-          performance: responses[6] || {},
-          ibStatus: responses[7] || { socket: 'Offline', web: 'Unauthorized' }
-        });
-        setIbStatus(responses[7] || { socket: 'Offline', web: 'Unauthorized' });
+        // Determine what mode the URL represents
+        const urlRepresentsMode = currentMode === 'paper' ? 'PAPER_TRADING' : 'SIMULATION';
         
-        // Recent trades (last 10)
-        const trades = responses[9] || [];
-        setRecentTrades(trades.slice(-10).reverse());
-        
-        // Fetch current prices for recent trades
-        const tradeTickers = [...new Set(trades.slice(-10).map(t => t.ticker))];
-        if (tradeTickers.length > 0) {
-          fetch(`/api/market-data?tickers=${tradeTickers.join(',')}`)
-            .then(r => r.json())
-            .then(priceData => {
-              const prices = {};
-              priceData.data?.forEach(item => {
-                prices[item.ticker] = item.price;
-              });
-              setTradePrices(prices);
-            })
-            .catch(() => {});
+        // If mismatch, switch backend mode to match URL
+        if (backendMode !== urlRepresentsMode && urlRepresentsMode !== 'SIMULATION') {
+          await fetch('/api/execution/global-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: urlRepresentsMode })
+          });
         }
-        
-        // Daily P&L
-        const pnlData = responses[10] || {};
-        setDailyPnL(pnlData.daily || []);
-        
-        setLastUpdate(new Date());
       } catch (e) {
-        console.error('Data fetch error:', e);
-      } finally {
-        setLoading(false);
+        console.error('Mode sync error:', e);
       }
     };
+    syncMode();
+  }, [currentMode]);
 
     fetchData();
     const interval = setInterval(fetchData, 60000); // Refresh every 60s
@@ -367,549 +511,317 @@ function App() {
     { id: 'settings', label: 'Settings', icon: Icons.Settings },
   ];
 
-  // =============================================================================
-  // DASHBOARD TAB - Executive Overview
-  // =============================================================================
-  const DashboardTab = () => {
-    const portfolioValue = data.portfolio?.inventory_value || 0;
-    const todayPnl = data.portfolio?.today_pnl || 0;
-    const pnlPercent = portfolioValue > 0 ? (todayPnl / portfolioValue) * 100 : 0;
-    const activePositions = data.portfolio?.active_positions || 0;
-    
-    return (
-      <div className="space-y-6 animate-in fade-in duration-500">
-        {/* Header Status Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/50 border border-white/5">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${ibStatus.socket === 'Connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              <span className="text-xs font-medium text-slate-400">IBKR</span>
-              <StatusBadge 
-                status={ibStatus.socket === 'Connected' ? 'live' : 'offline'} 
-                text={ibStatus.socket === 'Connected' ? 'Live' : 'Disconnected'} 
-              />
-            </div>
-            <div className="h-4 w-px bg-white/10" />
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-slate-400">Market Status</span>
-              <StatusBadge status="live" text="Open" />
-            </div>
-            <div className="h-4 w-px bg-white/10" />
-            <div className="text-xs text-slate-500">
-              Last Update: {lastUpdate?.toLocaleTimeString() || '---'}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {['1D', '1W', '1M', '3M', 'YTD'].map(range => (
-              <button
-                key={range}
-                onClick={() => setTimeRange(range)}
-                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                  timeRange === range 
-                    ? 'bg-white text-black' 
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {range}
-              </button>
-            ))}
-          </div>
-        </div>
+  const handleTickerClick = (ticker) => {
+    setTickerModal(ticker);
+  };
 
-        {/* Key Metrics Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MetricCard
-            label="Portfolio Value"
-            value={formatCurrency(portfolioValue)}
-            subtext={pnlPercent !== 0 ? formatPercent(pnlPercent) + ' today' : undefined}
-            isPositive={pnlPercent >= 0}
-            icon={Icons.Portfolio}
-            color={pnlPercent >= 0 ? 'emerald' : 'rose'}
-            large
-          />
-          <MetricCard
-            label="Today's P&L"
-            value={formatCurrency(todayPnl)}
-            subtext="Realized + Unrealized"
-            isPositive={todayPnl >= 0}
-            icon={todayPnl >= 0 ? Icons.TrendUp : Icons.TrendDown}
-            color={todayPnl >= 0 ? 'emerald' : 'rose'}
-            large
-          />
-          <MetricCard
-            label="Active Positions"
-            value={activePositions}
-            subtext="Across all asset classes"
-            icon={Icons.Dashboard}
-            color="blue"
-            large
-          />
-          
-          {/* Mini P&L Trend */}
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500 uppercase">P&L Trend</span>
-              <Icons.Chart className="w-4 h-4 text-slate-400" />
-            </div>
-            
-            {dailyPnL.length > 0 ? (
-              <>
-                <div className="flex items-end gap-1 h-12 mt-2">
-                  {dailyPnL.slice(-7).map((day, idx) => {
-                    const maxPnL = Math.max(...dailyPnL.slice(-7).map(d => Math.abs(d.pnl)), 100);
-                    const height = Math.max(15, (Math.abs(day.pnl) / maxPnL) * 100);
-                    return (
-                      <div
-                        key={idx}
-                        className={`flex-1 rounded-t ${day.pnl >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                        style={{ height: `${height}%`, minHeight: '4px' }}
-                        title={`${day.date}: ${day.pnl >= 0 ? '+' : ''}$${day.pnl.toFixed(2)}`}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                  <span>{dailyPnL.slice(-7)[0]?.date?.slice(5)}</span>
-                  <span>Today</span>
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-12 text-xs text-slate-500">
-                No data yet
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Top Signals */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                Top Alpha Signals
-              </h3>
-              <button 
-                onClick={() => setActiveTab('research')}
-                className="text-xs text-blue-400 hover:text-blue-300 font-medium"
-              >
-                View All →
-              </button>
-            </div>
-            <div className="space-y-2">
-              {data.signals.slice(0, 5).map((signal, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-white/5 hover:border-white/10 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs font-mono text-slate-500 w-8">{idx + 1}</span>
-                    <div>
-                      <p className="text-sm font-bold text-white">{signal.ticker}</p>
-                      <p className="text-xs text-slate-500">{signal.market || 'Global'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <p className="text-sm font-mono text-white">${signal.price}</p>
-                      <PnLBadge value={signal.change} size="sm" />
-                    </div>
-                    <div className="text-right w-20">
-                      <p className="text-xs text-slate-400">Confidence</p>
-                      <p className={`text-sm font-bold ${signal.total_conf > 80 ? 'text-emerald-400' : signal.total_conf > 60 ? 'text-blue-400' : 'text-amber-400'}`}>
-                        {signal.total_conf}%
-                      </p>
-                    </div>
-                    <div className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase ${
-                      signal.action === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 
-                      signal.action === 'SELL' ? 'bg-rose-500/20 text-rose-400' : 
-                      'bg-amber-500/20 text-amber-400'
-                    }`}>
-                      {signal.action}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Side Panel */}
-          <div className="space-y-4">
-            {/* Market Mood */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/5">
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-3">Market Mood</h4>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-2xl font-black text-white">{data.macro?.market_mood || 'Neutral'}</span>
-                <div className="flex gap-1">
-                  {[1,2,3,4,5].map(i => (
-                    <div key={i} className={`w-2 h-6 rounded-full ${i <= 3 ? 'bg-emerald-500' : 'bg-slate-700'}`} />
-                  ))}
-                </div>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                {data.macro?.swarm_conclusion?.slice(0, 100) || 'Market analysis pending...'}
-              </p>
-            </div>
-
-            {/* Quick Stats - Calculated from actual positions */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/5 space-y-3">
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">Performance</h4>
-              
-              {/* Only show if positions exist */}
-              {data.portfolio?.positions?.length > 0 ? (
-                <>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-slate-500">Active Positions</span>
-                    <span className="text-sm font-mono font-bold text-white">{data.portfolio.positions.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-slate-500">Avg Win Rate</span>
-                    <span className="text-sm font-mono font-bold text-blue-400">
-                      {(data.signals.reduce((acc, s) => acc + (s.win_rate || 0), 0) / (data.signals.length || 1) * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-slate-500">Avg AI Confidence</span>
-                    <span className="text-sm font-mono font-bold text-violet-400">
-                      {(data.signals.reduce((acc, s) => acc + (s.total_conf || 0), 0) / (data.signals.length || 1) * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <p className="text-xs text-slate-500 italic">Add positions to see performance metrics</p>
-              )}
-            </div>
-
-            {/* Alerts */}
-            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20">
-              <div className="flex items-center gap-2 mb-2">
-                <Icons.Alert />
-                <span className="text-xs font-black text-rose-400 uppercase tracking-wider">Risk Alerts</span>
-              </div>
-              <p className="text-xs text-slate-400">No active alerts. All systems operational.</p>
-            </div>
-            
-            {/* Recent Trades Widget */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/5">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">Recent Activity</h4>
-                <button 
-                  onClick={() => setActiveTab('performance')}
-                  className="text-[10px] text-blue-400 hover:text-blue-300"
-                >
-                  View All →
-                </button>
-              </div>
-              
-              {recentTrades.length > 0 ? (
-                <div className="space-y-2">
-                  {recentTrades.slice(0, 5).map((trade, idx) => {
-                    const currentPrice = tradePrices[trade.ticker];
-                    const entryPrice = trade.entry_price;
-                    const pnlPct = currentPrice && entryPrice 
-                      ? ((currentPrice - entryPrice) / entryPrice) * 100 
-                      : null;
-                    
-                    return (
-                      <div key={idx} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                            trade.side === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                          }`}>
-                            {trade.side}
-                          </span>
-                          <span className="text-xs font-bold text-white">{trade.ticker}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          {/* Entry Price */}
-                          <div className="text-right">
-                            <span className="text-[9px] text-slate-500 block">Entry</span>
-                            <span className="text-[10px] text-slate-400">${entryPrice?.toFixed(2)}</span>
-                          </div>
-                          
-                          {/* Current Price */}
-                          {currentPrice ? (
-                            <div className="text-right">
-                              <span className="text-[9px] text-slate-500 block">Now</span>
-                              <span className="text-[10px] text-white">${currentPrice.toFixed(2)}</span>
-                            </div>
-                          ) : (
-                            <div className="text-right">
-                              <span className="text-[9px] text-slate-500 block">Now</span>
-                              <span className="text-[10px] text-slate-600">--</span>
-                            </div>
-                          )}
-                          
-                          {/* P&L % */}
-                          {pnlPct !== null ? (
-                            <div className="text-right w-14">
-                              <span className="text-[9px] text-slate-500 block">P&L</span>
-                              <span className={`text-[10px] font-bold ${pnlPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="text-right w-14">
-                              <span className="text-[9px] text-slate-500 block">P&L</span>
-                              <span className="text-[10px] text-slate-600">--</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-xs text-slate-500 italic">No recent trades</p>
-              )}
-            </div>
-          </div>
-        </div>
+  if (loading) return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="text-slate-500 flex items-center gap-2">
+        <div className="w-4 h-4 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin" />
+        <span className="text-xs">Loading platform...</span>
       </div>
-    );
+    </div>
+  );
+
+  // View components map
+  const renderView = () => {
+    switch (currentTab) {
+      case 'strategies': return <LabView />;
+      case 'performance': return <PerformanceView />;
+      case 'portfolio': return <PortfolioView />;
+      case 'markets': return <MarketsTab onTickerClick={handleTickerClick} />;
+      case 'settings': return <SettingsTab />;
+      case 'command':
+      default: return <CommandView />;
+    }
   };
 
   // =============================================================================
-  // PORTFOLIO TAB - Fixed with Close Position Feature
+  // COMMAND CENTER VIEW
   // =============================================================================
-  const PortfolioTab = () => {
-    const [positions, setPositions] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [totals, setTotals] = useState({ total_value: 0, total_pnl: 0, total_positions: 0 });
-    const [closingPosition, setClosingPosition] = useState(null);
-    const [closeMessage, setCloseMessage] = useState(null);
-    
-    // Search and filter state
-    const [positionSearch, setPositionSearch] = useState('');
-    const [positionAssetFilter, setPositionAssetFilter] = useState('ALL');
-    const [positionMarketFilter, setPositionMarketFilter] = useState('ALL');
+  const CommandView = () => (
+    <div className="space-y-3 pb-16 md:pb-0">
+      {/* Execution Mode Toggle */}
+      <GlobalExecutionToggle />
 
-    // Fetch positions from new API
+      {/* KPI Strip - Mobile: 2 cols, Desktop: 6 cols */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+        <KPI label="Portfolio" value={fmtK(portfolioValue)} sub={data.mode.replace(/_/g, ' ')} />
+        <KPI label="Unrealized P&L" value={fmtK(totalUnrealized)} sub={fmtPct(portfolioValue > 0 ? totalUnrealized / portfolioValue * 100 : 0)} positive={totalUnrealized >= 0} />
+        <KPI label="Realized P&L" value={fmtK(totalRealized)} positive={totalRealized >= 0} />
+        <KPI label="Active Strategies" value={activeStrategies} sub={`of ${data.strategies.length}`} />
+        <KPI label="Win Rate" value={data.summary.win_rate != null ? `${data.summary.win_rate.toFixed(0)}%` : '—'} />
+        <KPI label="Sharpe" value={data.summary.sharpe?.toFixed(2) || '—'} />
+      </div>
+
+      {/* P&L Breakdown - Mobile: 2 cols, Desktop: 4 cols */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <PnLSummary dailyPnl={data.dailyPnl} trades={data.trades} />
+      </div>
+
+      {/* P&L Chart + Strategies */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="bg-slate-900/50 rounded-lg border border-white/5 p-3">
+          <div className="text-[9px] text-slate-500 uppercase mb-2">30-Day P&L Trend</div>
+          <SparkBars data={data.dailyPnl.map(d => d.pnl || 0)} height={80} />
+          <div className="flex justify-between text-[9px] text-slate-600 mt-1">
+            <span>{data.dailyPnl[0]?.date?.slice(5) || ''}</span>
+            <span>Today</span>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Strategy Performance</span>
+            <span className="text-[10px] text-slate-600">{data.strategies.length} strategies</span>
+          </div>
+          
+          {/* Desktop Header */}
+          <div className="hidden md:grid grid-cols-12 gap-2 px-3 py-1.5 text-[9px] text-slate-500 uppercase tracking-wider border-b border-white/10">
+            <div className="col-span-3">Strategy</div>
+            <div className="col-span-1 text-right">WR</div>
+            <div className="col-span-1 text-right">Sharpe</div>
+            <div className="col-span-1 text-right">Trades</div>
+            <div className="col-span-1 text-right">Return</div>
+            <div className="col-span-1 text-right">BT WR</div>
+            <div className="col-span-2 text-center">Signal</div>
+            <div className="col-span-2 text-right">Action</div>
+          </div>
+          
+          <div className="max-h-[300px] overflow-y-auto">
+            {/* Desktop Table Rows */}
+            <div className="hidden md:block">
+              {data.strategies.map((s, i) => (
+                <StrategyRow key={s.strategy_id || i} s={s}
+                  onDeploy={setDeployStrategy} onViewDetail={setDetailStrategy} />
+              ))}
+            </div>
+            
+            {/* Mobile Cards */}
+            <div className="md:hidden p-2">
+              {data.strategies.map((s, i) => (
+                <MobileStrategyRow key={s.strategy_id || i} s={s}
+                  onDeploy={setDeployStrategy} onViewDetail={setDetailStrategy} />
+              ))}
+            </div>
+            
+            {!data.strategies.length && (
+              <div className="py-8 text-center text-slate-600 text-xs">No strategies loaded</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Active Positions */}
+      <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+        <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+            Live Positions ({data.positions.length})
+          </span>
+          <div className="flex items-center gap-2">
+            <Dot on={isConnected} />
+            <span className="text-[10px] text-slate-500">IBKR {isConnected ? 'Connected' : 'Offline'}</span>
+          </div>
+        </div>
+        <PositionTable positions={data.positions} onClose={async (id, ticker) => {
+          if (!confirm(`Close ${ticker}?`)) return;
+          await fetch(`/api/positions/${id}/close`, { method: 'POST' });
+          fetchAll();
+        }} />
+      </div>
+    </div>
+  );
+
+  // =============================================================================
+  // STRATEGY LAB VIEW - Simplified: Available + Deployed with Signals
+  // =============================================================================
+  const LabView = () => {
+    const [researchers, setResearchers] = useState([]);
+    const [loadingR, setLoadingR] = useState(true);
+
     useEffect(() => {
-      fetchPositions();
+      fetch('/api/strategies/researcher')
+        .then(r => r.json())
+        .then(d => setResearchers(d.strategies || []))
+        .catch(() => {})
+        .finally(() => setLoadingR(false));
     }, []);
 
-    const fetchPositions = async () => {
-      try {
-        const res = await fetch('/api/portfolio/positions');
-        if (res.ok) {
-          const data = await res.json();
-          setPositions(data.positions || []);
-          setTotals({
-            total_value: data.total_value || 0,
-            total_pnl: data.total_pnl || 0,
-            total_positions: data.total_positions || 0
-          });
-        }
-      } catch (e) {
-        console.error('Failed to fetch positions:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // Close position handler
-    const handleClosePosition = async (positionId, ticker) => {
-      if (!confirm(`Are you sure you want to close position ${ticker}?`)) return;
-      
-      setClosingPosition(positionId);
-      try {
-        const res = await fetch(`/api/positions/${positionId}/close`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (res.ok) {
-          const result = await res.json();
-          setCloseMessage({ type: 'success', text: result.message });
-          // Refresh positions
-          fetchPositions();
-          // Also refresh strategy data
-          setTimeout(() => window.location.reload(), 2000);
-        } else {
-          const err = await res.json();
-          setCloseMessage({ type: 'error', text: err.detail || 'Failed to close position' });
-        }
-      } catch (e) {
-        setCloseMessage({ type: 'error', text: 'Network error' });
-      } finally {
-        setClosingPosition(null);
-        setTimeout(() => setCloseMessage(null), 5000);
-      }
-    };
-
-    // Filter positions
-    const filteredPositions = positions.filter(pos => {
-      if (positionSearch && !pos.ticker?.toLowerCase().includes(positionSearch.toLowerCase())) return false;
-      if (positionAssetFilter !== 'ALL' && pos.asset_class !== positionAssetFilter) return false;
-      if (positionMarketFilter !== 'ALL') {
-        const ticker = pos.ticker || '';
-        const isHK = ticker.endsWith('.HK');
-        const isCN = ticker.endsWith('.SS') || ticker.endsWith('.SZ');
-        const isSG = ticker.endsWith('.SI');
-        const isUS = !isHK && !isCN && !isSG;
-        if (positionMarketFilter === 'HK' && !isHK) return false;
-        if (positionMarketFilter === 'CN' && !isCN) return false;
-        if (positionMarketFilter === 'SG' && !isSG) return false;
-        if (positionMarketFilter === 'US' && !isUS) return false;
-      }
-      return true;
+    // Filter out already deployed strategies from available list
+    // Handle both string and potential ID format differences
+    const deployedIds = new Set(
+      data.strategies
+        .map(s => s.strategy_id)
+        .filter(Boolean)
+        .map(id => String(id).toUpperCase().trim())
+    );
+    
+    const availableResearchers = researchers.filter(r => {
+      const rid = String(r.id || r.strategy_id || '').toUpperCase().trim();
+      const isDeployed = deployedIds.has(rid);
+      return !isDeployed;
     });
+    
+    // Debug logging - remove after fix confirmed
+    console.log('[LabView] Deployed IDs:', Array.from(deployedIds).slice(0, 10), `...(${deployedIds.size} total)`);
+    console.log('[LabView] Available after filter:', availableResearchers.length, 'of', researchers.length);
 
-    if (loading) {
-      return (
-        <div className="p-12 text-center text-slate-500">
-          <div className="w-8 h-8 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
-          Loading Portfolio...
-        </div>
-      );
-    }
+    // Helper to get tier color
+    const getTierColor = (tier) => {
+      if (tier === 'T1' || tier === 1) return 'emerald';
+      if (tier === 'T2' || tier === 2) return 'amber';
+      if (tier === 'T3' || tier === 3) return 'blue';
+      return 'slate';
+    };
+
+    const getTierLabel = (tier) => {
+      if (tier === 'T1' || tier === 1) return 'T1';
+      if (tier === 'T2' || tier === 2) return 'T2';
+      if (tier === 'T3' || tier === 3) return 'T3';
+      return 'T4';
+    };
 
     return (
-      <div className="space-y-6 animate-in fade-in duration-500">
-        {/* Close Message */}
-        {closeMessage && (
-          <div className={`p-4 rounded-xl ${closeMessage.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-rose-500/10 border border-rose-500/30'}`}>
-            <p className={`text-sm ${closeMessage.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {closeMessage.text}
-            </p>
+      <div className="space-y-4">
+        {/* DEPLOYED STRATEGIES - All from performance endpoint */}
+        <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+            <span className="text-xs font-bold text-white">🚀 Deployed Strategies</span>
+            <span className="text-[10px] text-slate-500">{data.strategies.length} active</span>
           </div>
-        )}
-
-        {/* Portfolio Header */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
-            <span className="text-xs text-slate-500 uppercase">Total Portfolio Value</span>
-            <p className="text-2xl font-bold text-white mt-1">{formatCurrency(totals.total_value)}</p>
-          </div>
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
-            <span className="text-xs text-slate-500 uppercase">Total Unrealized P&L</span>
-            <p className={`text-2xl font-bold mt-1 ${totals.total_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {totals.total_pnl >= 0 ? '+' : ''}{formatCurrency(totals.total_pnl)}
-            </p>
-          </div>
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
-            <span className="text-xs text-slate-500 uppercase">Active Positions</span>
-            <p className="text-2xl font-bold text-white mt-1">{totals.total_positions}</p>
-          </div>
+          
+          {data.strategies.length === 0 ? (
+            <div className="py-6 text-center text-slate-600 text-xs">No strategies deployed yet</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {data.strategies.map((s, i) => (
+                <div key={s.strategy_id || i} className="p-3 hover:bg-white/[0.02]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-white">{s.strategy_name || s.strategy_id}</span>
+                      <Pill color={getTierColor(s.tier)}>{getTierLabel(s.tier)}</Pill>
+                      <span className="text-[10px] text-slate-500">{s.asset_class}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {s.current_signal && (
+                        <Pill color={s.current_signal.action === 'BUY' ? 'emerald' : s.current_signal.action === 'SELL' ? 'rose' : 'slate'}>
+                          {s.current_signal.action} {s.current_signal.ticker}
+                        </Pill>
+                      )}
+                      <button 
+                        onClick={() => setDetailStrategy(s)}
+                        className="text-[10px] text-blue-400 hover:text-blue-300"
+                      >
+                        Details →
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Tickers with signals */}
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {s.tickers?.map((t, idx) => (
+                      <span 
+                        key={idx} 
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                          t.signal === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' :
+                          t.signal === 'SELL' ? 'bg-rose-500/20 text-rose-400' :
+                          'bg-slate-700 text-slate-400'
+                        }`}
+                      >
+                        {t.ticker}
+                        {t.signal && <span className="ml-1 opacity-70">{t.signal === 'BUY' ? '▲' : t.signal === 'SELL' ? '▼' : '—'}</span>}
+                      </span>
+                    )) || <span className="text-[10px] text-slate-600">No tickers assigned</span>}
+                  </div>
+                  
+                  {/* Signal Preview - Same format as Available */}
+                  <div className="pt-2 border-t border-white/5 text-[10px]">
+                    <div className="flex gap-4">
+                      <span className="text-emerald-400 truncate max-w-[200px]" title={s.buy_signal}>▲ {s.buy_signal?.slice(0, 30) || '—'}</span>
+                      <span className="text-rose-400 truncate max-w-[200px]" title={s.sell_signal}>▼ {s.sell_signal?.slice(0, 30) || '—'}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Quick stats */}
+                  <div className="flex gap-4 mt-2 text-[10px] text-slate-500">
+                    <span>Live Trades: <span className="text-slate-300">{s.live_trades || 0}</span></span>
+                    <span>Win Rate: <span className={s.live_win_rate >= 50 ? 'text-emerald-400' : 'text-rose-400'}>{s.live_win_rate?.toFixed(0) || 0}%</span></span>
+                    <span>Returns: <span className={s.returns >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{fmtPct(s.returns)}</span></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Positions Table */}
-        <div className="rounded-xl border border-white/10 overflow-hidden">
-          <div className="p-4 border-b border-white/10 bg-slate-900/50">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <h3 className="text-sm font-black text-white uppercase tracking-wider">All Positions</h3>
-              
-              {/* Search and Filters */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">🔍</span>
-                  <input
-                    type="text"
-                    placeholder="Search ticker..."
-                    value={positionSearch}
-                    onChange={(e) => setPositionSearch(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 bg-slate-800 border border-white/10 rounded-lg text-white text-xs placeholder-slate-500 focus:border-blue-500/50 focus:outline-none w-32"
-                  />
-                </div>
-                
-                <select
-                  value={positionAssetFilter}
-                  onChange={(e) => setPositionAssetFilter(e.target.value)}
-                  className="bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:border-blue-500/50 focus:outline-none"
-                >
-                  <option value="ALL">All Assets</option>
-                  <option value="STOCK">Stocks</option>
-                  <option value="FX">FX</option>
-                  <option value="CRYPTO">Crypto</option>
-                  <option value="COMMODITY">Commodities</option>
-                </select>
-                
-                <select
-                  value={positionMarketFilter}
-                  onChange={(e) => setPositionMarketFilter(e.target.value)}
-                  className="bg-slate-800 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:border-blue-500/50 focus:outline-none"
-                >
-                  <option value="ALL">All Markets</option>
-                  <option value="US">US</option>
-                  <option value="HK">Hong Kong</option>
-                  <option value="CN">China</option>
-                  <option value="SG">Singapore</option>
-                </select>
-                
-                <span className="text-xs text-slate-500">
-                  {filteredPositions.length} of {positions.length}
-                </span>
-              </div>
+        {/* AVAILABLE STRATEGIES - JT Ready to Deploy */}
+        <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-white">📦 Available Strategies</span>
+              <span className="text-[10px] text-slate-500 ml-2">JT-Ready ({availableResearchers.length})</span>
+            </div>
+            <div className="flex gap-2 text-[9px]">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500"></span>T1</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-500"></span>T2</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-blue-500"></span>T3</span>
             </div>
           </div>
           
-          <table className="w-full">
-            <thead className="bg-slate-900/30">
-              <tr className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="text-left p-3">Asset</th>
-                <th className="text-left p-3">Strategy</th>
-                <th className="text-right p-3">Qty</th>
-                <th className="text-right p-3">Entry</th>
-                <th className="text-right p-3">Current</th>
-                <th className="text-right p-3">Value</th>
-                <th className="text-right p-3">P&L</th>
-                <th className="text-center p-3">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {filteredPositions.map((pos) => (
-                <tr key={pos.id} className="hover:bg-white/5 transition-colors">
-                  <td className="p-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
-                        {pos.ticker?.slice(0, 2)}
+          {loadingR ? (
+            <div className="py-6 text-center text-slate-600 text-xs">Loading...</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {availableResearchers.map((s, i) => (
+                <div key={s.id || i} className="p-3 hover:bg-white/[0.02]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-bold text-white">{s.name}</span>
+                        <Pill color={getTierColor(s.tier)}>{getTierLabel(s.tier)}</Pill>
                       </div>
-                      <div>
-                        <p className="text-sm font-bold text-white">{pos.ticker}</p>
-                        <p className="text-[10px] text-slate-500 uppercase">{pos.asset_class}</p>
+                      <div className="text-[10px] text-slate-500 mb-2">
+                        {s.market || s.asset_class} • {s.universe_count || 0} tickers • {s.time_horizon}
+                      </div>
+                      
+                      {/* Key Metrics - Compact */}
+                      <div className="flex gap-3 text-[10px]">
+                        <span className="text-slate-500">N/yr: <span className="text-slate-300">{s.trades_per_year || s.n_count || '—'}</span></span>
+                        <span className="text-slate-500">WR: <span className={((s.win_rate || 0) * 100) >= 55 ? 'text-emerald-400' : 'text-slate-300'}>{((s.win_rate || 0) * 100).toFixed(0)}%</span></span>
+                        <span className="text-slate-500">PF: <span className={(s.profit_factor || 0) >= 1.5 ? 'text-emerald-400' : 'text-slate-300'}>{s.profit_factor?.toFixed(2) || '—'}</span></span>
+                        <span className="text-slate-500">MDD: <span className={(s.max_drawdown || 0) <= 0.1 ? 'text-emerald-400' : 'text-rose-400'}>{s.max_drawdown ? `${(s.max_drawdown * 100).toFixed(0)}%` : '—'}</span></span>
                       </div>
                     </div>
-                  </td>
-                  <td className="p-3">
-                    <p className="text-xs text-slate-400 truncate max-w-[120px]">{pos.strategy}</p>
-                  </td>
-                  <td className="p-3 text-right">
-                    <p className="text-sm font-mono text-white">{formatNumber(pos.quantity, 2)}</p>
-                  </td>
-                  <td className="p-3 text-right">
-                    <p className="text-sm font-mono text-slate-400">${formatNumber(pos.entry_price)}</p>
-                  </td>
-                  <td className="p-3 text-right">
-                    <p className="text-sm font-mono text-white">${formatNumber(pos.current_price)}</p>
-                  </td>
-                  <td className="p-3 text-right">
-                    <p className="text-sm font-mono text-white">{formatCurrency(pos.market_value)}</p>
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className={`text-sm font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {pos.pnl >= 0 ? '+' : ''}{formatCurrency(pos.pnl)}
+                    
+                    <div className="flex flex-col items-end gap-2">
+                      <button 
+                        onClick={() => setDeployStrategy(s)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-[10px] font-bold rounded transition-colors whitespace-nowrap"
+                      >
+                        Deploy →
+                      </button>
+                      <button 
+                        onClick={() => setDetailStrategy(s)}
+                        className="text-[9px] text-blue-400 hover:text-blue-300"
+                      >
+                        View Details
+                      </button>
                     </div>
-                    <div className={`text-[10px] ${pos.pnl_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {pos.pnl_pct >= 0 ? '+' : ''}{pos.pnl_pct?.toFixed(2) || '0.00'}%
+                  </div>
+                  
+                  {/* Signal Preview */}
+                  <div className="mt-2 pt-2 border-t border-white/5 text-[10px]">
+                    <div className="flex gap-4">
+                      <span className="text-emerald-400 truncate max-w-[200px]" title={s.buy_signal}>▲ {s.buy_signal?.slice(0, 30) || '—'}</span>
+                      <span className="text-rose-400 truncate max-w-[200px]" title={s.sell_signal}>▼ {s.sell_signal?.slice(0, 30) || '—'}</span>
                     </div>
-                  </td>
-                  <td className="p-3 text-center">
-                    <button
-                      onClick={() => handleClosePosition(pos.id, pos.ticker)}
-                      disabled={closingPosition === pos.id}
-                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-bold rounded-lg transition-colors"
-                    >
-                      {closingPosition === pos.id ? 'Closing...' : 'SELL'}
-                    </button>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
-          
-          {filteredPositions.length === 0 && (
-            <div className="p-12 text-center text-slate-500">
-              <div className="text-4xl mb-4">📭</div>
-              <p>No positions found</p>
+              {!availableResearchers.length && (
+                <div className="py-8 text-center text-slate-600 text-xs">No strategies available — all deployed</div>
+              )}
             </div>
           )}
         </div>
@@ -917,109 +829,331 @@ function App() {
     );
   };
 
-  // --- STRATEGIES TAB - Uses GoldenStrategies Component ---
-  const StrategiesTabContent = () => {
-    return <GoldenStrategies />;
+  // =============================================================================
+  // PORTFOLIO VIEW
+  // =============================================================================
+  const PortfolioView = () => {
+    const [paperStrats, setPaperStrats] = useState([]);
+    const [search, setSearch] = useState('');
+
+    useEffect(() => {
+      fetch('/api/paper-strategies').then(r => r.json()).then(d => setPaperStrats(d.strategies || [])).catch(() => {});
+    }, []);
+
+    const filtered = data.positions.filter(p => !search || p.ticker?.toLowerCase().includes(search.toLowerCase()));
+
+    return (
+      <div className="space-y-3">
+        {/* Portfolio Summary */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <KPI label="Portfolio Value" value={fmtK(portfolioValue)} />
+          <KPI label="Unrealized" value={fmtK(totalUnrealized)} positive={totalUnrealized >= 0} />
+          <KPI label="Realized" value={fmtK(totalRealized)} positive={totalRealized >= 0} />
+          <KPI label="Positions" value={data.positions.length} />
+          <KPI label="Mode" value={data.mode.replace(/_/g, ' ')} />
+        </div>
+
+        <PnLSummary dailyPnl={data.dailyPnl} trades={data.trades} />
+
+        {/* Monthly Returns */}
+        {data.monthlyReturns.length > 0 && (
+          <div className="bg-slate-900/50 rounded-lg border border-white/5 p-3">
+            <div className="text-[9px] text-slate-500 uppercase mb-2">Monthly Returns</div>
+            <div className="grid grid-cols-6 md:grid-cols-12 gap-1">
+              {data.monthlyReturns.slice(0, 12).map((m, i) => (
+                <div key={i} className={`text-center rounded px-1 py-1.5 ${pnlBg(m.return)}`}>
+                  <div className="text-[9px] text-slate-500">{['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m.month - 1]}</div>
+                  <div className={`text-[10px] font-bold font-mono ${pnlCl(m.return)}`}>{m.return >= 0 ? '+' : ''}{m.return.toFixed(1)}%</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Positions */}
+        <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Positions</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search ticker..."
+              className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-[10px] text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/50 w-28" />
+          </div>
+          <PositionTable positions={filtered} onClose={async (id, ticker) => {
+            if (!confirm(`Close ${ticker}?`)) return;
+            await fetch(`/api/positions/${id}/close`, { method: 'POST' });
+            fetchAll();
+          }} />
+        </div>
+
+        {/* Paper Strategies */}
+        <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/5">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+              Paper Positions ({paperStrats.length})
+            </span>
+          </div>
+          <div className="max-h-[400px] overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[9px] text-slate-500 uppercase tracking-wider border-b border-white/10">
+                  <th className="text-left py-1.5 px-2">Ticker</th>
+                  <th className="text-left py-1.5 px-2">Strategy</th>
+                  <th className="text-right py-1.5 px-2">Capital</th>
+                  <th className="text-right py-1.5 px-2">Invested</th>
+                  <th className="text-right py-1.5 px-2">Unrealized</th>
+                  <th className="text-right py-1.5 px-2">Realized</th>
+                  <th className="text-right py-1.5 px-2">Trades</th>
+                  <th className="text-center py-1.5 px-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paperStrats.map((ps, i) => (
+                  <tr key={ps.id || i} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <td className="py-1.5 px-2 font-bold text-white">{ps.ticker}</td>
+                    <td className="py-1.5 px-2 text-slate-400 truncate max-w-[100px]">{ps.strategy_name || ps.strategy_id}</td>
+                    <td className="py-1.5 px-2 text-right font-mono text-slate-400">{fmtK(ps.capital)}</td>
+                    <td className="py-1.5 px-2 text-right font-mono text-white">{fmtK(ps.invested_capital)}</td>
+                    <td className={`py-1.5 px-2 text-right font-mono font-bold ${pnlCl(ps.unrealized_pnl)}`}>{fmtK(ps.unrealized_pnl)}</td>
+                    <td className={`py-1.5 px-2 text-right font-mono ${pnlCl(ps.realized_pnl)}`}>{fmtK(ps.realized_pnl)}</td>
+                    <td className="py-1.5 px-2 text-right font-mono text-slate-500">{ps.trades_count || 0}</td>
+                    <td className="py-1.5 px-2 text-center">
+                      <Pill color={ps.status === 'ACTIVE' ? 'emerald' : 'slate'}>{ps.status}</Pill>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // =============================================================================
-  // MAIN RENDER
+  // PERFORMANCE VIEW - Backtest vs Live Comparison
   // =============================================================================
-  return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans selection:bg-blue-500/30">
-      {/* Header - Mobile Optimized */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-slate-950/80 backdrop-blur-xl">
-        <div className="flex items-center justify-between px-3 md:px-6 py-2 md:py-3">
-          {/* Logo */}
-          <div className="flex items-center gap-2 md:gap-3">
-            <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
-              <span className="text-xs md:text-sm font-black">JT</span>
-            </div>
-            <div className="hidden md:block">
-              <h1 className="text-sm font-black tracking-tight">AI Trading Platform</h1>
-              <p className="text-[10px] text-slate-500">Quantitative Research & Execution</p>
-            </div>
-            <div className="md:hidden">
-              <h1 className="text-xs font-black tracking-tight">JT Trading</h1>
-            </div>
+  const PerformanceView = () => {
+    const [timeframe, setTimeframe] = useState('1M'); // 1W, 1M, 3M, 1Y, ALL
+
+    return (
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-white">Strategy Performance</h2>
+            <p className="text-[10px] text-slate-500">Backtest vs Live tracking</p>
           </div>
-
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-1">
-            {tabs.map(tab => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-white text-black shadow-lg'
-                      : 'text-slate-400 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <Icon />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Mobile Menu Button & Status */}
-          <div className="flex items-center gap-2 md:gap-3">
-            <div className="hidden md:block">
-              <GlobalExecutionToggle />
-            </div>
-            
-            <div className={`w-2 h-2 rounded-full ${ibStatus.socket === 'Connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-            <span className="text-[10px] md:text-xs text-slate-500 hidden sm:inline">
-              {loading ? 'Syncing...' : 'Live'}
-            </span>
-            
-            {/* Mobile Menu Toggle */}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
-            >
-              {mobileMenuOpen ? <Icons.Close /> : <Icons.Menu />}
-            </button>
+          <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/5">
+            {['1W', '1M', '3M', '1Y', 'ALL'].map(tf => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                className={`px-3 py-1 rounded text-[10px] font-bold transition-all ${
+                  timeframe === tf ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
           </div>
         </div>
-        
-        {/* Mobile Navigation Drawer */}
-        {mobileMenuOpen && (
-          <nav className="md:hidden border-t border-white/5 bg-slate-950/95 backdrop-blur-xl">
-            <div className="py-2 px-3">
-              {tabs.map(tab => {
-                const Icon = tab.icon;
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="text-[9px] text-slate-500 uppercase">Active Strategies</div>
+            <div className="text-xl font-bold text-white">{data.strategies.filter(s => s.live_trades > 0).length}</div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="text-[9px] text-slate-500 uppercase">Avg Live Win Rate</div>
+            <div className="text-xl font-bold text-emerald-400">
+              {(data.strategies.filter(s => s.live_win_rate).reduce((a, s) => a + (s.live_win_rate || 0), 0) / 
+                Math.max(1, data.strategies.filter(s => s.live_win_rate).length)).toFixed(0)}%
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="text-[9px] text-slate-500 uppercase">Total Live Trades</div>
+            <div className="text-xl font-bold text-white">
+              {data.strategies.reduce((a, s) => a + (s.live_trades || 0), 0)}
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+            <div className="text-[9px] text-slate-500 uppercase">Best Performer</div>
+            <div className="text-sm font-bold text-emerald-400 truncate">
+              {data.strategies.length > 0 
+                ? data.strategies.sort((a, b) => (b.returns || 0) - (a.returns || 0))[0]?.strategy_name || '—'
+                : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Performance Table */}
+        <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
+          <div className="px-3 py-2 border-b border-white/5">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Strategy Comparison</span>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[9px] text-slate-500 uppercase tracking-wider border-b border-white/10 bg-slate-900/30">
+                <th className="text-left py-2 px-3">Strategy</th>
+                <th className="text-right py-2 px-3">Tier</th>
+                <th className="text-right py-2 px-3">BT WR</th>
+                <th className="text-right py-2 px-3">Live WR</th>
+                <th className="text-right py-2 px-3">Δ WR</th>
+                <th className="text-right py-2 px-3">BT PF</th>
+                <th className="text-right py-2 px-3">Live PF</th>
+                <th className="text-right py-2 px-3">BT N</th>
+                <th className="text-right py-2 px-3">Live N</th>
+                <th className="text-right py-2 px-3">Returns</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.strategies.map((s, i) => {
+                const deltaWR = s.backtest_win_rate != null && s.live_win_rate != null 
+                  ? s.live_win_rate - s.backtest_win_rate 
+                  : null;
                 return (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      setActiveTab(tab.id);
-                      setMobileMenuOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-bold transition-all mb-1 ${
-                      activeTab === tab.id
-                        ? 'bg-white text-black'
-                        : 'text-slate-400 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    <Icon />
-                    <span>{tab.label}</span>
-                  </button>
+                  <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02] cursor-pointer"
+                    onClick={() => setDetailStrategy(s)}>
+                    <td className="py-2 px-3">
+                      <div className="font-bold text-white">{s.strategy_name || s.strategy_id}</div>
+                      <div className="text-[9px] text-slate-500">{s.asset_class}</div>
+                    </td>
+                    <td className="py-2 px-3 text-right">
+                      <span className={`text-[10px] font-bold ${
+                        s.tier === 'T1' || s.tier === 1 ? 'text-emerald-400' :
+                        s.tier === 'T2' || s.tier === 2 ? 'text-amber-400' :
+                        s.tier === 'T3' || s.tier === 3 ? 'text-blue-400' : 'text-slate-400'
+                      }`}>
+                        {s.tier === 'T1' || s.tier === 1 ? 'T1' :
+                         s.tier === 'T2' || s.tier === 2 ? 'T2' :
+                         s.tier === 'T3' || s.tier === 3 ? 'T3' : 'T4'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-400">
+                      {s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '—'}
+                    </td>
+                    <td className={`py-2 px-3 text-right font-mono font-bold ${pnlCl(s.live_win_rate != null ? s.live_win_rate - 50 : null)}`}>
+                      {s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '—'}
+                    </td>
+                    <td className={`py-2 px-3 text-right font-mono ${pnlCl(deltaWR)}`}>
+                      {deltaWR != null ? `${deltaWR >= 0 ? '+' : ''}${deltaWR.toFixed(0)}pp` : '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-400">
+                      {s.backtest_pf?.toFixed(2) || s.backtest_profit_factor?.toFixed(2) || '—'}
+                    </td>
+                    <td className={`py-2 px-3 text-right font-mono ${pnlCl((s.live_profit_factor || 0) - 1.5)}`}>
+                      {s.live_profit_factor?.toFixed(2) || '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-500">{s.backtest_trades || 0}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">{s.live_trades || 0}</td>
+                    <td className={`py-2 px-3 text-right font-mono font-bold ${pnlCl(s.returns)}`}>
+                      {s.returns != null ? fmtPct(s.returns) : '—'}
+                    </td>
+                  </tr>
                 );
               })}
-              {/* Execution Mode Toggle for Mobile */}
-              <div className="mt-3 pt-3 border-t border-white/10">
-                <p className="text-[10px] text-slate-500 uppercase px-4 mb-2">Execution Mode</p>
-                <div className="px-2">
-                  <GlobalExecutionToggle />
+              {data.strategies.length === 0 && (
+                <tr>
+                  <td colSpan="10" className="py-8 text-center text-slate-600 text-xs">No strategies loaded</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Strategy Cards - Detailed View */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {data.strategies.slice(0, 6).map((s, i) => (
+            <div key={i} className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-white">{s.strategy_name || s.strategy_id}</span>
+                <div className="flex gap-2">
+                  <span className={`text-[10px] font-bold ${
+                    s.tier === 'T1' || s.tier === 1 ? 'text-emerald-400' :
+                    s.tier === 'T2' || s.tier === 2 ? 'text-amber-400' :
+                    s.tier === 'T3' || s.tier === 3 ? 'text-blue-400' : 'text-slate-400'
+                  }`}>
+                    {s.tier === 'T1' || s.tier === 1 ? 'T1' :
+                     s.tier === 'T2' || s.tier === 2 ? 'T2' :
+                     s.tier === 'T3' || s.tier === 3 ? 'T3' : 'T4'}
+                  </span>
                 </div>
               </div>
+              
+              <div className="grid grid-cols-4 gap-2 mb-2">
+                <div className="text-center p-1.5 bg-slate-800/30 rounded">
+                  <div className="text-[9px] text-slate-500">Win Rate</div>
+                  <div className={`text-sm font-bold font-mono ${pnlCl(s.live_win_rate != null ? s.live_win_rate - 50 : null)}`}>
+                    {s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '—'}
+                  </div>
+                </div>
+                <div className="text-center p-1.5 bg-slate-800/30 rounded">
+                  <div className="text-[9px] text-slate-500">PF</div>
+                  <div className={`text-sm font-bold font-mono ${pnlCl((s.live_profit_factor || 0) - 1.5)}`}>
+                    {s.live_profit_factor?.toFixed(2) || '—'}
+                  </div>
+                </div>
+                <div className="text-center p-1.5 bg-slate-800/30 rounded">
+                  <div className="text-[9px] text-slate-500">Trades</div>
+                  <div className="text-sm font-bold font-mono text-white">{s.live_trades || 0}</div>
+                </div>
+                <div className="text-center p-1.5 bg-slate-800/30 rounded">
+                  <div className="text-[9px] text-slate-500">Return</div>
+                  <div className={`text-sm font-bold font-mono ${pnlCl(s.returns)}`}>
+                    {s.returns != null ? fmtPct(s.returns) : '—'}
+                  </div>
+                </div>
+              </div>
+              
+              {s.current_signal && (
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className="text-slate-500">Current Signal:</span>
+                  <Pill color={s.current_signal.action === 'BUY' ? 'emerald' : s.current_signal.action === 'SELL' ? 'rose' : 'slate'}>
+                    {s.current_signal.action} {s.current_signal.ticker}
+                  </Pill>
+                </div>
+              )}
             </div>
-          </nav>
-        )}
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // =============================================================================
+  // RENDER
+  // =============================================================================
+  return (
+    <div className="min-h-screen bg-slate-950 text-white font-sans">
+      {/* Top Bar - Mobile optimized */}
+      <header className="fixed top-0 left-0 right-0 z-40 border-b border-white/5 bg-slate-950/90 backdrop-blur-xl safe-top">
+        <div className="flex items-center justify-between px-3 py-2 max-w-[1800px] mx-auto">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-black">JT</div>
+              <span className="text-xs font-bold text-white hidden md:inline">JTCML</span>
+            </div>
+            {/* Desktop Nav - URL based */}
+            <nav className="hidden md:flex gap-1">
+              {navItems.map(n => (
+                <button key={n.id} onClick={() => navigateToTab(n.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${currentTab === n.id ? 'bg-white text-black' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}>
+                  <span>{n.icon}</span>
+                  <span>{n.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Pill color={modeColor}>{data.mode.replace('_TRADING', '').replace('_', ' ')}</Pill>
+            <div className="flex items-center gap-1">
+              <Dot on={isConnected} />
+              <span className="text-[10px] text-slate-500 hidden sm:inline">IBKR</span>
+            </div>
+            <span className="text-[10px] text-slate-600 hidden lg:inline">{new Date().toLocaleTimeString()}</span>
+          </div>
+        </div>
       </header>
 
       {/* Main Content - Mobile Optimized Padding */}
@@ -1045,52 +1179,18 @@ function App() {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-slate-950/95 backdrop-blur-xl">
-        <div className="flex items-center justify-around py-1">
-          {tabs.slice(0, 5).map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center gap-0.5 py-2 px-3 rounded-lg transition-all ${
-                  isActive
-                    ? 'text-white'
-                    : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <div className={isActive ? "scale-110 transition-transform" : "transition-transform"}>
-                  <Icon />
-                </div>
-                <span className="text-[9px] font-medium">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      {/* Mobile Bottom Navigation - URL based */}
+      <MobileBottomNav view={currentTab} setView={navigateToTab} navItems={navItems} />
 
-      {/* Stock Detail Modal */}
-      <StockDetailModal 
-        ticker={selectedTicker}
-        isOpen={isDetailModalOpen}
-        onClose={() => setIsDetailModalOpen(false)}
-      />
+      {/* Modals */}
+      {detailStrategy && <StrategyDetail strategy={detailStrategy} onClose={() => setDetailStrategy(null)} />}
+      {deployStrategy && <DeployModal strategy={deployStrategy} onClose={() => setDeployStrategy(null)} onDone={fetchAll} />}
 
-      {/* Footer - Hidden on mobile since we have bottom nav */}
-      <footer className="hidden md:block fixed bottom-0 left-0 right-0 border-t border-white/5 bg-slate-950/80 backdrop-blur-xl py-2 px-4 md:px-6">
-        <div className="flex items-center justify-between text-[10px] text-slate-600">
-          <div className="flex items-center gap-4">
-            <span>v3.0 Quant Edition</span>
-            <span className="hidden md:inline">•</span>
-            <span className="hidden md:inline">Latency: 23ms</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span>Last Update: {lastUpdate?.toLocaleTimeString() || '---'}</span>
-            <span className="hidden md:inline">•</span>
-            <span className="hidden md:inline text-slate-500">JTCML Trading Systems</span>
-          </div>
+      {/* Footer - Hidden on mobile */}
+      <footer className="hidden md:block fixed bottom-0 left-0 right-0 z-40 border-t border-white/5 bg-slate-950/80 backdrop-blur py-1 px-3">
+        <div className="flex items-center justify-between text-[9px] text-slate-600 max-w-[1800px] mx-auto">
+          <span>v4.1 • Platform Mode</span>
+          <span>JTCML Trading Systems</span>
         </div>
       </footer>
     </div>

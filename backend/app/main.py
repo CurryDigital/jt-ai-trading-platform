@@ -1,16 +1,18 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
+"""
+JTCML Trading Platform — FastAPI Backend
+=========================================
+Platform layer: API endpoints + IBKR execution.
+Data ingestion/refresh is handled by the DE agent.
+"""
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from pydantic import BaseModel
-import time
-import yfinance as yf
-import json
-import datetime
-import numpy as np
 import logging
 
-# Setup logger
+# Route modules
+from app.routes import market, stocks, fx, crypto, strategies, positions
+from app.routes import performance, execution, ibkr, alerts, metadata, hkex
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Internal Imports
@@ -43,6 +45,7 @@ app = FastAPI()
 if HAS_STOCK_DETAIL_API and stock_detail_router:
     app.include_router(stock_detail_router)
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://trade.jtcml.com"],
