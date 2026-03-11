@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { MarketsTab } from './components/MarketsTab';
 import { SettingsTab } from './components/SettingsTab';
-import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
+import { StrategyLab } from './components/StrategyLab';
 
 // =============================================================================
 // JTCML TRADING PLATFORM v4.1 — COMPACT AUTO-TRADING DASHBOARD
@@ -494,58 +494,21 @@ function App() {
     syncMode();
   }, [currentMode]);
 
-  const fetchAll = useCallback(async () => {
-    try {
-      const [perf, positions, paper, pnl, trades, mode, ib] = await Promise.all([
-        fetch('/api/performance/strategy').then(r => r.json()).catch(() => ({})),
-        fetch('/api/portfolio/positions').then(r => r.json()).catch(() => []),
-        fetch('/api/paper-strategies').then(r => r.json()).catch(() => ({})),
-        fetch('/api/performance/daily-pnl?days=30').then(r => r.json()).catch(() => ({})),
-        fetch('/api/velocity/trades').then(r => r.json()).catch(() => []),
-        fetch('/api/execution/global-mode').then(r => r.json()).catch(() => ({})),
-        fetch('/api/velocity/ib/status').then(r => r.json()).catch(() => ({})),
-      ]);
-      setData({
-        strategies: perf.strategies || [],
-        summary: perf.summary || {},
-        positions: Array.isArray(positions) ? positions : [],
-        paperStrategies: paper.strategies || [],
-        dailyPnl: pnl.daily || [],
-        trades: Array.isArray(trades) ? trades : [],
-        mode: mode.execution_mode || 'SIMULATION',
-        simCapital: mode.simulation_capital || 100000,
-        simUsed: mode.simulation_used || 0,
-        ibStatus: ib,
-        ibBalance: mode.account_balance || mode.net_liquidation,
-        monthlyReturns: perf.monthly_returns || [],
-      });
-    } catch (e) { console.error('Fetch error:', e); }
-    finally { setLoading(false); }
+    fetchData();
+    const interval = setInterval(fetchData, 60000); // Refresh every 60s
+    return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => { fetchAll(); const t = setInterval(fetchAll, 30000); return () => clearInterval(t); }, [fetchAll]);
-
-  // Navigation helper - updates URL
-  const navigateToTab = (tabId) => {
-    const mode = currentMode || 'sim';
-    navigate(`/${mode}/${tabId}`);
-  };
-
-  // Derived
-  const totalUnrealized = data.positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
-  const totalRealized = data.trades.reduce((s, t) => s + (t.pnl || 0), 0);
-  const activeStrategies = data.strategies.filter(s => s.live_trades > 0).length;
-  const portfolioValue = data.ibBalance || data.simCapital || 0;
-  const isConnected = data.ibStatus?.socket === 'Connected' || data.ibStatus?.status === 'Connected';
-  const modeColor = data.mode === 'LIVE_TRADING' ? 'rose' : data.mode === 'PAPER_TRADING' ? 'blue' : 'amber';
-
-  const navItems = [
-    { id: 'command', icon: '⚡', label: 'Command' },
-    { id: 'strategies', icon: '🧪', label: 'Lab' },
-    { id: 'performance', icon: '📊', label: 'Performance' },
-    { id: 'portfolio', icon: '💼', label: 'Portfolio' },
-    { id: 'markets', icon: '📈', label: 'Markets' },
-    { id: 'settings', icon: '⚙️', label: 'Settings' },
+  // --- TAB CONFIGURATION ---
+  const tabs = [
+    { id: 'dashboard', label: 'Dashboard', icon: Icons.Dashboard },
+    { id: 'strategies', label: 'Strategies', icon: Icons.Strategies },
+    { id: 'lab', label: 'Lab', icon: Icons.Chart },
+    { id: 'research', label: 'Research', icon: Icons.Research },
+    { id: 'performance', label: 'Performance', icon: Icons.Performance },
+    { id: 'portfolio', label: 'Portfolio', icon: Icons.Portfolio },
+    { id: 'markets', label: 'Markets', icon: Icons.Markets },
+    { id: 'settings', label: 'Settings', icon: Icons.Settings },
   ];
 
   const handleTickerClick = (ticker) => {
@@ -1193,9 +1156,27 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content - Adjusted for mobile bottom nav */}
-      <main className="pt-14 md:pt-12 pb-20 md:pb-4 px-3 max-w-[1800px] mx-auto">
-        {renderView()}
+      {/* Main Content - Mobile Optimized Padding */}
+      <main className="pt-16 md:pt-20 pb-20 md:pb-6 px-3 md:px-6 max-w-[1600px] mx-auto">
+        {loading && !data.signals.length ? (
+          <div className="flex items-center justify-center h-[60vh]">
+            <div className="flex items-center gap-3 text-slate-500">
+              <div className="w-5 h-5 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin" />
+              <span className="text-sm">Loading market data...</span>
+            </div>
+          </div>
+        ) : (
+          <>
+            {activeTab === 'dashboard' && <DashboardTab />}
+            {activeTab === 'strategies' && <StrategiesTabContent />}
+            {activeTab === 'lab' && <StrategyLab />}
+            {activeTab === 'research' && <ResearchTab key="research-tab" onTickerClick={handleTickerClick} />}
+            {activeTab === 'performance' && <StrategyPerformance />}
+            {activeTab === 'portfolio' && <PortfolioTab />}
+            {activeTab === 'markets' && <MarketsTab onTickerClick={handleTickerClick} />}
+            {activeTab === 'settings' && <SettingsTab />}
+          </>
+        )}
       </main>
 
       {/* Mobile Bottom Navigation - URL based */}

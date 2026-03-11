@@ -45,7 +45,7 @@ export const MarketsTab = ({ onTickerClick }) => {
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 30000); // Refresh every 30s
+    const interval = setInterval(fetchMarketData, 60000); // Refresh every 60s
     return () => clearInterval(interval);
   }, [selectedTimeframe]);
 
@@ -67,8 +67,8 @@ export const MarketsTab = ({ onTickerClick }) => {
       const volumeRes = await fetch('/api/market/volume-leaders');
       const volumeLeaders = volumeRes.ok ? await volumeRes.json() : [];
 
-      // Fetch global markets
-      const globalRes = await fetch('/api/market/global');
+      // Fetch global markets with cache-busting
+      const globalRes = await fetch(`/api/market/global?_t=${Date.now()}`);
       const global = globalRes.ok ? await globalRes.json() : [];
 
       setMarketData({
@@ -812,40 +812,75 @@ export const MarketsTab = ({ onTickerClick }) => {
             </div>
           </div>
 
-          {/* Market Hours - HKT Based */}
-          <div className="p-3 rounded-lg bg-slate-900/50 border border-white/5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-white">Global Market Hours (HKT)</span>
-            </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-              {[
-                { name: 'Tokyo (TSE)', flag: '🇯🇵', openHKT: '08:00', closeHKT: '14:00', openLocal: '09:00', closeLocal: '15:00', status: 'Closed' },
-                { name: 'Hong Kong (HKEX)', flag: '🇭🇰', openHKT: '09:30', closeHKT: '16:00', openLocal: '09:30', closeLocal: '16:00', status: 'Closed' },
-                { name: 'London (LSE)', flag: '🇬🇧', openHKT: '15:00', closeHKT: '23:30', openLocal: '08:00', closeLocal: '16:30', status: 'Closed' },
-                { name: 'New York (NYSE)', flag: '🇺🇸', openHKT: '21:30', closeHKT: '04:00', openLocal: '09:30', closeLocal: '16:00', status: 'Open' },
-              ].map(ex => (
-                <div key={ex.name} className="p-2 bg-slate-800/30 rounded border border-white/5">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="text-sm">{ex.flag}</span>
-                    <span className="text-[10px] font-bold text-white truncate">{ex.name}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-400">
-                    <div className="flex justify-between">
-                      <span>HKT:</span>
-                      <span className="text-slate-300">{ex.openHKT} - {ex.closeHKT}</span>
+          {/* Market Hours */}
+          <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
+            <h3 className="text-sm font-black text-white uppercase mb-4">Global Market Hours (HKT)</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {(() => {
+                // Get current time in HKT (UTC+8)
+                const now = new Date();
+                const hktOffset = 8 * 60; // HKT is UTC+8 in minutes
+                const utcOffset = now.getTimezoneOffset(); // Local offset from UTC in minutes
+                const hktTime = new Date(now.getTime() + (utcOffset + hktOffset) * 60000);
+                const hktHour = hktTime.getHours();
+                const hktMinute = hktTime.getMinutes();
+                const hktDecimal = hktHour + hktMinute / 60;
+                
+                // Market hours in HKT
+                const markets = [
+                  { 
+                    name: 'Tokyo (TSE)', 
+                    flag: '🇯🇵', 
+                    localHours: '09:00-15:00 JST',
+                    hktOpen: 8.0,    // 08:00 HKT
+                    hktClose: 14.0,  // 14:00 HKT
+                  },
+                  { 
+                    name: 'Hong Kong (HKEX)', 
+                    flag: '🇭🇰', 
+                    localHours: '09:30-16:00 HKT',
+                    hktOpen: 9.5,    // 09:30 HKT
+                    hktClose: 16.0,  // 16:00 HKT
+                  },
+                  { 
+                    name: 'London (LSE)', 
+                    flag: '🇬🇧', 
+                    localHours: '08:00-16:30 GMT',
+                    hktOpen: 16.0,   // 16:00 HKT
+                    hktClose: 24.5,  // 00:30 HKT (next day)
+                  },
+                  { 
+                    name: 'New York (NYSE)', 
+                    flag: '🇺🇸', 
+                    localHours: '09:30-16:00 EST',
+                    hktOpen: 22.5,   // 22:30 HKT
+                    hktClose: 29.0,  // 05:00 HKT (next day, represented as 29 for calculation)
+                  },
+                ];
+                
+                return markets.map(market => {
+                  let isOpen = false;
+                  if (market.hktClose > 24) {
+                    // Market spans midnight (NY)
+                    isOpen = hktDecimal >= market.hktOpen || hktDecimal < (market.hktClose - 24);
+                  } else {
+                    isOpen = hktDecimal >= market.hktOpen && hktDecimal < market.hktClose;
+                  }
+                  
+                  return (
+                    <div key={market.name} className="p-3 bg-slate-800/50 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span>{market.flag}</span>
+                        <span className="text-xs font-bold text-white">{market.name}</span>
+                      </div>
+                      <p className="text-xs text-slate-500">{market.localHours}</p>
+                      <span className={`text-xs font-bold ${isOpen ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {isOpen ? 'Open' : 'Closed'}
+                      </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Local:</span>
-                      <span className="text-slate-500">{ex.openLocal} - {ex.closeLocal}</span>
-                    </div>
-                  </div>
-                  <div className="mt-1">
-                    <span className={`text-[10px] font-bold ${ex.status === 'Open' ? 'text-emerald-400' : 'text-slate-500'}`}>
-                      {ex.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>

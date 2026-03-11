@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloudflare Quick Tunnel for JTCML Trading Platform
+After=network-online.target jtcml-backend.service
+Wants=jtcml-backend.service
+
+[Service]
+Type=simple
+User=ubuntu
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/cloudflared tunnel --url http://127.0.0.1:8000 --metrics localhost:45678
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

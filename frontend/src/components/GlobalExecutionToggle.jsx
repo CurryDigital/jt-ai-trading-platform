@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 /**
  * Global Execution Mode Toggle
@@ -17,13 +17,27 @@ export const GlobalExecutionToggle = () => {
   const [loading, setLoading] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [message, setMessage] = useState(null);
+  const configRef = useRef(null);
 
   useEffect(() => {
     fetchGlobalMode();
-    // Refresh every 60 seconds (reduced from 30 to minimize API calls)
     const interval = setInterval(fetchGlobalMode, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // Handle click outside to close config panel
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (configRef.current && !configRef.current.contains(event.target)) {
+        setShowConfig(false);
+      }
+    };
+    
+    if (showConfig) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showConfig]);
 
   useEffect(() => {
     if (message) {
@@ -63,9 +77,11 @@ export const GlobalExecutionToggle = () => {
   };
 
   const updateMode = async (newMode) => {
-    if (newMode === mode) return;
+    if (newMode === mode || loading) return;
     
     setLoading(true);
+    setMessage('Switching...');
+    
     try {
       const res = await fetch('/api/execution/global-mode', {
         method: 'POST',
@@ -93,8 +109,13 @@ export const GlobalExecutionToggle = () => {
         if (data.account_balance_usd !== null && data.account_balance_usd !== undefined) {
           setIbkrBalanceUSD(data.account_balance_usd);
         }
+        setIbkrConnected(data.ibkr_connected || false);
         setMessage(`Switched to ${newMode.replace('_', ' ')}`);
-        setShowConfig(false);
+        // Don't close config panel immediately so user sees the change
+        setTimeout(() => setShowConfig(false), 800);
+      } else {
+        const err = await res.json();
+        setMessage(err.detail || 'Failed to switch mode');
       }
     } catch (e) {
       console.error('Failed to update mode:', e);
@@ -213,7 +234,10 @@ export const GlobalExecutionToggle = () => {
 
       {/* Config Panel */}
       {showConfig && (
-        <div className="absolute top-full right-0 mt-2 w-80 bg-slate-900 border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
+        <div 
+          ref={configRef}
+          className="absolute top-full right-0 mt-2 w-80 bg-slate-900 border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden"
+        >
           <div className="p-4 border-b border-white/10">
             <h3 className="text-sm font-bold text-white">Execution Mode</h3>
             <p className="text-xs text-slate-400 mt-1">Choose how trades are executed</p>
@@ -228,8 +252,10 @@ export const GlobalExecutionToggle = () => {
             ].map((m) => (
                 <button
                 key={m.key}
-                onClick={() => {
-                  if (mode !== m.key) {
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (mode !== m.key && !loading) {
                     updateMode(m.key);
                   }
                 }}
@@ -356,14 +382,6 @@ export const GlobalExecutionToggle = () => {
         <div className="absolute top-full right-0 mt-2 px-4 py-2 bg-blue-500 text-white text-xs font-bold rounded-lg shadow-lg z-50 animate-fade-in">
           {message}
         </div>
-      )}
-
-      {/* Click outside to close */}
-      {showConfig && (
-        <div 
-          className="fixed inset-0 z-40" 
-          onClick={() => setShowConfig(false)}
-        />
       )}
     </div>
   );

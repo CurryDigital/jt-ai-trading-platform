@@ -737,12 +737,11 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
     fetchPaperStrategies(); 
     fetchStrategyStats();
     
-    // Refresh every 5 minutes instead of continuously
+    // Refresh every 60 seconds
     const interval = setInterval(() => {
       fetchPaperStrategies();
       fetchStrategyStats();
-    }, 300000); // 5 minutes
-    
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -847,22 +846,35 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
       if (!strategy) continue;
       
       const poolSize = customPools[strategyId] || defaultPoolSize;
-      const tradeSize = Math.floor(poolSize * 0.25);
-      const tickers = strategy.universe?.slice(0, 4) || [];
       
       try {
-        const res = await fetch('/api/strategies/deploy-with-pool', {
+        // Use deploy-auto: deploys full universe with BUY signals only, max 5 positions
+        const res = await fetch('/api/strategies/deploy-auto', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             strategy_id: strategyId,
-            tickers: tickers,
             total_pool: poolSize,
-            trade_size_pct: 0.25
+            trade_size_pct: 0.25,
+            max_positions: 5
           })
         });
         
-        results.push({ strategy: strategy.name, status: res.ok ? 'success' : 'error' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          results.push({ 
+            strategy: strategy.name, 
+            status: 'success',
+            deployed: data.positions_created,
+            tickers: data.tickers_deployed
+          });
+        } else {
+          results.push({ 
+            strategy: strategy.name, 
+            status: 'error', 
+            error: data.error || 'Deploy failed'
+          });
+        }
       } catch (e) {
         results.push({ strategy: strategy.name, status: 'error', error: e.message });
       }
@@ -872,7 +884,18 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
     setSelectedStrategies(new Set());
     fetchPaperStrategies();
     fetchStrategyStats();
-    alert(`Deployed ${results.filter(r => r.status === 'success').length}/${results.length} strategies!`);
+    
+    // Show detailed results
+    const successCount = results.filter(r => r.status === 'success').length;
+    const detailMsg = results.map(r => {
+      if (r.status === 'success') {
+        return `✅ ${r.strategy}: ${r.deployed} positions (${r.tickers?.join(', ')})`;
+      } else {
+        return `❌ ${r.strategy}: ${r.error}`;
+      }
+    }).join('\n');
+    
+    alert(`Deployed ${successCount}/${results.length} strategies:\n\n${detailMsg}`);
     if (onDeployStrategy) onDeployStrategy();
   };
 

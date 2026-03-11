@@ -1185,7 +1185,7 @@ export const StrategyPerformance = () => {
   useEffect(() => {
     fetchData();
     fetchGlobalMode();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(fetchData, 60000);
     const modeInterval = setInterval(fetchGlobalMode, 60000);
     return () => {
       clearInterval(interval);
@@ -1227,8 +1227,8 @@ export const StrategyPerformance = () => {
     if (paperStrategies.length > 0) {
       fetchPrices();
       fetchSignals();
-      const priceInterval = setInterval(fetchPrices, 10000); // Reduced from 15s to 10s
-      const signalInterval = setInterval(fetchSignals, 30000);
+      const priceInterval = setInterval(fetchPrices, 60000);
+      const signalInterval = setInterval(fetchSignals, 60000);
       return () => {
         clearInterval(priceInterval);
         clearInterval(signalInterval);

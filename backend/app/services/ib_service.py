@@ -239,8 +239,30 @@ class IBKRThreadedService:
     
     @property
     def is_connected(self):
-        """Check connection status (thread-safe)"""
-        return self._connected and self._ib is not None and self._ib.isConnected()
+        """Check connection status (thread-safe) with proactive health validation"""
+        if not self._connected or self._ib is None:
+            return False
+        
+        try:
+            # Check if IB thinks it's connected
+            if not self._ib.isConnected():
+                self._connected = False
+                return False
+            
+            # Proactive health check: try to get managed accounts
+            # This will fail if the connection is actually dead
+            accounts = self._ib.managedAccounts()
+            if accounts is None:
+                logger.warning("IBKR health check: managedAccounts() returned None")
+                self._connected = False
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"IBKR connection check failed: {e}")
+            self._connected = False
+            return False
     
     def submit_order(self, symbol, action, quantity, order_type="MKT"):
         """
@@ -332,25 +354,42 @@ class IBKRQuantService:
         return ib_threaded_service.get_status()
     
     def get_account_summary(self):
-        """Get account summary - requires connected IB instance"""
+        """Get account summary - requires connected IB instance with health validation"""
+        # First check connection with health validation
         if not ib_threaded_service.is_connected:
+            logger.warning("Cannot fetch account summary: IBKR not connected")
             return None
         
         try:
             # Access the IB instance from threaded service
             ib = ib_threaded_service._ib
             if not ib:
+                logger.warning("IB instance is None despite is_connected=True")
+                return None
+            
+            # Double-check connection is alive before fetching
+            if not ib.isConnected():
+                logger.warning("IB isConnected() returned False during account fetch")
+                ib_threaded_service._connected = False
                 return None
             
             # Get account summary
             accounts = ib.managedAccounts()
             if not accounts:
+                logger.warning("No managed accounts returned from IB")
                 return None
             
             account = accounts[0]
             
-            # Get account values
-            values = ib.accountValues(account)
+            # Get account values with timeout protection
+            try:
+                values = ib.accountValues(account)
+                if values is None:
+                    logger.warning("accountValues() returned None")
+                    return None
+            except Exception as av_err:
+                logger.error(f"Error fetching account values: {av_err}")
+                return None
             
             result = {
                 "account": account,
@@ -402,6 +441,8 @@ class IBKRQuantService:
             
         except Exception as e:
             logger.error(f"Failed to get account summary: {e}")
+            # Mark connection as potentially broken
+            ib_threaded_service._connected = False
             return None
     
     async def connect(self):
