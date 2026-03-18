@@ -19,6 +19,10 @@ const StrategyLab = () => {
   
   // Expanded strategy for detailed view
   const [expandedStrategy, setExpandedStrategy] = useState(null);
+  
+  // Deploy state
+  const [deployingId, setDeployingId] = useState(null);
+  const [deployResult, setDeployResult] = useState(null);
 
   const assetClasses = [
     { id: 'ALL', label: 'All Strategies', icon: '📊' },
@@ -63,6 +67,52 @@ const StrategyLab = () => {
       }
     } catch (e) {
       console.error('Failed to fetch live stats:', e);
+    }
+  };
+
+  // One-click deploy using strategy's universe tickers
+  const handleDeploy = async (strategy) => {
+    if (deployingId) return; // Prevent double clicks
+    
+    setDeployingId(strategy.id);
+    setDeployResult(null);
+    
+    try {
+      // Use strategy's universe tickers, fallback to empty array
+      const tickers = strategy.universe || [];
+      
+      if (tickers.length === 0) {
+        setDeployResult({ success: false, error: 'No tickers configured for this strategy' });
+        return;
+      }
+      
+      const res = await fetch('/api/strategies/deploy-with-pool', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          strategy_id: strategy.id, 
+          tickers: tickers, 
+          total_pool: 100000 // Default $100k pool
+        })
+      });
+      
+      const data = await res.json();
+      setDeployResult({ ...data, strategyId: strategy.id });
+      
+      // Clear result after 3 seconds
+      setTimeout(() => {
+        setDeployResult(null);
+      }, 3000);
+      
+      // Refresh if successful
+      if (data.success) {
+        fetchStrategies(false);
+        fetchLiveStats();
+      }
+    } catch (e) {
+      setDeployResult({ success: false, error: e.message, strategyId: strategy.id });
+    } finally {
+      setDeployingId(null);
     }
   };
 
@@ -467,15 +517,29 @@ const StrategyLab = () => {
                                 <span className="text-sm text-white font-mono">{s.exit_logic || '—'}</span>
                               </div>
                               
-                              {/* Deploy Button */}
+                              {/* Deploy Button - One Click */}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  window.location.href = `/strategies?deploy=${s.id}`;
+                                  handleDeploy(s);
                                 }}
-                                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold rounded-lg transition-colors"
+                                disabled={deployingId === s.id}
+                                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                               >
-                                Deploy Strategy
+                                {deployingId === s.id ? (
+                                  <>
+                                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    Deploying...
+                                  </>
+                                ) : deployResult?.strategyId === s.id ? (
+                                  deployResult.success ? (
+                                    <span className="text-emerald-100">✓ Deployed!</span>
+                                  ) : (
+                                    <span className="text-rose-200">✗ {deployResult.error}</span>
+                                  )
+                                ) : (
+                                  <>Deploy Strategy ({s.universe?.length || 0} tickers)</>
+                                )}
                               </button>
                             </div>
                           </div>
@@ -507,5 +571,7 @@ const StrategyLab = () => {
     </div>
   );
 };
+
+export { StrategyLab };
 
 export default StrategyLab;

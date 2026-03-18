@@ -2,40 +2,77 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
+import os
 import boto3
 import psycopg2
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def get_hkt_now():
     return datetime.datetime.utcnow() + datetime.timedelta(hours=8)
 
-# RDS Configuration
-DB_HOST = "openclaw.cjs04usueagu.ap-southeast-1.rds.amazonaws.com"
-DB_PORT = 5432
-DB_NAME = "aitrading"
-DB_USER = "openclaw_user"
-REGION = "ap-southeast-1"
+# RDS Configuration from environment variables
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_NAME = os.getenv("DB_NAME", "aitrading")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")  # If empty, uses IAM auth
+DB_REGION = os.getenv("DB_REGION", "ap-southeast-1")
 
 def get_auth_token():
+    """Get RDS IAM auth token or use password from env"""
+    if DB_PASSWORD:
+        return DB_PASSWORD
     try:
-        client = boto3.client('rds', region_name=REGION)
+        client = boto3.client('rds', region_name=DB_REGION)
         return client.generate_db_auth_token(DBHostname=DB_HOST, Port=DB_PORT, DBUsername=DB_USER)
-    except: return None
+    except Exception as e:
+        print(f"Warning: Could not generate IAM auth token: {e}")
+        return None
 
 def get_connection():
+    """Create database connection using psycopg2"""
+    password = get_auth_token()
+    if not password:
+        raise ValueError("No database password available. Set DB_PASSWORD in .env or ensure IAM auth is configured.")
+    
     return psycopg2.connect(
-        host=DB_HOST, port=DB_PORT, user=DB_USER, password=get_auth_token(),
+        host=DB_HOST, port=DB_PORT, user=DB_USER, password=password,
         database=DB_NAME, sslmode='require',
         options='-c search_path=aitrading_schema,bronze,silver,gold,consumption -c timezone=Asia/Hong_Kong'
     )
 
-engine = create_engine(
-    f"postgresql://{DB_USER}@{DB_HOST}/{DB_NAME}", 
-    creator=get_connection,
-    pool_size=50,
-    max_overflow=20,
-    pool_timeout=30,
-    pool_recycle=1800
-)
+# Build connection string for SQLAlchemy
+if DB_PASSWORD:
+    # Use password auth
+    connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+else:
+    # Use IAM auth with creator function
+    connection_string = f"postgresql://{DB_USER}@{DB_HOST}/{DB_NAME}"
+
+# Create engine with appropriate configuration
+if DB_PASSWORD:
+    # Direct connection with password
+    engine = create_engine(
+        connection_string,
+        pool_size=50,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800
+    )
+else:
+    # IAM auth with creator function
+    engine = create_engine(
+        connection_string,
+        creator=get_connection,
+        pool_size=50,
+        max_overflow=20,
+        pool_timeout=30,
+        pool_recycle=1800
+    )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

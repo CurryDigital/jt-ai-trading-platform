@@ -140,8 +140,7 @@ def reset_simulation(db: Session = Depends(get_db)):
         db.execute(text("DELETE FROM gold.trade_executions"))
         try: db.execute(text("DELETE FROM consumption.Portfolio_Positions_Current"))
         except: pass
-        try: db.execute(text("DELETE FROM consumption.Performance_Trades_History"))
-        except: pass
+        # NOTE: Performance_Trades_History dropped - no longer need to delete
 
         db.execute(text("""
             INSERT INTO gold.platform_settings (key, value, updated_at)

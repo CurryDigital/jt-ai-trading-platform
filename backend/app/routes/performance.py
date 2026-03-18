@@ -29,11 +29,12 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         FROM consumption.Strategies_Backtest_Results GROUP BY strategy_id
     """)).fetchall()
 
+    # NOTE: Performance_Trades_History dropped - using paper_strategies for live stats
     live_stats = db.execute(text("""
         SELECT strategy_id, COUNT(*) as total_trades,
                SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades
-        FROM consumption.Performance_Trades_History
-        WHERE exit_date IS NOT NULL GROUP BY strategy_id
+        FROM gold.paper_strategies
+        WHERE status = 'ACTIVE' GROUP BY strategy_id
     """)).fetchall()
 
     current_signals = db.execute(text("""
@@ -76,18 +77,22 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         WHERE portfolio_type = 'PAPER' ORDER BY year DESC, month DESC LIMIT 12
     """)).fetchall()
 
+    # NOTE: Performance_Portfolio_Summary dropped - using gold.paper_strategies for summary
     summary = db.execute(text("""
-        SELECT * FROM consumption.Performance_Portfolio_Summary WHERE portfolio_type = 'PAPER'
+        SELECT 
+            COALESCE(SUM(realized_pnl), 0) as total_pnl,
+            COALESCE(SUM(unrealized_pnl), 0) as unrealized_pnl
+        FROM gold.paper_strategies WHERE status = 'ACTIVE'
     """)).fetchone()
 
     return {
         "strategies": strategies,
         "monthly_returns": [{"year": r.year, "month": r.month, "return": float(r.return_pct or 0)} for r in monthly],
         "summary": {
-            "total_return": float(summary.total_pnl_pct or 0) if summary else 0,
-            "sharpe": float(summary.sharpe_ratio or 0) if summary else 0,
-            "max_drawdown": float(summary.max_drawdown_pct or 0) if summary else 0,
-            "win_rate": float(summary.win_rate or 0) * 100 if summary else 0,
+            "total_return": float(summary.total_pnl or 0) if summary else 0,
+            "sharpe": 0,  # TODO: Calculate from available data
+            "max_drawdown": 0,  # TODO: Calculate from available data
+            "win_rate": 0,  # TODO: Calculate from available data
         },
     }
 
@@ -99,17 +104,19 @@ def get_strategy_performance(db: Session = Depends(get_db)):
 @router.get("/performance/daily-pnl")
 def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
     """Get daily P&L from position entries and exits."""
+    # NOTE: Performance_Trades_History dropped - using trade_executions
     closed_trades = db.execute(text("""
-        SELECT DATE(exit_date) as trade_date, SUM(realized_pnl) as day_pnl, COUNT(*) as trade_count
-        FROM consumption.Performance_Trades_History WHERE exit_date IS NOT NULL
-        GROUP BY DATE(exit_date) ORDER BY trade_date DESC LIMIT :days
+        SELECT DATE(executed_at) as trade_date, SUM(pnl) as day_pnl, COUNT(*) as trade_count
+        FROM gold.trade_executions WHERE pnl IS NOT NULL
+        GROUP BY DATE(executed_at) ORDER BY trade_date DESC LIMIT :days
     """), {"days": days}).fetchall()
 
+    # NOTE: Using paper_strategies with available columns
     open_positions = db.execute(text("""
-        SELECT DATE(entry_date) as entry_date, SUM(unrealized_pnl) as day_pnl, COUNT(*) as position_count
-        FROM consumption.Portfolio_Positions_Current WHERE side = 'LONG'
-        GROUP BY DATE(entry_date) ORDER BY entry_date DESC LIMIT :days
-    """), {"days": days}).fetchall()
+        SELECT strategy_id, SUM(unrealized_pnl) as day_pnl, COUNT(*) as position_count
+        FROM gold.paper_strategies WHERE status = 'ACTIVE'
+        GROUP BY strategy_id
+    """)).fetchall()
 
     daily_map = {}
     for t in closed_trades:
@@ -118,12 +125,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
             daily_map.setdefault(d, {"pnl": 0, "trades": 0})
             daily_map[d]["pnl"] += float(t.day_pnl or 0)
             daily_map[d]["trades"] += t.trade_count
-    for p in open_positions:
-        if p.entry_date:
-            d = str(p.entry_date)
-            daily_map.setdefault(d, {"pnl": 0, "trades": 0})
-            daily_map[d]["pnl"] += float(p.day_pnl or 0)
-            daily_map[d]["trades"] += p.position_count
+    # NOTE: Skipping open_positions - paper_strategies lacks date column for grouping
 
     if not daily_map:
         return {"daily": [], "summary": {"total_pnl": 0, "avg_daily_pnl": 0, "message": "No positions recorded yet"}}
@@ -149,30 +151,34 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
 
 @router.get("/velocity/trades")
 def get_velocity_trades(db: Session = Depends(get_db)):
+    # NOTE: Performance_Trades_History dropped - using trade_executions
     result = db.execute(text("""
-        SELECT trade_id, ticker, side, entry_date, entry_price, entry_quantity as quantity,
-               exit_date, exit_price, realized_pnl as pnl, realized_pnl_pct as pnl_pct,
-               strategy_id, holding_days, exit_reason
-        FROM consumption.Performance_Trades_History ORDER BY created_at DESC LIMIT 100
+        SELECT id as trade_id, ticker, side, executed_at as entry_date, 
+               price as entry_price, quantity,
+               pnl
+        FROM gold.trade_executions ORDER BY executed_at DESC LIMIT 100
     """)).fetchall()
     return [{"id": r.trade_id, "ticker": r.ticker, "side": r.side,
              "entry_price": float(r.entry_price or 0), "pnl": float(r.pnl or 0),
-             "strategy": r.strategy_id, "holding_period": r.holding_days} for r in result]
+             "strategy": None, "holding_period": 0} for r in result]
 
 
 @router.get("/velocity/summary")
 def get_velocity_summary(db: Session = Depends(get_db)):
-    trades = db.execute(text("SELECT COUNT(*) as cnt FROM consumption.Performance_Trades_History")).fetchone()
+    # NOTE: Performance_Trades_History dropped
+    trades = db.execute(text("SELECT COUNT(*) as cnt FROM gold.trade_executions")).fetchone()
+    # NOTE: Performance_Portfolio_Summary dropped
     summary = db.execute(text("""
-        SELECT total_value, total_pnl, win_rate, sharpe_ratio
-        FROM consumption.Performance_Portfolio_Summary WHERE portfolio_type = 'PAPER'
+        SELECT 
+            COALESCE(SUM(realized_pnl) + SUM(unrealized_pnl), 0) as total_pnl
+        FROM gold.paper_strategies WHERE status = 'ACTIVE'
     """)).fetchone()
     return {
         "total_trades": trades.cnt if trades else 0,
-        "portfolio_value": float(summary.total_value or 0) if summary else 0,
+        "portfolio_value": 0,  # TODO: Calculate from available data
         "total_pnl": float(summary.total_pnl or 0) if summary else 0,
-        "win_rate": float(summary.win_rate or 0) * 100 if summary else 0,
-        "sharpe_ratio": float(summary.sharpe_ratio or 0) if summary else 0,
+        "win_rate": 0,  # TODO: Calculate from available data
+        "sharpe_ratio": 0,  # TODO: Calculate from available data
         "active_strategies": 8, "status": "active",
     }
 

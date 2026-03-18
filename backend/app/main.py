@@ -1,11 +1,17 @@
 """
-JTCML Trading Platform — FastAPI Backend
+JTCML Trading Platform - FastAPI Backend
 =========================================
 Platform layer: API endpoints + IBKR execution.
 Data ingestion/refresh is handled by the DE agent.
 """
-from fastapi import FastAPI
+import datetime
+import json
+import time
+from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 import logging
 
 # Route modules
@@ -38,6 +44,11 @@ except ImportError:
     stock_detail_router = None
 from app.services.ib_service import ib_quant_service
 from app.services.ib_web_service import ib_web_service
+from app.services.strategy_manager import strategy_manager
+from app.services.jt_strategy_executor import get_executor
+
+# JT Strategy Executor - initialized lazily
+jt_strategy_executor = None
 
 app = FastAPI()
 
@@ -56,102 +67,9 @@ app.add_middleware(
 
 import asyncio
 
-async def scheduler_loop():
-    """
-    Continuous background loop that checks gold.sync_schedules and triggers refreshes.
-    """
-    freq_map = {
-        "1min": 60,
-        "5min": 300,
-        "1hr": 3600,
-        "1day": 86400
-    }
-    
-    while True:
-        db = SessionLocal()
-        try:
-            schedules = db.execute(text("SELECT component, frequency, last_run FROM gold.sync_schedules WHERE frequency != 'pause'")).fetchall()
-            now = datetime.datetime.now()
-            
-            for s in schedules:
-                comp, freq, last_run = s
-                interval = freq_map.get(freq)
-                if not interval: continue
-                
-                should_run = False
-                if last_run is None:
-                    should_run = True
-                else:
-                    # last_run is in Asia/Hong_Kong time, adjust current time
-                    hkt_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).replace(tzinfo=None)
-                    if (hkt_now - last_run).total_seconds() >= interval:
-                        should_run = True
-                
-                if should_run:
-                    print(f"Scheduler: Triggering refresh for {comp} (Frequency: {freq})")
-                    # Update last_run immediately to prevent double triggers
-                    db.execute(text("UPDATE gold.sync_schedules SET last_run = :lr WHERE component = :comp"), {"lr": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).replace(tzinfo=None), "comp": comp})
-                    db.commit()
-                    
-                    # Trigger the actual refresh task
-                    if comp == 'indices': await refresh_indices_and_mood()
-                    elif comp == 'stocks': 
-                        await refresh_stock_layer()
-                        # Iteration 56: Trigger automated trading evaluation after stock refresh
-                        print("Scheduler: Evaluating Automated Trading Signals...")
-                        await trading_service.run_signal_execution()
-                    elif comp == 'fx': await refresh_fx_layer()
-                    elif comp == 'commodities': await refresh_commodity_layer()
-                    elif comp == 'crypto': await refresh_crypto_layer()
-                    elif comp == 'hft': 
-                        await refresh_hft_layer()
-                        # Iteration 65: Trigger Quant Strategy execution tick
-                        print("Scheduler: Running Quant Strategy Tick...")
-                        await strategy_manager.run_tick()
-                    elif comp == 'etfs':
-                        # NEW: ETF daily data refresh
-                        if refresh_etf_layer:
-                            print("Scheduler: Refreshing ETF data...")
-                            await refresh_etf_layer()
-                        else:
-                            print("Scheduler: ETF refresh not available")
-                    elif comp == 'accruals':
-                        # NEW: Accruals Quality weekly refresh
-                        if refresh_accruals_quality:
-                            print("Scheduler: Refreshing Accruals Quality data...")
-                            await refresh_accruals_quality()
-                        else:
-                            print("Scheduler: Accruals refresh not available")
-            
-            # Force run tick every loop for testing responsiveness
-            print("Scheduler: Force Running Quant Strategy Tick...")
-            await strategy_manager.run_tick()
-            
-            # JT-Ready Strategy Execution
-            print("Scheduler: Running JT-Ready Strategy Execution...")
-            global jt_strategy_executor
-            if jt_strategy_executor is None:
-                jt_strategy_executor = get_executor(db)
-            
-            # Get current global execution mode
-            mode_result = db.execute(text("SELECT value FROM gold.platform_settings WHERE key = 'global_execution_mode'")).fetchone()
-            current_mode = mode_result.value if mode_result else 'SIMULATION'
-            jt_strategy_executor.set_execution_mode(current_mode)
-            
-            # Run execution cycle
-            try:
-                trades = await jt_strategy_executor.run_execution_cycle()
-                if trades > 0:
-                    print(f"Scheduler: JT-Ready execution completed - {trades} trades")
-            except Exception as exec_err:
-                print(f"Scheduler: JT-Ready execution error: {exec_err}")
-                    
-        except Exception as e:
-            print(f"Scheduler Error: {e}")
-        finally:
-            db.close()
-            
-        await asyncio.sleep(30) # Check every 30 seconds
+# REMOVED: scheduler_loop() - Platform is READ-ONLY
+# Data refresh schedules are managed by DE agent, not Platform
+# See shared/references/inter-agent-protocol.md for data contract workflow
 
 @app.middleware("http")
 async def ibkr_session_middleware(request: Request, call_next):
@@ -163,49 +81,15 @@ async def ibkr_session_middleware(request: Request, call_next):
     # Filter for IBKR-related cookies if possible, or just sync all
     if any(k in cookies for k in ['JSESSIONID', 'x-sess-uuid', 'IB_SESSION']):
         ib_web_service.set_cookies(cookies)
-    
+
     response = await call_next(request)
     return response
 
 @app.on_event("startup")
 async def startup_event():
-    # Initialize new data schedules if they don't exist
-    db = SessionLocal()
-    try:
-        # Add ETF daily schedule
-        existing = db.execute(text("SELECT 1 FROM gold.sync_schedules WHERE component = 'etfs'")).fetchone()
-        if not existing:
-            db.execute(text("""
-                INSERT INTO gold.sync_schedules (component, frequency, last_run)
-                VALUES ('etfs', '1day', NULL)
-            """))
-            print("✅ Scheduler: Added ETF daily refresh schedule")
-        
-        # Add Accruals weekly schedule
-        existing = db.execute(text("SELECT 1 FROM gold.sync_schedules WHERE component = 'accruals'")).fetchone()
-        if not existing:
-            db.execute(text("""
-                INSERT INTO gold.sync_schedules (component, frequency, last_run)
-                VALUES ('accruals', '1day', NULL)
-            """))
-            print("✅ Scheduler: Added Accruals weekly refresh schedule")
-        
-        db.commit()
-    except Exception as e:
-        print(f"⚠️ Failed to initialize schedules: {e}")
-    finally:
-        db.close()
-    
-    # Start scheduler
-    asyncio.create_task(scheduler_loop())
-    print("✅ Yahoo Finance: Primary data source active")
-    
-    # Send startup notification
-    try:
-        from app.services.telegram_alerts import telegram_alerts
-        telegram_alerts.alert_backend_restart("Systemd service startup")
-    except Exception as e:
-        print(f"⚠️ Failed to send startup alert: {e}")
+    # DISABLED: Scheduler initialization - Platform is READ-ONLY
+    # Data schedules are managed by DE agent
+    print("✅ Backend started - READ-ONLY mode (consumption views only)")
 
 async def run_deep_sell_analysis(db: Session):
     """
@@ -214,12 +98,12 @@ async def run_deep_sell_analysis(db: Session):
     # 1. Fetch Market Context (Regime and macro proxies)
     risk_row = db.query(GlobalState).filter(GlobalState.key == "system_risk_level").first()
     mood_row = db.query(GlobalState).filter(GlobalState.key == "market_mood_index").first()
-    
+
     market_data = {
         "regime": "PANIC" if risk_row and risk_row.value == "CRITICAL" else "GROWTH",
         "mood": mood_row.value if mood_row else "Neutral"
     }
-    
+
     items = db.query(Inventory).all()
     for item in items:
         try:
@@ -234,7 +118,7 @@ async def run_deep_sell_analysis(db: Session):
             if research_swarm:
                 try:
                     analysis_raw = await research_swarm.debate_sell_signal(inv_data, market_data)
-                    
+
                     # The swarm returns a dict with "analysis" as a content string
                     # We try to parse the content string if it's JSON
                     try:
@@ -247,7 +131,7 @@ async def run_deep_sell_analysis(db: Session):
                     item.analysis = {"decision": "HOLD", "reasoning": f"Analysis unavailable: {e}"}
             else:
                 item.analysis = {"decision": "HOLD", "reasoning": "Research swarm not configured"}
-            
+
             db.commit()
         except Exception as e:
             print(f"Sell analysis error for {item.ticker}: {e}")
@@ -271,16 +155,16 @@ def get_open_positions(db: Session = Depends(get_db)):
             WHERE i.status = 'held'
             ORDER BY i.purchase_date DESC
         """)).fetchall()
-        
+
         result = []
         for p in positions:
             current_price = p.current_market_price or p.current_price or p.buy_price
             quantity = float(p.quantity) if p.quantity else 0
             buy_price = float(p.buy_price) if p.buy_price else 0
-            
+
             unrealized_pnl = (current_price - buy_price) * quantity
             pnl_pct = ((current_price / buy_price) - 1) * 100 if buy_price > 0 else 0
-            
+
             result.append({
                 "id": p.id,
                 "ticker": p.ticker,
@@ -299,7 +183,7 @@ def get_open_positions(db: Session = Depends(get_db)):
                 "analysis": p.analysis,
                 "status": p.status
             })
-        
+
         return {
             "positions": result,
             "summary": {
@@ -318,7 +202,7 @@ def get_execution_status():
     """Get IBKR execution connectivity status"""
     from app.services.ib_service import ib_quant_service
     from app.services.ib_web_service import ib_web_service
-    
+
     return {
         "tws_api": {
             "connected": ib_quant_service.is_connected,
@@ -343,7 +227,7 @@ async def run_strategy_backtest(
 ):
     """
     Run a backtest for a strategy
-    
+
     Payload: {
         "start_date": "2024-01-01",
         "end_date": "2024-12-31",
@@ -353,12 +237,12 @@ async def run_strategy_backtest(
     """
     try:
         from app.services.backtest_engine import backtest_engine
-        
+
         # Check if strategy exists
         strategy = db.query(QuantStrategy).filter(QuantStrategy.id == strategy_id).first()
         if not strategy:
             raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-        
+
         # Queue backtest in background
         bg.add_task(
             backtest_engine.run_backtest,
@@ -368,14 +252,14 @@ async def run_strategy_backtest(
             initial_capital=payload.get("initial_capital", 10000),
             commission_rate=payload.get("commission_rate", 0.001)
         )
-        
+
         return {
             "status": "queued",
             "strategy_id": strategy_id,
             "strategy_name": strategy.name,
             "message": "Backtest started in background. Check status in a few minutes."
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -403,10 +287,10 @@ def get_backtest_vs_live(strategy_id: int, db: Session = Depends(get_db)):
     try:
         from app.services.backtest_engine import backtest_engine
         comparison = backtest_engine.compare_backtest_vs_live(strategy_id)
-        
+
         if "error" in comparison:
             raise HTTPException(status_code=404, detail=comparison["error"])
-        
+
         return comparison
     except HTTPException:
         raise
@@ -471,7 +355,7 @@ def get_full_portfolio_dashboard(db: Session = Depends(get_db)):
     """Get complete portfolio dashboard in one call"""
     try:
         from app.services.portfolio_risk import portfolio_risk_manager
-        
+
         return {
             "summary": portfolio_risk_manager.get_portfolio_summary(),
             "correlations": portfolio_risk_manager.get_correlation_matrix(),
@@ -490,7 +374,7 @@ async def api_trigger_sell_analysis(bg: BackgroundTasks, db: Session = Depends(g
 async def api_analyze_single(ticker: str, bg: BackgroundTasks, db: Session = Depends(get_db)):
     item = db.query(Inventory).filter(Inventory.ticker == ticker).first()
     if not item: raise HTTPException(status_code=404, detail="Asset not found")
-    bg.add_task(run_deep_sell_analysis, db) 
+    bg.add_task(run_deep_sell_analysis, db)
     return {"status": "Analysis Queued"}
 
 class InventoryAdd(BaseModel):
@@ -506,7 +390,7 @@ def get_macro_pulse(db: Session = Depends(get_db)):
         SELECT region, index_name, current_value, change_pct, trend, sentiment_score
         FROM consumption.Dashboard_Market_Overview
     """)).fetchall()
-    
+
     pulse_data = {}
     for row in result:
         pulse_data[row.region] = {
@@ -516,10 +400,10 @@ def get_macro_pulse(db: Session = Depends(get_db)):
             "rationale": f"Market trend: {row.trend}",
             "estimates": {"1d": "---", "1w": "---", "1m": "---"}
         }
-    
+
     # Get risk from system config
     risk = db.execute(text("SELECT value FROM gold.system_config WHERE component='risk_mgmt' AND key='max_portfolio_risk_daily'")).fetchone()
-    
+
     return {
         "indices": pulse_data,
         "system_risk": "LOW" if not risk else ("HIGH" if float(risk.value) > 5 else "LOW"),
@@ -531,10 +415,10 @@ def get_signals(db: Session = Depends(get_db)):
     """Get trading signals from consumption views with live price updates"""
     import yfinance as yf
     from datetime import datetime
-    
+
     # Get signals from consumption
     signals_result = db.execute(text("""
-        SELECT 
+        SELECT
             s.strategy_id, s.ticker, s.signal as action, s.signal_strength as total_conf,
             s.confidence_score, s.entry_price, s.current_price, s.stop_loss, s.take_profit,
             s.win_rate, s.updated_at as timestamp, m.market, m.change_pct as daily_change
@@ -544,11 +428,11 @@ def get_signals(db: Session = Depends(get_db)):
         ORDER BY s.confidence_score DESC
         LIMIT 20
     """)).fetchall()
-    
+
     res = []
     for s in signals_result:
         ticker_symbol = s.ticker
-        
+
         # Try to get live price from yfinance
         live_price = None
         live_change = None
@@ -559,23 +443,23 @@ def get_signals(db: Session = Depends(get_db)):
                 yf_ticker = ticker_symbol  # Already in correct format
             elif ticker_symbol in ['BTC-USD', 'ETH-USD', 'SOL-USD']:
                 yf_ticker = ticker_symbol  # Crypto
-            
+
             ticker = yf.Ticker(yf_ticker)
             info = ticker.info
-            
+
             # Get current price
             live_price = info.get('currentPrice') or info.get('regularMarketPrice') or s.current_price or s.entry_price
-            
+
             # Get change percentage
             live_change = info.get('regularMarketChangePercent') or s.daily_change
             if live_change and isinstance(live_change, (int, float)):
                 live_change = round(live_change, 2)
-            
+
         except Exception as e:
             # Fallback to database price
             live_price = s.current_price or s.entry_price
             live_change = s.daily_change
-        
+
         res.append({
             "ticker": s.ticker,
             "market": s.market or "US",
@@ -599,7 +483,7 @@ def get_signals(db: Session = Depends(get_db)):
             "rec_score": s.confidence_score,
             "candlestick_pattern": None
         })
-    
+
     return res
 
 @app.get("/api/fx/pairs")
@@ -654,17 +538,17 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
     Priority: IBKR (live) > Yahoo Finance (delayed)
     IBKR for: Stocks, FX, Commodities (futures), ETFs
     Yahoo for: Crypto (BTC, ETH, SOL)
-    
+
     Returns: price, change, changePercent for each ticker with source attribution
     """
     import yfinance as yf
-    
+
     if not tickers:
         return {"success": True, "data": [], "ibkr_connected": False}
-    
+
     ticker_list = tickers.split(',')
     results = []
-    
+
     # Check if IBKR is connected
     ib_connected = False
     try:
@@ -672,33 +556,33 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
         ib_connected = ib_quant_service.is_connected
     except Exception as e:
         logger.warning(f"Could not check IBKR status: {e}")
-    
+
     # Define which assets use which source
     YAHOO_ONLY_ASSETS = {'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'LINK'}
-    
+
     for ticker in ticker_list:
         ticker = ticker.strip().upper()
         if not ticker:
             continue
-        
+
         original_ticker = ticker
         price = None
         source = "unknown"
         is_crypto = ticker in YAHOO_ONLY_ASSETS or ticker.replace('-USD', '') in YAHOO_ONLY_ASSETS
-        
+
         # Crypto always uses Yahoo (IBKR doesn't have crypto)
         if is_crypto:
             try:
                 yf_ticker = ticker if '-USD' in ticker else f"{ticker}-USD"
                 t = yf.Ticker(yf_ticker)
                 df = t.history(period="2d")
-                
+
                 if not df.empty:
                     price = df['Close'].iloc[-1]
                     source = "yfinance"
             except Exception as e:
                 logger.warning(f"Yahoo Finance price fetch failed for {ticker}: {e}")
-        
+
         # For non-crypto, try IBKR first if connected
         elif ib_connected:
             try:
@@ -709,7 +593,7 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
                     source = "ibkr"
             except Exception as e:
                 logger.warning(f"IBKR price fetch failed for {ticker}: {e}")
-        
+
         # Fallback to Yahoo for non-crypto if IBKR failed or not connected
         if price is None and not is_crypto:
             try:
@@ -717,16 +601,16 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
                 # Handle HK stocks
                 if ticker.endswith('.HK'):
                     yf_ticker = ticker
-                
+
                 t = yf.Ticker(yf_ticker)
                 df = t.history(period="2d")
-                
+
                 if not df.empty:
                     price = df['Close'].iloc[-1]
                     source = "yfinance"
             except Exception as e:
                 logger.warning(f"Yahoo Finance price fetch failed for {ticker}: {e}")
-        
+
         # Format the response
         if price is not None:
             try:
@@ -755,9 +639,9 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
                         change = 0
                         change_percent = 0
                         volume = 0
-                    
+
                     timestamp = datetime.now().isoformat()
-                
+
                 results.append({
                     "ticker": original_ticker,
                     "price": round(price, 2),
@@ -785,7 +669,7 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
                 "changePercent": 0,
                 "error": "No price data available from IBKR or Yahoo Finance"
             })
-    
+
     return {
         "success": True,
         "data": results,
@@ -807,7 +691,7 @@ def get_data_sources_breakdown(db: Session = Depends(get_db)):
         ibkr_connected = ib_quant_service.is_connected
     except:
         pass
-    
+
     # Define data source mapping
     data_sources = [
         # Market Data - Real-time
@@ -941,18 +825,18 @@ def get_data_sources_breakdown(db: Session = Depends(get_db)):
             "assets": "All strategies"
         },
     ]
-    
+
     # Count by source
     source_counts = {}
     for ds in data_sources:
         src = ds["primary_source"]
         source_counts[src] = source_counts.get(src, 0) + 1
-    
+
     return {
         "ibkr_connected": ibkr_connected,
-        "ibkr_host": "52.74.14.181",
-        "ibkr_port": 4002,
-        "ibkr_mode": "Paper Trading",
+        "ibkr_host": ib_quant_service.host,
+        "ibkr_port": ib_quant_service.port,
+        "ibkr_mode": "Paper Trading" if ib_quant_service.port == 4002 else "Live Trading",
         "data_sources": data_sources,
         "summary": {
             "total_feeds": len(data_sources),
@@ -982,7 +866,7 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
         # Query indices from unified_prices
         indices = ['^GSPC', '^DJI', '^IXIC', '^RUT', '^VIX', '^HSI', '^N225', '^FTSE']
         result = []
-        
+
         for idx in indices:
             try:
                 # Get latest price
@@ -994,17 +878,17 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
                     ORDER BY date DESC
                     LIMIT 1
                 """), {"ticker": idx}).fetchone()
-                
+
                 if row and row.close:
                     change = row.close - (row.prev_close or row.close)
                     change_pct = (change / (row.prev_close or row.close)) * 100 if row.prev_close else 0
-                    
+
                     name_map = {
                         '^GSPC': 'S&P 500', '^DJI': 'Dow Jones', '^IXIC': 'Nasdaq',
                         '^RUT': 'Russell 2000', '^VIX': 'VIX', '^HSI': 'Hang Seng',
                         '^N225': 'Nikkei 225', '^FTSE': 'FTSE 100'
                     }
-                    
+
                     result.append({
                         "symbol": idx,
                         "name": name_map.get(idx, idx),
@@ -1015,7 +899,7 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
                     })
             except Exception as e:
                 logger.warning(f"Error fetching {idx}: {e}")
-        
+
         return {"data": result}
     except Exception as e:
         logger.error(f"Error in market indices: {e}")
@@ -1028,7 +912,7 @@ def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
         # Try to get from database first
         rows = db.execute(text("""
             WITH price_changes AS (
-                SELECT 
+                SELECT
                     ticker,
                     close,
                     date,
@@ -1038,24 +922,24 @@ def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
                 WHERE date >= CURRENT_DATE - INTERVAL '5 days'
             )
             SELECT ticker, close, prev_close,
-                   CASE WHEN prev_close > 0 AND prev_close IS NOT NULL 
-                        THEN ((close - prev_close) / prev_close * 100) 
-                        ELSE 0 
+                   CASE WHEN prev_close > 0 AND prev_close IS NOT NULL
+                        THEN ((close - prev_close) / prev_close * 100)
+                        ELSE 0
                    END as change_pct
             FROM price_changes
             WHERE rn = 1 AND prev_close IS NOT NULL
             ORDER BY change_pct DESC
         """)).fetchall()
-        
+
         # If no data in DB, fetch from Yahoo Finance
         if not rows:
             logger.info("No movers data in DB, fetching from Yahoo Finance...")
             import yfinance as yf
-            
+
             # Get some major tickers to check
             tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC', 'NFLX',
                       '0700.HK', '9988.HK', '3690.HK', '0005.HK', '1299.HK']
-            
+
             movers_data = []
             for ticker in tickers:
                 try:
@@ -1074,18 +958,18 @@ def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
                             })
                 except Exception as e:
                     continue
-            
+
             # Sort for gainers and losers
             sorted_stocks = sorted(movers_data, key=lambda x: x["change_percent"], reverse=True)
             gainers = sorted_stocks[:5]
             losers = sorted_stocks[-5:][::-1]
-            
+
             return {
                 "gainers": gainers,
                 "losers": losers,
                 "source": "yahoo"
             }
-        
+
         # Group by ticker and get latest
         ticker_changes = {}
         for row in rows:
@@ -1096,13 +980,13 @@ def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
                     "change_percent": float(row.change_pct),
                     "name": row.ticker
                 }
-        
+
         # Sort for gainers and losers
         sorted_stocks = sorted(ticker_changes.values(), key=lambda x: x["change_percent"], reverse=True)
-        
+
         gainers = sorted_stocks[:10]
         losers = sorted_stocks[-10:][::-1]
-        
+
         return {
             "gainers": gainers,
             "losers": losers,
@@ -1116,7 +1000,7 @@ def get_market_movers(timeframe: str = "1D", db: Session = Depends(get_db)):
 def get_market_sectors(db: Session = Depends(get_db)):
     """Get sector performance from sector ETFs"""
     # Policy: No mock data - return empty/null if real data unavailable
-    
+
     # Sector ETFs to track performance
     sector_etfs = {
         'XLK': {'name': 'Technology', 'icon': '💻'},
@@ -1128,9 +1012,9 @@ def get_market_sectors(db: Session = Depends(get_db)):
         'XLB': {'name': 'Materials', 'icon': '🏗️'},
         'XLU': {'name': 'Utilities', 'icon': '💡'},
     }
-    
+
     sectors = []
-    
+
     try:
         for ticker, info in sector_etfs.items():
             # Get latest price and previous close
@@ -1142,13 +1026,13 @@ def get_market_sectors(db: Session = Depends(get_db)):
                 ORDER BY date DESC
                 LIMIT 1
             """), {"ticker": ticker}).fetchall()
-            
+
             if rows and rows[0].close:
                 latest = rows[0]
                 change_pct = 0
                 if latest.prev_close and latest.prev_close > 0:
                     change_pct = ((float(latest.close) - float(latest.prev_close)) / float(latest.prev_close)) * 100
-                
+
                 sectors.append({
                     "name": info['name'],
                     "ticker": ticker,
@@ -1171,7 +1055,7 @@ def get_market_sectors(db: Session = Depends(get_db)):
         logger.error(f"Error fetching sector data: {e}")
         # Return empty rather than mock data
         return {"data": [], "error": str(e)}
-    
+
     return {"data": sectors}
 
 @app.get("/api/market/volume-leaders")
@@ -1186,7 +1070,7 @@ def get_volume_leaders(db: Session = Depends(get_db)):
             ORDER BY date DESC
             LIMIT 50
         """)).fetchall()
-        
+
         leaders = []
         seen = set()
         for row in rows:
@@ -1201,7 +1085,7 @@ def get_volume_leaders(db: Session = Depends(get_db)):
                         "change_percent": 0.0  # Could calculate
                     })
                     seen.add(row.ticker)
-        
+
         return {"data": leaders[:12]}
     except Exception as e:
         logger.error(f"Error in volume leaders: {e}")
@@ -1212,7 +1096,7 @@ def get_global_markets(db: Session = Depends(get_db)):
     """Get global market indices with real data from database"""
     from datetime import datetime, timedelta
     from fastapi.responses import JSONResponse
-    
+
     # Index mapping: ticker -> display info
     indices = {
         '^GSPC': {'name': 'S&P 500', 'region': 'US', 'flag': '🇺🇸'},
@@ -1224,9 +1108,9 @@ def get_global_markets(db: Session = Depends(get_db)):
         '000001.SS': {'name': 'Shanghai', 'region': 'Asia', 'flag': '🇨🇳'},
         '^AXJO': {'name': 'ASX 200', 'region': 'Asia', 'flag': '🇦🇺'},
     }
-    
+
     markets = []
-    
+
     try:
         for ticker, info in indices.items():
             # Get latest price and previous day close for change calculation
@@ -1237,24 +1121,24 @@ def get_global_markets(db: Session = Depends(get_db)):
                 ORDER BY date DESC
                 LIMIT 2
             """), {"ticker": ticker}).fetchall()
-            
+
             if rows and len(rows) >= 1:
                 latest_close = float(rows[0].close) if rows[0].close else 0
                 latest_date = rows[0].date
-                
+
                 # Calculate change percent from previous day
                 change_percent = 0
                 if len(rows) >= 2 and rows[1].close:
                     prev_close = float(rows[1].close)
                     if prev_close > 0:
                         change_percent = ((latest_close - prev_close) / prev_close) * 100
-                
+
                 # Determine market status based on region and time
                 # This is simplified - in production you'd use actual market hours
                 status = "Closed"
                 now = datetime.utcnow()
                 hour = now.hour
-                
+
                 if info['region'] == 'US':
                     # US markets: 14:30 - 21:00 UTC
                     status = "Open" if 14 <= hour < 21 else "Closed"
@@ -1271,7 +1155,7 @@ def get_global_markets(db: Session = Depends(get_db)):
                         status = "Open" if (0 <= hour < 6) or (7 <= hour < 10) else "Closed"
                     else:
                         status = "Closed"
-                
+
                 markets.append({
                     "name": info['name'],
                     "region": info['region'],
@@ -1298,7 +1182,7 @@ def get_global_markets(db: Session = Depends(get_db)):
         logger.error(f"Error fetching global markets: {e}")
         # Return empty list on error
         return {"data": [], "error": str(e)}
-    
+
     # Return with cache-control headers to prevent browser caching
     return JSONResponse(
         content={"data": markets},
@@ -1322,14 +1206,14 @@ def get_market_breadth(db: Session = Depends(get_db)):
                 FROM silver.unified_prices
                 WHERE date >= CURRENT_DATE - INTERVAL '1 day'
             )
-            SELECT 
+            SELECT
                 SUM(CASE WHEN close > prev_close THEN 1 ELSE 0 END) as advancing,
                 SUM(CASE WHEN close < prev_close THEN 1 ELSE 0 END) as declining,
                 SUM(CASE WHEN close = prev_close THEN 1 ELSE 0 END) as unchanged
             FROM latest_changes
             WHERE prev_close IS NOT NULL
         """)).fetchone()
-        
+
         return {
             "advancing": rows.advancing or 0,
             "declining": rows.declining or 0,
@@ -1360,7 +1244,7 @@ def get_market_sentiment(db: Session = Depends(get_db)):
             ORDER BY date DESC
             LIMIT 1
         """)).fetchone()
-        
+
         # Policy: Return null if no real data available (no mock data)
         if not vix_row or not vix_row.close:
             return {
@@ -1369,9 +1253,9 @@ def get_market_sentiment(db: Session = Depends(get_db)):
                 "putCall": None,
                 "note": "VIX data unavailable"
             }
-        
+
         vix = float(vix_row.close)
-        
+
         # Calculate fear/greed index based on VIX
         # VIX < 15 = Greed, VIX > 30 = Fear
         if vix < 15:
@@ -1384,7 +1268,7 @@ def get_market_sentiment(db: Session = Depends(get_db)):
             fear_greed = 35  # Fear
         else:
             fear_greed = 20  # Extreme Fear
-        
+
         return {
             "fearGreed": fear_greed,
             "vix": vix,
@@ -1480,19 +1364,19 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
     try:
         # Get the position details
         position = db.execute(text("""
-            SELECT id, ticker, strategy_id, quantity, entry_price, 
+            SELECT id, ticker, strategy_id, quantity, entry_price,
                    invested_capital, realized_pnl, unrealized_pnl, trades_count
-            FROM gold.paper_strategies 
+            FROM gold.paper_strategies
             WHERE id = :position_id
         """), {"position_id": position_id}).fetchone()
-        
+
         if not position:
             raise HTTPException(status_code=404, detail="Position not found")
-        
+
         # Get current market price
         ticker = position.ticker
         close_price = None
-        
+
         # Fallback to Yahoo Finance
         if close_price is None:
             import yfinance as yf
@@ -1503,7 +1387,7 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
                 yf_ticker = 'ETH-USD'
             elif ticker == 'SOL':
                 yf_ticker = 'SOL-USD'
-            
+
             t = yf.Ticker(yf_ticker)
             df = t.history(period="1d")
             if not df.empty:
@@ -1511,15 +1395,15 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
                 # Handle crypto micro-units
                 if ticker in ['BTC', 'ETH', 'SOL']:
                     close_price = close_price / 1000
-        
+
         if close_price is None:
             raise HTTPException(status_code=500, detail="Could not fetch current market price")
-        
+
         # Calculate final P&L
         entry_price = position.entry_price or 0
         invested = position.invested_capital or 0
         quantity = position.quantity or 0
-        
+
         if entry_price > 0 and invested > 0:
             shares = invested / entry_price
             exit_value = shares * close_price
@@ -1528,11 +1412,11 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
         else:
             trade_pnl = 0
             pnl_pct = 0
-        
+
         # Record the trade execution
         db.execute(text("""
-            INSERT INTO gold.trade_executions 
-            (strategy_id, ticker, side, quantity, entry_price, exit_price, 
+            INSERT INTO gold.trade_executions
+            (strategy_id, ticker, side, quantity, entry_price, exit_price,
              pnl, pnl_pct, status, executed_at, execution_mode)
             VALUES (:strategy_id, :ticker, 'SELL', :quantity, :entry_price, :exit_price,
                     :pnl, :pnl_pct, 'CLOSED', NOW(), 'PAPER_TRADING')
@@ -1545,10 +1429,10 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
             "pnl": trade_pnl,
             "pnl_pct": pnl_pct
         })
-        
+
         # Update the paper strategy position
         db.execute(text("""
-            UPDATE gold.paper_strategies 
+            UPDATE gold.paper_strategies
             SET realized_pnl = COALESCE(realized_pnl, 0) + :trade_pnl,
                 unrealized_pnl = 0,
                 invested_capital = 0,
@@ -1561,9 +1445,9 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
             "trade_pnl": trade_pnl,
             "close_price": close_price
         })
-        
+
         db.commit()
-        
+
         return {
             "status": "success",
             "position_id": position_id,
@@ -1573,7 +1457,7 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
             "pnl_pct": round(pnl_pct, 2),
             "message": f"Closed {ticker} at ${close_price:.2f} with P&L ${trade_pnl:.2f} ({pnl_pct:+.2f}%)"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1590,7 +1474,7 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     try:
         # Get positions from consumption view
         result = db.execute(text("""
-            SELECT 
+            SELECT
                 position_id as id,
                 ticker,
                 name as strategy_name,
@@ -1608,7 +1492,7 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
             WHERE quantity > 0
             ORDER BY market_value DESC
         """)).fetchall()
-        
+
         positions = []
         for r in result:
             positions.append({
@@ -1625,11 +1509,11 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
                 "pnl_pct": float(r.pnl_pct or 0),
                 "days_held": r.days_held
             })
-        
+
         # Calculate totals
         total_value = sum(p["market_value"] for p in positions)
         total_pnl = sum(p["pnl"] for p in positions)
-        
+
         return {
             "positions": positions,
             "total_positions": len(positions),
@@ -1637,7 +1521,7 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
             "total_pnl": total_pnl,
             "active_positions": len([p for p in positions if p["quantity"] > 0])
         }
-        
+
     except Exception as e:
         logger.error(f"Error fetching portfolio positions: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch positions: {str(e)}")
@@ -1645,7 +1529,8 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
 # --- MAINTENANCE & REFRESH APIS (5 DOMAINS) ---
 @app.post("/api/maintenance/refresh/indices")
 async def api_refresh_indices(bg: BackgroundTasks):
-    bg.add_task(refresh_indices_and_mood); return {"status": "Syncing"}
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
 
 @app.get("/api/maintenance/status/indices")
 async def api_status_indices(db: Session = Depends(get_db)):
@@ -1654,7 +1539,8 @@ async def api_status_indices(db: Session = Depends(get_db)):
 
 @app.post("/api/maintenance/refresh/fx")
 async def api_refresh_fx(bg: BackgroundTasks):
-    bg.add_task(refresh_fx_layer); return {"status": "Syncing"}
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
 
 @app.get("/api/maintenance/status/fx")
 async def api_status_fx(db: Session = Depends(get_db)):
@@ -1682,24 +1568,24 @@ async def api_fx_bars_latest(ticker: str = None, limit: int = 12, db: Session = 
     try:
         if ticker:
             bars = db.execute(text("""
-                SELECT bucket, ticker, open, high, low, close, 
+                SELECT bucket, ticker, open, high, low, close,
                        bid_close, ask_close, spread_avg_bps, tick_count
-                FROM gold.fx_bars_5s 
-                WHERE ticker = :ticker 
-                ORDER BY bucket DESC 
+                FROM gold.fx_bars_5s
+                WHERE ticker = :ticker
+                ORDER BY bucket DESC
                 LIMIT :limit
             """), {"ticker": ticker, "limit": limit}).fetchall()
         else:
             # Get latest bar for each major pair
             bars = db.execute(text("""
-                SELECT DISTINCT ON (ticker) 
+                SELECT DISTINCT ON (ticker)
                     bucket, ticker, open, high, low, close,
                     bid_close, ask_close, spread_avg_bps, tick_count
-                FROM gold.fx_bars_5s 
+                FROM gold.fx_bars_5s
                 WHERE ticker IN ('EURUSD', 'USDJPY', 'GBPUSD')
                 ORDER BY ticker, bucket DESC
             """)).fetchall()
-        
+
         return [{
             "bucket": b.bucket.isoformat() if b.bucket else None,
             "ticker": b.ticker,
@@ -1725,7 +1611,7 @@ async def api_fx_streaming_alerts(limit: int = 10, db: Session = Depends(get_db)
             ORDER BY timestamp DESC
             LIMIT :limit
         """), {"limit": limit}).fetchall()
-        
+
         return [{
             "timestamp": a.timestamp.isoformat() if a.timestamp else None,
             "ticker": a.ticker,
@@ -1779,7 +1665,8 @@ async def api_ib_web_status():
 
 @app.post("/api/maintenance/refresh/commodities")
 async def api_refresh_commodities(bg: BackgroundTasks):
-    bg.add_task(refresh_commodity_layer); return {"status": "Syncing"}
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
 
 @app.get("/api/maintenance/status/commodities")
 async def api_status_commodities(db: Session = Depends(get_db)):
@@ -1788,7 +1675,8 @@ async def api_status_commodities(db: Session = Depends(get_db)):
 
 @app.post("/api/maintenance/refresh/crypto")
 async def api_refresh_crypto(bg: BackgroundTasks):
-    bg.add_task(refresh_crypto_layer); return {"status": "Syncing"}
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
 
 @app.get("/api/maintenance/status/crypto")
 async def api_status_crypto(db: Session = Depends(get_db)):
@@ -1797,25 +1685,14 @@ async def api_status_crypto(db: Session = Depends(get_db)):
 
 @app.post("/api/maintenance/refresh/stocks")
 async def api_refresh_stocks(bg: BackgroundTasks):
-    bg.add_task(refresh_stock_layer); return {"status": "Syncing"}
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
 
 @app.post("/api/maintenance/refresh/stocks/daily")
 async def api_refresh_stocks_daily(bg: BackgroundTasks):
-    """Trigger daily stock data refresh for all 400+ tickers via cron pipeline"""
-    import subprocess
-    def run_daily_refresh():
-        try:
-            result = subprocess.run(
-                ["python3", "/home/ubuntu/.openclaw/workspace/jtcml_trading/daily_stock_refresh.py"],
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
-            return {"status": "success" if result.returncode == 0 else "error", 
-                    "output": result.stdout, "error": result.stderr}
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
-    
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
+
     bg.add_task(run_daily_refresh)
     return {"status": "Daily stock refresh triggered", "tickers": 400}
 
@@ -1827,27 +1704,28 @@ async def api_status_stocks(db: Session = Depends(get_db)):
 @app.get("/api/velocity/trades")
 def get_velocity_trades(db: Session = Depends(get_db)):
     result = db.execute(text("""
-        SELECT trade_id, ticker, side, entry_date, entry_price, entry_quantity as quantity,
-               exit_date, exit_price, realized_pnl as pnl, realized_pnl_pct as pnl_pct,
-               strategy_id, holding_days, exit_reason
-        FROM consumption.Performance_Trades_History ORDER BY created_at DESC LIMIT 100
+        SELECT id as trade_id, ticker, side, executed_at as entry_date,
+               price as entry_price, quantity,
+               pnl
+        FROM gold.trade_executions ORDER BY executed_at DESC LIMIT 100
     """)).fetchall()
     return [{"id": r.trade_id, "ticker": r.ticker, "side": r.side,
              "entry_price": float(r.entry_price or 0), "pnl": float(r.pnl or 0),
-             "strategy": r.strategy_id, "holding_period": r.holding_days} for r in result]
+             "strategy": None, "holding_period": 0} for r in result]
 
 @app.get("/api/velocity/summary")
 def get_velocity_summary(db: Session = Depends(get_db)):
-    trades = db.execute(text("SELECT COUNT(*) as cnt FROM consumption.Performance_Trades_History")).fetchone()
+    trades = db.execute(text("SELECT COUNT(*) as cnt FROM gold.trade_executions")).fetchone()
     summary = db.execute(text("""
-        SELECT total_value, total_pnl, win_rate, sharpe_ratio
-        FROM consumption.Performance_Portfolio_Summary WHERE portfolio_type = 'PAPER'
+        SELECT
+            COALESCE(SUM(realized_pnl) + SUM(unrealized_pnl), 0) as total_pnl
+        FROM gold.paper_strategies WHERE status = 'ACTIVE'
     """)).fetchone()
     return {"total_trades": trades.cnt if trades else 0,
-            "portfolio_value": float(summary.total_value or 0) if summary else 0,
+            "portfolio_value": 0,
             "total_pnl": float(summary.total_pnl or 0) if summary else 0,
-            "win_rate": float(summary.win_rate or 0) * 100 if summary else 0,
-            "sharpe_ratio": float(summary.sharpe_ratio or 0) if summary else 0,
+            "win_rate": 0,
+            "sharpe_ratio": 0,
             "active_strategies": 8, "status": "active"}
 
 
@@ -1856,13 +1734,13 @@ def get_all_stocks(db: Session = Depends(get_db)):
     """Get all stock data from consumption layer"""
     try:
         stocks = db.execute(text("""
-            SELECT ticker, name, sector, market, price, change_pct as daily_change, 
+            SELECT ticker, name, sector, market, price, change_pct as daily_change,
                    volume, trend, rsi_14, top_strategy_score as final_score,
                    signal as action, signal_strength as confidence, pe_ratio, market_cap
-            FROM consumption.Markets_Stocks_Overview 
+            FROM consumption.Markets_Stocks_Overview
             ORDER BY top_strategy_score DESC NULLS LAST
         """)).fetchall()
-        
+
         result = []
         for s in stocks:
             result.append({
@@ -1884,7 +1762,7 @@ def get_all_stocks(db: Session = Depends(get_db)):
                 "pe": float(s.pe_ratio or 0) if s.pe_ratio else None,
                 "market_cap": s.market_cap
             })
-        
+
         return result
     except Exception as e:
         print(f"Error fetching stocks: {e}")
@@ -1896,54 +1774,54 @@ def get_stock_detail(ticker: str, timeframe: str = "ytd", db: Session = Depends(
     try:
         # Check if ticker exists in asset_registry
         asset = db.execute(text("""
-            SELECT ticker, name, asset_class, market 
-            FROM gold.asset_registry 
+            SELECT ticker, name, asset_class, market
+            FROM gold.asset_registry
             WHERE ticker = :ticker AND is_active = TRUE
         """), {"ticker": ticker.upper()}).fetchone()
-        
+
         if not asset:
             # Try to fetch from yfinance anyway (for non-registered tickers)
             pass
-        
+
         # Fetch historical data based on timeframe
         import yfinance as yf
         import pandas_ta as ta
         from datetime import datetime, timedelta
-        
+
         t = yf.Ticker(ticker.upper())
         info = t.info
-        
+
         # Map timeframe to period
         period_map = {
             "1m": "1mo",
-            "ytd": "ytd", 
+            "ytd": "ytd",
             "12m": "1y",
             "all": "5y"
         }
         yf_period = period_map.get(timeframe, "ytd")
-        
+
         import pandas as pd
-        
+
         try:
             df = t.history(period=yf_period)
             if df.empty:
                 df = t.history(period="1y")  # fallback
         except:
             df = t.history(period="1y")
-        
+
         if df.empty:
             raise HTTPException(status_code=404, detail=f"No price data available for {ticker}")
-        
+
         # Calculate technical indicators
         if not df.empty:
             # SMA lines
             df['SMA_20'] = ta.sma(df['Close'], length=20)
             df['SMA_50'] = ta.sma(df['Close'], length=50)
             df['SMA_200'] = ta.sma(df['Close'], length=200)
-            
+
             # RSI
             df['RSI'] = ta.rsi(df['Close'], length=14)
-            
+
             # Prepare chart data
             chart_data = []
             for idx, row in df.iterrows():
@@ -1959,11 +1837,11 @@ def get_stock_detail(ticker: str, timeframe: str = "ytd", db: Session = Depends(
                     "sma_200": round(float(row['SMA_200']), 2) if pd.notna(row['SMA_200']) else None,
                     "rsi": round(float(row['RSI']), 1) if pd.notna(row['RSI']) else None
                 })
-            
+
             # Current indicator values
             latest = df.iloc[-1]
             current_rsi = round(float(latest['RSI']), 1) if pd.notna(latest['RSI']) else None
-            
+
             # SMA trend signals
             sma_signal = "NEUTRAL"
             if pd.notna(latest['SMA_20']) and pd.notna(latest['SMA_50']):
@@ -1975,7 +1853,7 @@ def get_stock_detail(ticker: str, timeframe: str = "ytd", db: Session = Depends(
             chart_data = []
             current_rsi = None
             sma_signal = "UNKNOWN"
-        
+
         # Calculate YTD
         ytd = None
         try:
@@ -1988,7 +1866,7 @@ def get_stock_detail(ticker: str, timeframe: str = "ytd", db: Session = Depends(
                 ytd = round(((latest_price - year_start_price) / year_start_price) * 100, 2)
         except:
             ytd = info.get('regularMarketChangePercent', 0) * 100 if info else None
-        
+
         # Get 52 week high/low
         try:
             ytd_high = info.get('fiftyTwoWeekHigh')
@@ -2002,7 +1880,7 @@ def get_stock_detail(ticker: str, timeframe: str = "ytd", db: Session = Depends(
             current_price = float(latest['Close'])
             daily_change = None
             company_name = ticker.upper()
-        
+
         return {
             "ticker": ticker.upper(),
             "market": asset.market if asset else "US",
@@ -2053,10 +1931,10 @@ def get_all_crypto(db: Session = Depends(get_db)):
     """Get all crypto data from consumption layer"""
     try:
         cryptos = db.execute(text("""
-            SELECT * FROM consumption.crypto 
+            SELECT * FROM consumption.crypto
             ORDER BY total_confidence DESC
         """)).fetchall()
-        
+
         return [{
             "ticker": c.ticker,
             "asset": c.asset_name,
@@ -2219,7 +2097,7 @@ def get_strategy_daily_pnl_api(
     db: Session = Depends(get_db)
 ):
     """Get daily P&L breakdown for a specific strategy
-    
+
     Query params:
     - start_date: YYYY-MM-DD (optional)
     - end_date: YYYY-MM-DD (optional)
@@ -2243,18 +2121,18 @@ def get_strategy_detail(strategy_id: int, db: Session = Depends(get_db)):
     strategy = db.query(QuantStrategy).filter(QuantStrategy.id == strategy_id).first()
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     # Get daily P&L
     daily_pnl = strategy_manager.get_strategy_daily_pnl(strategy_id)
-    
+
     # Get backtest summary
     backtest = strategy_manager.get_strategy_backtest_summary(strategy_id)
-    
+
     # Get recent trades
     trades = db.query(Trade).filter(
         Trade.strategy.like(f"{strategy.name}%")
     ).order_by(Trade.timestamp.desc()).limit(50).all()
-    
+
     return {
         "strategy": {
             "id": strategy.id,
@@ -2328,14 +2206,14 @@ async def api_execute_trade(trade: TradeRequest, db: Session = Depends(get_db)):
     """
     # 1. Execute via IB Web Service
     result = ib_web_service.execute_order(trade.account_id, trade.ticker, trade.action, trade.quantity)
-    
+
     if result['status'] == 'success':
         # 2. Record the trade in the audit log
         try:
             # Try to get the latest price for auditing
             t_yf = yf.Ticker(trade.ticker); df = t_yf.history(period="1d")
             price = df['Close'].iloc[-1] if not df.empty else 0
-            
+
             new_trade = Trade(
                 ticker=trade.ticker, side=trade.action, price=price,
                 quantity=trade.quantity, total_value=price * trade.quantity,
@@ -2364,17 +2242,17 @@ def get_hft_matrix(db: Session = Depends(get_db)):
 @app.get("/api/performance/strategy")
 def get_strategy_performance(db: Session = Depends(get_db)):
     """Get strategy performance with both backtest and actual win rates + CURRENT SIGNAL
-    
+
     Only returns strategies for the current execution mode (SIMULATION/PAPER_TRADING/LIVE_TRADING)
     """
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
-    
+
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     # Map execution mode to portfolio_type
     portfolio_type_map = {
         'SIMULATION': 'SIMULATION',
@@ -2382,17 +2260,17 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         'LIVE_TRADING': 'LIVE'
     }
     portfolio_type = portfolio_type_map.get(current_mode, 'SIMULATION')
-    
+
     # Get strategy attribution for CURRENT MODE ONLY
     attribution = db.execute(text("""
         SELECT strategy_id, strategy_name, allocated_capital_pct as allocation,
                contribution_pct as contribution, return_pct as returns, num_trades,
                win_rate, sharpe_ratio
         FROM consumption.Performance_Strategy_Attribution
-        WHERE portfolio_type = :portfolio_type 
+        WHERE portfolio_type = :portfolio_type
         ORDER BY return_pct DESC
     """), {"portfolio_type": portfolio_type}).fetchall()
-    
+
     # If no data for current mode, return empty (not historical data from other modes)
     if not attribution:
         return {
@@ -2407,7 +2285,7 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             "execution_mode": current_mode,
             "note": f"No strategies deployed in {current_mode} mode"
         }
-    
+
     # Get backtest win rates
     backtests = db.execute(text("""
         SELECT strategy_id, AVG(win_rate) as backtest_win_rate,
@@ -2419,17 +2297,17 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         FROM consumption.Strategies_Backtest_Results
         GROUP BY strategy_id
     """)).fetchall()
-    
-    # Get actual/live win rates from trade history (all closed trades)
+
+    # Get actual/live win rates from trade history (using paper_strategies)
     live_stats = db.execute(text("""
         SELECT strategy_id,
                COUNT(*) as total_trades,
                SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades
-        FROM consumption.Performance_Trades_History
-        WHERE exit_date IS NOT NULL
+        FROM gold.paper_strategies
+        WHERE status = 'ACTIVE'
         GROUP BY strategy_id
     """)).fetchall()
-    
+
     # Get CURRENT SIGNALS - the strongest active signal for each strategy
     current_signals = db.execute(text("""
         SELECT DISTINCT ON (strategy_id)
@@ -2443,24 +2321,24 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         WHERE signal IN ('BUY', 'SELL')
         ORDER BY strategy_id, confidence_score DESC
     """)).fetchall()
-    
+
     # Create lookup dicts
     backtest_data = {b.strategy_id: b for b in backtests}
     live_data = {l.strategy_id: l for l in live_stats}
     signal_data = {s.strategy_id: s for s in current_signals}
-    
+
     # Build response with both metrics
     strategies = []
     for a in attribution:
         bt = backtest_data.get(a.strategy_id)
         live = live_data.get(a.strategy_id)
         sig = signal_data.get(a.strategy_id)
-        
+
         # Calculate live win rate from actual trades
         live_win_rate = None
         if live and live.total_trades > 0:
             live_win_rate = round((live.winning_trades / live.total_trades) * 100, 1)
-        
+
         strategies.append({
             "strategy_id": a.strategy_id,
             "strategy_name": a.strategy_name,
@@ -2485,21 +2363,21 @@ def get_strategy_performance(db: Session = Depends(get_db)):
                 "price": float(sig.current_price or 0) if sig else None
             } if sig else None
         })
-    
+
     # Get monthly returns for CURRENT MODE
     monthly = db.execute(text("""
         SELECT year, month, return_pct
         FROM consumption.Performance_Monthly_Returns
-        WHERE portfolio_type = :portfolio_type 
+        WHERE portfolio_type = :portfolio_type
         ORDER BY year DESC, month DESC LIMIT 12
     """), {"portfolio_type": portfolio_type}).fetchall()
-    
+
     # Get summary for CURRENT MODE
     summary = db.execute(text("""
         SELECT * FROM consumption.Performance_Portfolio_Summary
         WHERE portfolio_type = :portfolio_type
     """), {"portfolio_type": portfolio_type}).fetchone()
-    
+
     return {
         "strategies": strategies,
         "monthly_returns": [{"year": r.year, "month": r.month, "return": float(r.return_pct or 0)} for r in monthly],
@@ -2511,7 +2389,7 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         },
         "execution_mode": current_mode
     }
-    
+
     return {
         "strategies": strategies,
         "monthly_returns": [{"year": r.year, "month": r.month, "return": float(r.return_pct or 0)} for r in monthly],
@@ -2526,23 +2404,23 @@ def get_strategy_performance(db: Session = Depends(get_db)):
 @app.get("/api/performance/daily-pnl")
 def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
     """Get daily P&L - shows actual position entry and exit data"""
-    
-    # Get closed trades (realized P&L)
+
+    # Get closed trades (realized P&L) - using trade_executions
     closed_trades = db.execute(text("""
-        SELECT 
-            DATE(exit_date) as trade_date,
-            SUM(realized_pnl) as day_pnl,
+        SELECT
+            DATE(executed_at) as trade_date,
+            SUM(pnl) as day_pnl,
             COUNT(*) as trade_count
-        FROM consumption.Performance_Trades_History
-        WHERE exit_date IS NOT NULL
-        GROUP BY DATE(exit_date)
+        FROM gold.trade_executions
+        WHERE pnl IS NOT NULL
+        GROUP BY DATE(executed_at)
         ORDER BY trade_date DESC
         LIMIT :days
     """), {"days": days}).fetchall()
-    
+
     # Get open positions by entry date (unrealized P&L)
     open_positions = db.execute(text("""
-        SELECT 
+        SELECT
             DATE(entry_date) as entry_date,
             SUM(unrealized_pnl) as day_pnl,
             COUNT(*) as position_count
@@ -2552,10 +2430,10 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
         ORDER BY entry_date DESC
         LIMIT :days
     """), {"days": days}).fetchall()
-    
+
     # Combine data
     daily_map = {}
-    
+
     # Add closed trades
     for t in closed_trades:
         if t.trade_date:
@@ -2564,7 +2442,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
                 daily_map[date_str] = {"pnl": 0, "trades": 0}
             daily_map[date_str]["pnl"] += float(t.day_pnl or 0)
             daily_map[date_str]["trades"] += t.trade_count
-    
+
     # Add open positions
     for p in open_positions:
         if p.entry_date:
@@ -2573,7 +2451,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
                 daily_map[date_str] = {"pnl": 0, "trades": 0}
             daily_map[date_str]["pnl"] += float(p.day_pnl or 0)
             daily_map[date_str]["trades"] += p.position_count
-    
+
     # If no data at all
     if not daily_map:
         return {
@@ -2584,12 +2462,12 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
                 "message": "No positions recorded yet"
             }
         }
-    
+
     # Build sorted daily data
     sorted_dates = sorted(daily_map.keys())
     daily_data = []
     total_pnl = 0
-    
+
     for date_str in sorted_dates:
         data = daily_map[date_str]
         daily_data.append({
@@ -2598,7 +2476,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
             "trades": data["trades"]
         })
         total_pnl += data["pnl"]
-    
+
     return {
         "daily": daily_data,
         "summary": {
@@ -2612,7 +2490,8 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
 
 @app.post("/api/maintenance/refresh/hft")
 async def api_refresh_hft(bg: BackgroundTasks):
-    bg.add_task(refresh_hft_layer); return {"status": "Syncing"}
+    # DISABLED: Read-only mode - data refresh handled by DE agent
+    return {"status": "Read-only mode - refresh disabled"}
 
 @app.get("/api/maintenance/status/hft")
 async def api_status_hft(db: Session = Depends(get_db)):
@@ -2633,28 +2512,28 @@ def get_alert_status():
 def configure_alerts(config: dict):
     """
     Configure Telegram alerts
-    
+
     Body: {
         "bot_token": "123456:ABC-DEF...",
         "chat_id": "-5001038390"
     }
     """
     from app.services.telegram_alerts import telegram_alerts
-    
+
     bot_token = config.get("bot_token")
     chat_id = config.get("chat_id")
-    
+
     if not bot_token or not chat_id:
         raise HTTPException(status_code=400, detail="bot_token and chat_id required")
-    
+
     success = telegram_alerts.configure(bot_token, chat_id)
-    
+
     if success:
         return {
             "status": "success",
             "message": "Telegram alerts configured successfully",
             "test_message_sent": telegram_alerts.send_custom_alert(
-                "Configuration Test", 
+                "Configuration Test",
                 "✅ Telegram alerts are now configured and working!"
             )
         }
@@ -2666,19 +2545,19 @@ def configure_alerts(config: dict):
 def test_alert(payload: dict):
     """
     Send a test alert
-    
+
     Body: {
         "type": "trade|drawdown|custom",
         "message": "optional custom message"
     }
     """
     from app.services.telegram_alerts import telegram_alerts
-    
+
     if not telegram_alerts.enabled:
         raise HTTPException(status_code=400, detail="Telegram not configured. Use /api/alerts/configure first.")
-    
+
     alert_type = payload.get("type", "custom")
-    
+
     if alert_type == "trade":
         success = telegram_alerts.alert_trade_executed(
             strategy_name="TEST_STRATEGY",
@@ -2701,7 +2580,7 @@ def test_alert(payload: dict):
             message=payload.get("message", "This is a test alert from JT Trading Platform"),
             level="INFO"
         )
-    
+
     return {"status": "sent" if success else "failed"}
 
 
@@ -2709,28 +2588,28 @@ def test_alert(payload: dict):
 def trigger_daily_summary(db: Session = Depends(get_db)):
     """Manually trigger daily summary alert"""
     from app.services.telegram_alerts import telegram_alerts
-    
+
     if not telegram_alerts.enabled:
         raise HTTPException(status_code=400, detail="Telegram not configured")
-    
+
     strategies = db.query(QuantStrategy).filter(QuantStrategy.is_active == True).all()
-    
+
     total_pnl = sum(s.current_pnl or 0 for s in strategies)
     total_allocated = sum(s.params.get('allocated_capital', 10000) for s in strategies if s.params)
     total_trades = sum(s.total_trades or 0 for s in strategies)
-    
+
     strategy_list = [{
         "name": s.name,
         "current_pnl": s.current_pnl or 0
     } for s in strategies]
-    
+
     success = telegram_alerts.send_daily_summary(
         strategies=strategy_list,
         total_pnl=total_pnl,
         total_allocated=total_allocated,
         total_trades=total_trades
     )
-    
+
     return {"status": "sent" if success else "failed"}
 
 
@@ -2739,17 +2618,17 @@ def trigger_daily_summary(db: Session = Depends(get_db)):
 @app.get("/api/paper-strategies")
 def get_paper_strategies(db: Session = Depends(get_db)):
     """Get all paper trading strategies with their status - filtered by current execution mode"""
-    
+
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     # Only show positions created in the current mode
     result = db.execute(text("""
-        SELECT 
+        SELECT
             ps.id,
             ps.strategy_id,
             sd.name as strategy_name,
@@ -2770,7 +2649,7 @@ def get_paper_strategies(db: Session = Depends(get_db)):
         WHERE ps.execution_mode = :mode
         ORDER BY ps.created_at DESC
     """), {"mode": current_mode}).fetchall()
-    
+
     strategies = []
     for row in result:
         strategies.append({
@@ -2790,37 +2669,303 @@ def get_paper_strategies(db: Session = Depends(get_db)):
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "execution_mode": row.execution_mode
         })
-    
+
     return {
-        "strategies": strategies, 
+        "strategies": strategies,
         "count": len(strategies),
         "execution_mode": current_mode,
         "message": f"Showing {len(strategies)} positions for {current_mode} mode"
     }
 
 
+@app.delete("/api/paper-strategies/{id}")
+def delete_paper_strategy(id: int, db: Session = Depends(get_db)):
+    """Delete a paper strategy by ID (undeploy)"""
+    try:
+        # Delete the paper strategy
+        result = db.execute(text("""
+            DELETE FROM gold.paper_strategies WHERE id = :id
+        """), {"id": id})
+        
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+        
+        db.commit()
+        return {"success": True, "message": "Strategy undeployed"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting paper strategy {id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/strategies/{strategy_id}/score")
+def get_strategy_score(strategy_id: str, db: Session = Depends(get_db)):
+    """Get dynamic score (0-100) for a strategy based on current signals"""
+    try:
+        # Get strategy from registry
+        strategy = db.query(StrategyRegistry).filter(StrategyRegistry.strategy_id == strategy_id).first()
+        
+        if not strategy:
+            raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+        
+        # Get backtest data for this strategy
+        backtest = db.execute(text("""
+            SELECT win_rate, profit_factor, sharpe_ratio, max_drawdown_pct
+            FROM consumption.Strategies_Backtest_Results
+            WHERE strategy_id = :sid
+            LIMIT 1
+        """), {"sid": strategy_id}).fetchone()
+        
+        # Get recent trade performance
+        trades = db.execute(text("""
+            SELECT 
+                COUNT(*) as total_trades,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
+                AVG(pnl) as avg_pnl,
+                MAX(executed_at) as last_trade
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND executed_at > NOW() - INTERVAL '30 days'
+        """), {"sid": strategy_id}).fetchone()
+        
+        # Calculate dynamic score (0-100)
+        win_rate = float(backtest.win_rate if backtest and backtest.win_rate else (strategy.win_rate / 100 if strategy.win_rate else 0.5))
+        profit_factor = float(backtest.profit_factor if backtest and backtest.profit_factor else 1.5)
+        
+        base_wr = win_rate * 100  # 0-100
+        base_pf = min(3, profit_factor or 1.5) * 10  # 0-30
+        
+        # Live performance adjustment
+        live_score = 50  # neutral
+        if trades and trades.total_trades > 0:
+            live_wr = (trades.winning_trades / trades.total_trades) * 100
+            live_score = min(100, live_wr * 0.8 + 20)
+        
+        # Combine scores
+        final_score = min(100, max(0, int((base_wr * 0.3) + (base_pf * 0.3) + (live_score * 0.4))))
+        
+        # Determine trend
+        trend = "NEUTRAL"
+        if trades and trades.last_trade:
+            days_since = (datetime.datetime.now() - trades.last_trade).days
+            if days_since < 1:
+                trend = "ACTIVE"
+            elif days_since < 3:
+                trend = "WARM"
+            else:
+                trend = "COLD"
+        
+        return {
+            "strategy_id": strategy_id,
+            "score": final_score,
+            "trend": trend,
+            "components": {
+                "backtest_win_rate": round(base_wr, 1),
+                "profit_factor": round(profit_factor or 1.5, 2),
+                "recent_performance": round(live_score, 1)
+            },
+            "last_updated": datetime.datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting score for {strategy_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/strategies/{strategy_id}/signals")
+def get_strategy_signals(strategy_id: str, db: Session = Depends(get_db)):
+    """Get active buy/sell signals for a strategy"""
+    try:
+        # Get strategy from registry
+        strategy = db.query(StrategyRegistry).filter(StrategyRegistry.strategy_id == strategy_id).first()
+        
+        if not strategy:
+            raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+        
+        # Get deployed tickers for this strategy
+        positions = db.execute(text("""
+            SELECT ticker, entry_price, current_price, unrealized_pnl, realized_pnl
+            FROM gold.paper_strategies
+            WHERE strategy_id = :sid AND status = 'ACTIVE'
+        """), {"sid": strategy_id}).fetchall()
+        
+        buy_signals = []
+        sell_signals = []
+        
+        # Parse entry/exit logic from strategy
+        entry_logic = strategy.entry_logic or ""
+        exit_logic = strategy.exit_logic or ""
+        
+        # Generate signals based on position status
+        for pos in positions:
+            ticker = pos.ticker
+            
+            # Check for sell signals first (risk management)
+            if pos.unrealized_pnl and pos.unrealized_pnl < -500:
+                sell_signals.append({
+                    "ticker": ticker,
+                    "signal": "STOP_LOSS",
+                    "criteria": f"Unrealized P&L ${pos.unrealized_pnl:.0f}",
+                    "severity": "HIGH",
+                    "timestamp": datetime.datetime.now().isoformat()
+                })
+            
+            if pos.realized_pnl and pos.realized_pnl > 1000:
+                buy_signals.append({
+                    "ticker": ticker,
+                    "signal": "PROFIT_TAKEN",
+                    "criteria": f"Realized P&L ${pos.realized_pnl:.0f}",
+                    "confidence": 80,
+                    "timestamp": datetime.datetime.now().isoformat()
+                })
+            
+            # Default entry signal for active positions
+            if pos.entry_price:
+                buy_signals.append({
+                    "ticker": ticker,
+                    "signal": "POSITION_ACTIVE",
+                    "criteria": f"Entry @ ${pos.entry_price:.2f}" if pos.entry_price else "Deployed",
+                    "confidence": min(95, 60 + (strategy.win_rate / 100 if strategy.win_rate else 0.5) * 40),
+                    "timestamp": datetime.datetime.now().isoformat()
+                })
+        
+        # Add strategy-level signals from logic
+        if "SMA" in entry_logic.upper():
+            buy_signals.append({
+                "ticker": "ALL",
+                "signal": "GOLDEN_CROSS",
+                "criteria": "SMA 50/200 Bullish",
+                "confidence": 75,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+        
+        if "RSI" in entry_logic.upper():
+            buy_signals.append({
+                "ticker": "ALL", 
+                "signal": "RSI_OVERSOLD",
+                "criteria": "RSI < 30 Entry",
+                "confidence": 70,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+        
+        # Calculate strategy-level signal
+        high_score_count = len([s for s in buy_signals if s.get("confidence", 0) >= 70])
+        total_signals = len(buy_signals) + len(sell_signals)
+        
+        if high_score_count >= 3:
+            strategy_signal = "BUY"
+        elif len(sell_signals) > 0:
+            strategy_signal = "SELL"
+        else:
+            strategy_signal = "HOLD"
+        
+        # Get top tickers by confidence
+        top_tickers = [s["ticker"] for s in sorted(buy_signals, key=lambda x: x.get("confidence", 0), reverse=True)[:5] if s["ticker"] != "ALL"]
+        
+        # Sell candidates
+        sell_candidates = [s["ticker"] for s in sell_signals[:3]]
+        
+        return {
+            "strategy_id": strategy_id,
+            "strategy_level": {
+                "signal": strategy_signal,
+                "trigger": f"{high_score_count} tickers >70 score" if high_score_count > 0 else "No strong signals"
+            },
+            "top_tickers": top_tickers,
+            "sell_candidates": sell_candidates,
+            "buy_signals": buy_signals,
+            "sell_signals": sell_signals,
+            "signal_count": len(buy_signals) + len(sell_signals),
+            "last_updated": datetime.datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting signals for {strategy_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/strategies/{strategy_id}/ticker-scores")
+def get_strategy_ticker_scores(strategy_id: str, db: Session = Depends(get_db)):
+    """Get per-ticker scores and signals from gold.strategy_ticker_scores table"""
+    try:
+        # Query real ticker scores from DE's table
+        rows = db.execute(text("""
+            SELECT ticker, score, criteria_met, signal_action 
+            FROM gold.strategy_ticker_scores 
+            WHERE strategy_id = :sid
+            ORDER BY score DESC
+        """), {"sid": strategy_id}).fetchall()
+        
+        if not rows:
+            # Fallback: return empty if no scores yet
+            return {
+                "strategy_id": strategy_id,
+                "universe_scores": [],
+                "last_updated": datetime.datetime.now().isoformat()
+            }
+        
+        universe_scores = []
+        for row in rows:
+            # Clean ticker name (remove quotes and brackets)
+            ticker_clean = str(row.ticker).replace('[', '').replace(']', '').replace('"', '').replace("'", '').strip()
+            
+            # Parse criteria_met (could be JSON array or comma-separated string)
+            criteria = []
+            if row.criteria_met:
+                try:
+                    import json
+                    criteria = json.loads(row.criteria_met) if isinstance(row.criteria_met, str) and row.criteria_met.startswith('[') else [str(row.criteria_met)]
+                except:
+                    criteria = [str(row.criteria_met)]
+            
+            universe_scores.append({
+                "ticker": ticker_clean,
+                "score": int(row.score) if row.score else 50,
+                "signal": row.signal_action or "HOLD",
+                "criteria": criteria[:3]
+            })
+        
+        return {
+            "strategy_id": strategy_id,
+            "universe_scores": universe_scores,
+            "last_updated": datetime.datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting ticker scores for {strategy_id}: {e}")
+        # Return empty on error rather than crash
+        return {
+            "strategy_id": strategy_id,
+            "universe_scores": [],
+            "error": str(e),
+            "last_updated": datetime.datetime.now().isoformat()
+        }
+
+
 @app.get("/api/paper-strategies/{strategy_id:path}/daily-pnl")
 def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = Depends(get_db)):
     """Get daily P&L breakdown for a paper strategy - shows actual position data"""
     from datetime import datetime, timedelta
-    
+
     # First check: Get closed trades (realized P&L) for this strategy
     closed_trades = db.execute(text("""
-        SELECT 
-            DATE(exit_date) as trade_date,
-            SUM(realized_pnl) as day_realized,
+        SELECT
+            DATE(executed_at) as trade_date,
+            SUM(pnl) as day_realized,
             COUNT(*) as trade_count
-        FROM consumption.Performance_Trades_History
-        WHERE strategy_id = :strategy_id 
-          AND exit_date IS NOT NULL
-        GROUP BY DATE(exit_date)
+        FROM gold.trade_executions
+        WHERE strategy_id = :strategy_id
+          AND pnl IS NOT NULL
+        GROUP BY DATE(executed_at)
         ORDER BY trade_date DESC
         LIMIT :days
     """), {"strategy_id": strategy_id, "days": days}).fetchall()
-    
+
     # Second check: Get open positions by entry date (unrealized P&L)
     open_positions = db.execute(text("""
-        SELECT 
+        SELECT
             DATE(entry_date) as entry_date,
             SUM(unrealized_pnl) as day_unrealized,
             COUNT(*) as position_count
@@ -2831,10 +2976,10 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
         ORDER BY entry_date DESC
         LIMIT :days
     """), {"strategy_id": strategy_id, "days": days}).fetchall()
-    
+
     # Combine data
     daily_map = {}
-    
+
     # Add closed trades
     for t in closed_trades:
         if t.trade_date:
@@ -2843,7 +2988,7 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
                 daily_map[date_str] = {"realized": 0, "unrealized": 0, "trades": 0}
             daily_map[date_str]["realized"] += float(t.day_realized or 0)
             daily_map[date_str]["trades"] += t.trade_count
-    
+
     # Add open positions
     for p in open_positions:
         if p.entry_date:
@@ -2851,7 +2996,7 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
             if date_str not in daily_map:
                 daily_map[date_str] = {"realized": 0, "unrealized": 0, "trades": 0}
             daily_map[date_str]["unrealized"] += float(p.day_unrealized or 0)
-    
+
     # If no data at all, return empty
     if not daily_map:
         return {
@@ -2863,13 +3008,13 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
                 "message": "No positions or trades for this strategy"
             }
         }
-    
+
     # Build sorted daily data
     sorted_dates = sorted(daily_map.keys())
     daily_data = []
     total_realized = 0
     total_unrealized = 0
-    
+
     for date_str in sorted_dates:
         data = daily_map[date_str]
         daily_data.append({
@@ -2881,7 +3026,7 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
         })
         total_realized += data["realized"]
         total_unrealized += data["unrealized"]
-    
+
     return {
         "daily": daily_data,
         "summary": {
@@ -2905,25 +3050,25 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
         action = body.get('action', 'keep')  # 'close' or 'keep'
     except:
         action = 'keep'
-    
+
     # Get all positions for this strategy
     positions = db.execute(text("""
         SELECT id, ticker, invested_capital, status, mode
         FROM gold.paper_strategies
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchall()
-    
+
     if not positions:
         raise HTTPException(status_code=404, detail=f"No positions found for strategy {strategy_id}")
-    
+
     positions_closed = 0
-    
+
     for pos in positions:
         if action == 'close' and pos.invested_capital > 0:
             # Close the position - mark as closed
             db.execute(text("""
                 UPDATE gold.paper_strategies
-                SET 
+                SET
                     status = 'CLOSED',
                     realized_pnl = realized_pnl + unrealized_pnl,
                     unrealized_pnl = 0,
@@ -2933,7 +3078,7 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
                 WHERE id = :id
             """), {"id": pos.id})
             positions_closed += 1
-            
+
             # If IBKR order exists, cancel it
             if pos.status == 'ACTIVE' and pos.mode in ['PAPER_TRADING', 'LIVE_TRADING']:
                 try:
@@ -2949,23 +3094,23 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
             # Just mark as inactive/paused but keep position
             db.execute(text("""
                 UPDATE gold.paper_strategies
-                SET 
+                SET
                     status = 'PAUSED',
                     updated_at = NOW()
                 WHERE id = :id
             """), {"id": pos.id})
-    
+
     # Mark strategy as inactive in strategy_definitions
     db.execute(text("""
         UPDATE gold.strategy_definitions
-        SET 
+        SET
             is_active = FALSE,
             updated_at = NOW()
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id})
-    
+
     db.commit()
-    
+
     return {
         "success": True,
         "strategy_id": strategy_id,
@@ -2979,7 +3124,7 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
 def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
     """Get capital allocation for a strategy"""
     result = db.execute(text("""
-        SELECT 
+        SELECT
             strategy_id,
             name,
             assigned_capital,
@@ -2988,17 +3133,17 @@ def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
         FROM gold.strategy_definitions
         WHERE strategy_id = :strategy_id AND jt_ready = TRUE
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     # Calculate total in-market across all positions
     in_market = db.execute(text("""
-        SELECT COALESCE(SUM(invested_capital), 0) 
-        FROM gold.paper_strategies 
+        SELECT COALESCE(SUM(invested_capital), 0)
+        FROM gold.paper_strategies
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).scalar() or 0
-    
+
     return {
         "strategy_id": result.strategy_id,
         "name": result.name,
@@ -3013,19 +3158,19 @@ def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
 def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     """Update assigned capital for a strategy"""
     assigned_capital = payload.get("assigned_capital")
-    
+
     if assigned_capital is None or assigned_capital < 0:
         raise HTTPException(status_code=400, detail="assigned_capital must be >= 0")
-    
+
     # Check strategy exists
     result = db.execute(text("""
         SELECT strategy_id FROM gold.strategy_definitions
         WHERE strategy_id = :strategy_id AND jt_ready = TRUE
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     # Update assigned capital
     db.execute(text("""
         UPDATE gold.strategy_definitions
@@ -3033,9 +3178,9 @@ def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depen
             updated_at = NOW()
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id, "capital": assigned_capital})
-    
+
     db.commit()
-    
+
     return {
         "success": True,
         "strategy_id": strategy_id,
@@ -3048,28 +3193,28 @@ def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depen
 def can_strategy_buy(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     """Check if strategy can buy (in-market < assigned)"""
     proposed_investment = payload.get("amount", 0)
-    
+
     # Get assigned capital
     result = db.execute(text("""
         SELECT assigned_capital FROM gold.strategy_definitions
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    
+
     assigned = float(result.assigned_capital or 100000)
-    
+
     # Get current in-market
     in_market = db.execute(text("""
-        SELECT COALESCE(SUM(invested_capital), 0) 
-        FROM gold.paper_strategies 
+        SELECT COALESCE(SUM(invested_capital), 0)
+        FROM gold.paper_strategies
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).scalar() or 0
-    
+
     available = assigned - in_market
     can_buy = available >= proposed_investment
-    
+
     return {
         "can_buy": can_buy,
         "assigned_capital": assigned,
@@ -3092,43 +3237,43 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
     Returns mode, capital source, and available balance.
     """
     import time
-    
+
     # Get current mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
-    
+
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     # Get simulation capital config
     sim_capital = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'simulation_capital'
     """)).fetchone()
-    
+
     sim_amount = float(sim_capital.value) if sim_capital else 100000
-    
+
     # Calculate simulation capital usage (only for SIMULATION mode)
     sim_used = 0
     sim_positions = 0
     if current_mode == "SIMULATION":
         sim_stats = db.execute(text("""
-            SELECT 
+            SELECT
                 COALESCE(SUM(capital), 0) as total_allocated,
                 COUNT(*) as position_count
-            FROM gold.paper_strategies 
+            FROM gold.paper_strategies
             WHERE status = 'ACTIVE'
         """)).fetchone()
         sim_used = float(sim_stats.total_allocated) if sim_stats else 0
         sim_positions = int(sim_stats.position_count) if sim_stats else 0
-    
+
     response = {
         "execution_mode": current_mode,
         "available_modes": ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"],
         "risk_level": {
             "SIMULATION": "ZERO",
-            "PAPER_TRADING": "LOW", 
+            "PAPER_TRADING": "LOW",
             "LIVE_TRADING": "HIGH"
         }.get(current_mode, "UNKNOWN"),
         "simulation_capital": sim_amount,
@@ -3136,17 +3281,17 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
         "simulation_available": sim_amount - sim_used,
         "simulation_positions": sim_positions
     }
-    
+
     # Try to get IBKR account balance for paper/live modes (with caching)
     if current_mode in ["PAPER_TRADING", "LIVE_TRADING"]:
         try:
             # Import IBKR service
             from app.services.ib_service import ib_quant_service
-            
+
             # Check cache first (5 minute TTL)
             cache_ttl = 300  # 5 minutes
             now = time.time()
-            
+
             if _ibkr_balance_cache["data"] and _ibkr_balance_cache["timestamp"] and \
                (now - _ibkr_balance_cache["timestamp"]) < cache_ttl:
                 # Use cached data
@@ -3157,14 +3302,14 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                 # Fetch fresh data - just check connection status quickly
                 try:
                     tws_status = ib_quant_service.get_status()
-                    
+
                     if tws_status.get("is_connected"):
                         account_info = ib_quant_service.get_account_summary()
-                        
+
                         if account_info:
                             # Check if this is an HKD account
                             is_hkd = account_info.get("currency") == "HKD" or account_info.get("cash_hkd", 0) > 0
-                            
+
                             if is_hkd:
                                 # Use HKD values for HK accounts
                                 ibkr_data = {
@@ -3193,7 +3338,7 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                                     "account": account_info.get("account", "Unknown"),
                                     "account_type": "PAPER" if current_mode == "PAPER_TRADING" else "LIVE"
                                 }
-                            
+
                             # Update cache
                             _ibkr_balance_cache["data"] = ibkr_data
                             _ibkr_balance_cache["timestamp"] = now
@@ -3214,13 +3359,13 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                     response["account_balance"] = 0
                     response["account_currency"] = "USD"
                     response["warning"] = f"IBKR check failed: {str(ibkr_err)}"
-                
+
         except Exception as e:
             # Don't expose internal errors to frontend for IBKR checks
             response["ibkr_connected"] = False
             response["account_balance"] = 0
             response["account_currency"] = "USD"
-    
+
     return response
 
 
@@ -3232,10 +3377,10 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
     """
     mode = payload.get("execution_mode", "SIMULATION")
     sim_capital = payload.get("simulation_capital")
-    
+
     if mode not in ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"]:
         raise HTTPException(status_code=400, detail="Invalid mode. Use SIMULATION, PAPER_TRADING, or LIVE_TRADING")
-    
+
     # Update mode in database
     db.execute(text("""
         INSERT INTO gold.platform_settings (key, value, updated_at)
@@ -3244,7 +3389,7 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
             value = EXCLUDED.value,
             updated_at = NOW()
     """), {"mode": mode})
-    
+
     # Update simulation capital if provided
     if sim_capital is not None and mode == "SIMULATION":
         db.execute(text("""
@@ -3254,9 +3399,9 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
                 value = EXCLUDED.value,
                 updated_at = NOW()
         """), {"capital": float(sim_capital)})
-    
+
     db.commit()
-    
+
     # Get updated state
     return get_global_execution_mode(db)
 
@@ -3269,34 +3414,34 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     """
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
-    
+
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     symbol = payload.get("symbol", "AAPL")
     action = payload.get("action", "BUY")
     quantity = payload.get("quantity", 1)
     order_type = payload.get("order_type", "MKT")
-    
+
     if current_mode == "SIMULATION":
         # Get current simulation balance
         sim_capital = db.execute(text("""
-            SELECT value FROM gold.platform_settings 
+            SELECT value FROM gold.platform_settings
             WHERE key = 'simulation_capital'
         """)).fetchone()
         sim_amount = float(sim_capital.value) if sim_capital else 100000
-        
+
         # Get current allocated capital
         sim_stats = db.execute(text("""
             SELECT COALESCE(SUM(capital), 0) as total_allocated
-            FROM gold.paper_strategies 
+            FROM gold.paper_strategies
             WHERE status = 'ACTIVE'
         """)).fetchone()
         sim_used = float(sim_stats.total_allocated) if sim_stats else 0
         sim_available = sim_amount - sim_used
-        
+
         return {
             "success": True,
             "simulated": True,
@@ -3309,7 +3454,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
                 "available": sim_available
             }
         }
-    
+
     # Place real order through IBKR
     try:
         order_result = ib_quant_service.place_order(
@@ -3319,7 +3464,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
             order_type=order_type,
             account=None
         )
-        
+
         if order_result and order_result.get("success"):
             return {
                 "success": True,
@@ -3333,10 +3478,10 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
             }
         else:
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail=f"Order failed: {order_result.get('error', 'Unknown error')}"
             )
-    
+
     except Exception as e:
         logger.error(f"Error placing IBKR order: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3348,25 +3493,25 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
     Sync existing paper positions to IBKR by placing real orders.
     This is used when switching from SIMULATION to PAPER_TRADING mode
     to actually submit the orders to IBKR.
-    
+
     Expects: { "max_positions": 10 } (optional, defaults to 5)
     """
     max_positions = payload.get("max_positions", 5)
-    
+
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
-    
+
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     if current_mode == "SIMULATION":
         return {
             "success": False,
             "error": "Cannot sync in SIMULATION mode. Switch to PAPER_TRADING first."
         }
-    
+
     # Check IBKR connection
     try:
         tws_status = ib_quant_service.get_status()
@@ -3380,19 +3525,19 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
             "success": False,
             "error": f"Failed to check IBKR status: {str(e)}"
         }
-    
+
     # Get positions that need IBKR orders
     result = db.execute(text("""
         SELECT id, strategy_id, ticker, capital, entry_price, execution_mode
         FROM gold.paper_strategies
-        WHERE status = 'ACTIVE' 
+        WHERE status = 'ACTIVE'
         AND invested_capital > 0
         AND (ibkr_order_id IS NULL OR ibkr_order_id = '')
         AND execution_mode = 'PAPER_TRADING'
         ORDER BY id
         LIMIT :limit
     """), {"limit": max_positions})
-    
+
     positions = []
     for row in result:
         positions.append({
@@ -3402,16 +3547,16 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
             'capital': float(row.capital),
             'entry_price': float(row.entry_price) if row.entry_price else None
         })
-    
+
     submitted = []
     failed = []
-    
+
     for pos in positions:
         # Clean up ticker format
         ticker = pos['ticker']
         # Remove quotes, brackets, and extra whitespace
         ticker = ticker.replace('[', '').replace(']', '').replace('"', '').replace("'", '').strip()
-        
+
         # Skip FX pairs for now (need special handling)
         if '/' in ticker:
             failed.append({
@@ -3419,7 +3564,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                 "error": "FX pairs require special handling"
             })
             continue
-        
+
         # Clean up HK ticker format - convert "0006.HK" to "6.HK" or keep as is
         if ticker.endswith('.HK'):
             # Keep the HK suffix but clean up leading zeros if needed
@@ -3427,7 +3572,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
             if len(parts) == 2 and parts[0].isdigit():
                 # Keep original format - IBKR should handle it
                 pass
-        
+
         # Calculate quantity
         if pos['entry_price'] and pos['entry_price'] > 0:
             quantity = int(pos['capital'] / pos['entry_price'])
@@ -3441,10 +3586,10 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                 quantity = int(pos['capital'] / current_price)
             except:
                 quantity = 10
-        
+
         if quantity < 1:
             quantity = 1
-        
+
         try:
             order_result = ib_quant_service.place_order(
                 symbol=ticker,
@@ -3453,14 +3598,14 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                 order_type="MKT",
                 account=None
             )
-            
+
             if order_result and order_result.get('success'):
                 order_id = order_result.get('order_id', 'UNKNOWN')
                 fill_price = order_result.get('fill_price')  # IBKR golden source price
-                
+
                 # Use IBKR fill price if available, otherwise fall back to estimated price
                 entry_price = fill_price if fill_price else (pos['entry_price'] or 0)
-                
+
                 # Update database with IBKR golden source price
                 db.execute(text("""
                     UPDATE gold.paper_strategies
@@ -3472,12 +3617,12 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                         updated_at = NOW()
                     WHERE id = :id
                 """), {
-                    "order_id": str(order_id), 
+                    "order_id": str(order_id),
                     "id": pos['id'],
                     "entry_price": entry_price,
                     "capital": pos['capital']
                 })
-                
+
                 db.execute(text("""
                     INSERT INTO gold.trade_executions
                     (strategy_id, ticker, execution_mode, order_type, side, quantity, price, status, ibkr_order_id, executed_at)
@@ -3490,7 +3635,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                     "price": entry_price,
                     "order_id": str(order_id)
                 })
-                
+
                 submitted.append({
                     "ticker": ticker,
                     "quantity": quantity,
@@ -3504,15 +3649,15 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                     "ticker": ticker,
                     "error": error
                 })
-                
+
         except Exception as e:
             failed.append({
                 "ticker": ticker,
                 "error": str(e)
             })
-    
+
     db.commit()
-    
+
     return {
         "success": True,
         "mode": current_mode,
@@ -3531,43 +3676,43 @@ def reset_simulation(db: Session = Depends(get_db)):
     Only works in SIMULATION mode.
     """
     import time
-    
+
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
-    
+
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     if current_mode != "SIMULATION":
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Cannot reset in {current_mode} mode. Switch to SIMULATION first."
         )
-    
+
     try:
         # Count before deletion for reporting
         count_result = db.execute(text("""
             SELECT COUNT(*) as cnt FROM gold.paper_strategies
         """)).fetchone()
         positions_count = count_result.cnt if count_result else 0
-        
+
         trades_result = db.execute(text("""
             SELECT COUNT(*) as cnt FROM gold.trade_executions
         """)).fetchone()
         trades_count = trades_result.cnt if trades_result else 0
-        
+
         # Delete all paper strategies
         db.execute(text("""
             DELETE FROM gold.paper_strategies
         """))
-        
+
         # Delete all trade executions
         db.execute(text("""
             DELETE FROM gold.trade_executions
         """))
-        
+
         # Also delete from gold.positions if exists
         try:
             db.execute(text("""
@@ -3575,7 +3720,7 @@ def reset_simulation(db: Session = Depends(get_db)):
             """))
         except:
             pass  # Table might not exist or have different structure
-        
+
         # Delete from consumption tables (safer than TRUNCATE in transactions)
         try:
             db.execute(text("""
@@ -3583,22 +3728,18 @@ def reset_simulation(db: Session = Depends(get_db)):
             """))
         except Exception as e:
             logger.warning(f"Could not clear Portfolio_Positions_Current: {e}")
-        
+
         try:
             db.execute(text("""
-                DELETE FROM consumption.Performance_Trades_History
+                DELETE FROM gold.trade_executions WHERE strategy_id IN (SELECT strategy_id FROM gold.paper_strategies)
             """))
         except Exception as e:
-            logger.warning(f"Could not clear Performance_Trades_History: {e}")
-            
-        # Also try to delete from consumption.Performance_Portfolio_Summary if it exists
-        try:
-            db.execute(text("""
-                DELETE FROM consumption.Performance_Portfolio_Summary WHERE portfolio_type = 'PAPER'
-            """))
-        except:
-            pass
-        
+            logger.warning(f"Could not clear trade_executions: {e}")
+
+        # NOTE: Performance_Trades_History dropped - no longer need to clear
+
+        # NOTE: Performance_Portfolio_Summary dropped - no longer exists
+
         # Reset simulation capital to default
         db.execute(text("""
             INSERT INTO gold.platform_settings (key, value, updated_at)
@@ -3607,7 +3748,7 @@ def reset_simulation(db: Session = Depends(get_db)):
                 value = EXCLUDED.value,
                 updated_at = NOW()
         """))
-        
+
         # Also reset simulation used/available tracking
         db.execute(text("""
             INSERT INTO gold.platform_settings (key, value, updated_at)
@@ -3616,7 +3757,7 @@ def reset_simulation(db: Session = Depends(get_db)):
                 value = EXCLUDED.value,
                 updated_at = NOW()
         """))
-        
+
         db.execute(text("""
             INSERT INTO gold.platform_settings (key, value, updated_at)
             VALUES ('simulation_positions', '0', NOW())
@@ -3624,9 +3765,9 @@ def reset_simulation(db: Session = Depends(get_db)):
                 value = EXCLUDED.value,
                 updated_at = NOW()
         """))
-        
+
         db.commit()
-        
+
         return {
             "success": True,
             "message": f"Simulation reset complete. Deleted {positions_count} positions and {trades_count} trades. Capital reset to $100,000.",
@@ -3634,7 +3775,7 @@ def reset_simulation(db: Session = Depends(get_db)):
             "trades_deleted": trades_count,
             "simulation_capital_reset": 100000
         }
-        
+
     except Exception as e:
         db.rollback()
         logger.error(f"Error resetting simulation: {e}")
@@ -3652,25 +3793,25 @@ def close_fx_cash_positions(payload: dict, db: Session = Depends(get_db)):
     positions = payload.get("positions", {})
     executed = []
     failed = []
-    
+
     for currency, amount in positions.items():
         currency = currency.upper()
         if abs(amount) < 100:
             continue
-            
+
         try:
             # Determine action
             if amount > 0:
                 action = "SELL"  # Long position - sell to close
             else:
                 action = "BUY"   # Short position - buy to close
-            
+
             quantity = abs(amount)
             pair = f"{currency}HKD"
-            
+
             # Log the intended trade
             db.execute(text("""
-                INSERT INTO gold.trade_executions 
+                INSERT INTO gold.trade_executions
                 (strategy_id, ticker, execution_mode, order_type, side, quantity, status, executed_at)
                 VALUES ('cash_closure', :ticker, 'PAPER_TRADING', 'FX', :side, :qty, 'PENDING', NOW())
             """), {
@@ -3678,9 +3819,9 @@ def close_fx_cash_positions(payload: dict, db: Session = Depends(get_db)):
                 "side": action,
                 "qty": quantity
             })
-            
+
             db.commit()
-            
+
             executed.append({
                 "currency": currency,
                 "action": action,
@@ -3688,13 +3829,13 @@ def close_fx_cash_positions(payload: dict, db: Session = Depends(get_db)):
                 "quantity": quantity,
                 "original_amount": amount
             })
-            
+
         except Exception as e:
             failed.append({
                 "currency": currency,
                 "error": str(e)
             })
-    
+
     return {
         "success": True,
         "executed_count": len(executed),
@@ -3711,23 +3852,23 @@ def close_fx_cash_positions(payload: dict, db: Session = Depends(get_db)):
 def get_strategy_capital_pool(strategy_id: str, db: Session = Depends(get_db)):
     """Get capital pool status for a strategy - pool shared across universe assets"""
     strategy = db.execute(text("""
-        SELECT strategy_id, name, assigned_capital 
+        SELECT strategy_id, name, assigned_capital
         FROM gold.strategy_definitions WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    
+
     pool_usage = db.execute(text("""
         SELECT COALESCE(SUM(capital), 0) as used_capital, COUNT(*) as active_positions
         FROM gold.paper_strategies WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     total_assigned = float(strategy.assigned_capital) if strategy.assigned_capital else 100000
     used = float(pool_usage.used_capital) if pool_usage else 0
     available = total_assigned - used
     trade_size = total_assigned * 0.25
-    
+
     return {
         "strategy_id": strategy.strategy_id, "strategy_name": strategy.name,
         "total_assigned": total_assigned, "used": used, "available": available,
@@ -3745,7 +3886,7 @@ def update_strategy_capital_pool(strategy_id: str, payload: dict, db: Session = 
         UPDATE gold.strategy_definitions SET assigned_capital = :total, updated_at = NOW()
         WHERE strategy_id = :strategy_id RETURNING strategy_id, name, assigned_capital
     """), {"strategy_id": strategy_id, "total": new_total}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail="Strategy not found")
     db.commit()
@@ -3759,34 +3900,34 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
     tickers = payload.get("tickers", [])
     total_pool = payload.get("total_pool", 100000)
     trade_size_pct = payload.get("trade_size_pct", 0.25)
-    
+
     if not strategy_id or not tickers:
         raise HTTPException(status_code=400, detail="strategy_id and tickers required")
-    
+
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
-    strategy = db.execute(text("SELECT * FROM gold.strategy_definitions WHERE strategy_id = :sid AND jt_ready = TRUE"),
+
+    strategy = db.execute(text("SELECT * FROM gold.strategy_definitions WHERE strategy_id = :sid"),
                          {"sid": strategy_id}).fetchone()
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     pool_status = db.execute(text("""
         SELECT COALESCE(SUM(capital), 0) as used FROM gold.paper_strategies
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
     """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
-    
+
     current_used = float(pool_status.used) if pool_status else 0
     available = total_pool - current_used
     trade_size = total_pool * trade_size_pct
-    
+
     if available < trade_size:
         return {"success": False, "error": "Capital pool exhausted", "available": available, "required": trade_size}
-    
+
     created = []
     for ticker in tickers:
         if available < trade_size:
@@ -3795,9 +3936,9 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
             db.execute(text("""
                 INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', :mode, NOW(), NOW())
-                ON CONFLICT (strategy_id, ticker) DO UPDATE SET 
-                    status = 'ACTIVE', 
-                    capital = EXCLUDED.capital, 
+                ON CONFLICT (strategy_id, ticker) DO UPDATE SET
+                    status = 'ACTIVE',
+                    capital = EXCLUDED.capital,
                     execution_mode = EXCLUDED.execution_mode,
                     updated_at = NOW()
             """), {"strategy_id": strategy_id, "ticker": ticker.upper(), "capital": trade_size, "mode": current_mode})
@@ -3805,12 +3946,12 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
             created.append(ticker)
         except Exception as e:
             pass
-    
+
     db.commit()
     return {
-        "success": True, 
-        "positions_created": len(created), 
-        "tickers": created, 
+        "success": True,
+        "positions_created": len(created),
+        "tickers": created,
         "pool_remaining": available,
         "execution_mode": current_mode
     }
@@ -3827,54 +3968,54 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
     total_pool = payload.get("total_pool", 100000)
     trade_size_pct = payload.get("trade_size_pct", 0.25)
     max_positions = payload.get("max_positions", 5)
-    
+
     if not strategy_id:
         raise HTTPException(status_code=400, detail="strategy_id required")
-    
+
     # Get current execution mode
     mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings 
+        SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
     """)).fetchone()
     current_mode = mode_result.value if mode_result else 'SIMULATION'
-    
+
     # Get strategy from registry
     strategy = db.query(StrategyRegistry).filter(
         StrategyRegistry.strategy_id == strategy_id,
         StrategyRegistry.status.in_(['ACTIVE', 'TESTING'])
     ).first()
-    
+
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     # Parse universe
     universe = [t.strip() for t in strategy.target_assets.split(',')] if strategy.target_assets else []
-    
+
     if not universe:
         return {
             "success": False,
             "error": "Strategy has no universe defined",
             "strategy_id": strategy_id
         }
-    
+
     # Check which tickers in universe have BUY signals
     # Query consumption signals view
     placeholders = ','.join([f':t{i}' for i in range(len(universe))])
     params = {f't{i}': t for i, t in enumerate(universe)}
     params['strategy_id'] = strategy_id
-    
+
     signals_result = db.execute(text(f"""
         SELECT ticker, signal, confidence_score, signal_strength
         FROM consumption.Strategies_Signals_Current
-        WHERE strategy_id = :strategy_id 
+        WHERE strategy_id = :strategy_id
         AND ticker IN ({placeholders})
         AND signal = 'BUY'
         ORDER BY confidence_score DESC
         LIMIT :max_pos
     """), {**params, "max_pos": max_positions}).fetchall()
-    
+
     tickers_with_buy = [s.ticker for s in signals_result]
-    
+
     if not tickers_with_buy:
         return {
             "success": False,
@@ -3883,19 +4024,19 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
             "universe_checked": universe,
             "universe_size": len(universe)
         }
-    
+
     # Check pool availability
     pool_status = db.execute(text("""
-        SELECT COALESCE(SUM(capital), 0) as used, COUNT(*) as position_count 
+        SELECT COALESCE(SUM(capital), 0) as used, COUNT(*) as position_count
         FROM gold.paper_strategies
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
     """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
-    
+
     current_used = float(pool_status.used) if pool_status else 0
     current_positions = int(pool_status.position_count) if pool_status else 0
     available = total_pool - current_used
     trade_size = total_pool * trade_size_pct
-    
+
     # Respect max positions limit
     positions_remaining = max_positions - current_positions
     if positions_remaining <= 0:
@@ -3905,7 +4046,7 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
             "current_positions": current_positions,
             "max_positions": max_positions
         }
-    
+
     # Deploy up to max positions
     created = []
     skipped = []
@@ -3916,14 +4057,14 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
         if available < trade_size:
             skipped.append(f"{ticker} (insufficient capital)")
             continue
-        
+
         try:
             db.execute(text("""
                 INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', :mode, NOW(), NOW())
-                ON CONFLICT (strategy_id, ticker) DO UPDATE SET 
-                    status = 'ACTIVE', 
-                    capital = EXCLUDED.capital, 
+                ON CONFLICT (strategy_id, ticker) DO UPDATE SET
+                    status = 'ACTIVE',
+                    capital = EXCLUDED.capital,
                     execution_mode = EXCLUDED.execution_mode,
                     updated_at = NOW()
             """), {"strategy_id": strategy_id, "ticker": ticker.upper(), "capital": trade_size, "mode": current_mode})
@@ -3931,9 +4072,9 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
             created.append(ticker)
         except Exception as e:
             skipped.append(f"{ticker} (error: {str(e)})")
-    
+
     db.commit()
-    
+
     return {
         "success": len(created) > 0,
         "strategy_id": strategy_id,
@@ -3964,10 +4105,10 @@ def get_cash_position_summary(db: Session = Depends(get_db)):
         "USD": -162784.73,
         "HKD": 3343700.43
     }
-    
+
     # Calculate net FX exposure
     fx_exposure = {k: v for k, v in positions.items() if k != "HKD"}
-    
+
     # Estimate trades needed
     trades_needed = []
     for currency, amount in fx_exposure.items():
@@ -3980,7 +4121,7 @@ def get_cash_position_summary(db: Session = Depends(get_db)):
                 "pair": f"{currency}HKD",
                 "reason": f"Close {currency} position of {amount:,.2f}"
             })
-    
+
     return {
         "base_currency": "HKD",
         "base_balance": positions.get("HKD", 0),
@@ -3999,20 +4140,20 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
     try:
         # Query from StrategyRegistry (canonical source of truth from DE)
         query = db.query(StrategyRegistry)
-        
+
         # Filter by status - only active strategies
         query = query.filter(StrategyRegistry.status.in_(['ACTIVE', 'TESTING']))
-        
+
         # Filter GOLDEN priority as the "JT-Ready" strategies
         query = query.filter(StrategyRegistry.priority.in_(['GOLDEN', 'NEAR_GOLDEN']))
-        
+
         strategies = query.all()
-        
+
         # Fetch real backtest data from consumption
         backtest_data = {}
         try:
             backtests = db.execute(text("""
-                SELECT 
+                SELECT
                     strategy_id,
                     AVG(win_rate) as win_rate,
                     AVG(profit_factor) as profit_factor,
@@ -4023,7 +4164,7 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
                 FROM consumption.Strategies_Backtest_Results
                 GROUP BY strategy_id
             """)).fetchall()
-            
+
             for bt in backtests:
                 backtest_data[bt.strategy_id] = {
                     'win_rate': float(bt.win_rate) if bt.win_rate else None,
@@ -4035,15 +4176,15 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
                 }
         except Exception as e:
             logger.error(f"Error fetching backtest data: {e}")
-        
+
         result = []
         for s in strategies:
             # Parse target_assets into universe array
             tickers = [t.strip() for t in s.target_assets.split(',')] if s.target_assets else []
-            
+
             # Get backtest data for this strategy
             bt = backtest_data.get(s.strategy_id, {})
-            
+
             result.append({
                 "id": s.strategy_id,
                 "name": s.strategy_name,
@@ -4069,7 +4210,7 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
                 "exit_logic": s.exit_logic,
                 "source": "strategy_registry"
             })
-        
+
         return {"strategies": result, "count": len(result)}
     except Exception as e:
         logger.error(f"Error fetching from strategy_registry: {e}")
@@ -4082,7 +4223,7 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
 def _get_strategies_from_definitions(db: Session, asset_class: str = None):
     """Legacy fallback - read from strategy_definitions during migration"""
     query = """
-        SELECT 
+        SELECT
             strategy_id as id,
             name,
             description,
@@ -4102,9 +4243,9 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
     if asset_class:
         query += " AND asset_class = :asset_class"
     query += " ORDER BY sharpe_ratio DESC"
-    
+
     result = db.execute(text(query), {"asset_class": asset_class} if asset_class else {})
-    
+
     strategies = []
     for row in result:
         tickers = row.universe_tickers.split(',') if row.universe_tickers else []
@@ -4125,7 +4266,7 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
             "status": row.status,
             "source": "strategy_definitions_fallback"
         })
-    
+
     return {"strategies": strategies, "count": len(strategies)}
 
 
@@ -4133,7 +4274,7 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
 def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
     """Get strategy details including signal logic and entry/exit conditions"""
     result = db.execute(text("""
-        SELECT 
+        SELECT
             strategy_id,
             name,
             description,
@@ -4155,13 +4296,13 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
         FROM gold.strategy_definitions
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     # Parse signal logic and exit logic
     tickers = result.universe_tickers.split(',') if result.universe_tickers else []
-    
+
     return {
         "strategy_id": result.strategy_id,
         "name": result.name,
@@ -4196,10 +4337,10 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
 def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     """Set execution mode: SIMULATION, PAPER_TRADING, or LIVE_TRADING"""
     mode = payload.get("execution_mode", "SIMULATION")
-    
+
     if mode not in ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"]:
         raise HTTPException(status_code=400, detail="Invalid mode. Use SIMULATION, PAPER_TRADING, or LIVE_TRADING")
-    
+
     result = db.execute(text("""
         UPDATE gold.strategy_definitions
         SET execution_mode = :mode,
@@ -4207,12 +4348,12 @@ def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(ge
         WHERE strategy_id = :strategy_id
         RETURNING strategy_id, name, execution_mode
     """), {"strategy_id": strategy_id, "mode": mode}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     db.commit()
-    
+
     return {
         "success": True,
         "strategy_id": result.strategy_id,
@@ -4235,19 +4376,19 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
     side = payload.get("side")  # BUY or SELL
     quantity = payload.get("quantity", 100)
     order_type = payload.get("order_type", "MKT")
-    
+
     # Get strategy execution mode
     strategy = db.execute(text("""
         SELECT strategy_id, name, execution_mode, venue
         FROM gold.strategy_definitions
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    
+
     execution_mode = strategy.execution_mode or "SIMULATION"
-    
+
     # Log the execution attempt
     db.execute(text("""
         INSERT INTO gold.trade_executions
@@ -4261,9 +4402,9 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
         "side": side,
         "qty": quantity
     })
-    
+
     db.commit()
-    
+
     if execution_mode == "SIMULATION":
         # Simulation mode - just update database
         if side == "BUY":
@@ -4284,9 +4425,9 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
                     last_order_status = 'SIMULATED_SELL'
                 WHERE strategy_id = :strategy_id AND ticker = :ticker
             """), {"strategy_id": strategy_id, "ticker": ticker, "amount": quantity * 100})
-        
+
         db.commit()
-        
+
         return {
             "success": True,
             "execution_mode": "SIMULATION",
@@ -4294,7 +4435,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
             "order_id": f"SIM_{int(time.time())}",
             "status": "COMPLETED"
         }
-    
+
     elif execution_mode in ["PAPER_TRADING", "LIVE_TRADING"]:
         # TODO: Implement actual IBKR order submission
         # For now, return pending status
@@ -4306,7 +4447,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
             "status": "PENDING",
             "note": "IBKR integration pending - order queued"
         }
-    
+
     raise HTTPException(status_code=400, detail="Unknown execution mode")
 
 
@@ -4317,18 +4458,18 @@ async def execute_jt_ready_strategies(db: Session = Depends(get_db)):
     Evaluates all active positions and executes trades based on signals.
     """
     from app.services.jt_strategy_executor import get_executor
-    
+
     try:
         executor = get_executor(db)
-        
+
         # Get current mode
         mode_result = db.execute(text("SELECT value FROM gold.platform_settings WHERE key = 'global_execution_mode'")).fetchone()
         current_mode = mode_result.value if mode_result else 'SIMULATION'
         executor.set_execution_mode(current_mode)
-        
+
         # Run execution
         trades_executed = await executor.run_execution_cycle()
-        
+
         return {
             "success": True,
             "execution_mode": current_mode,
@@ -4348,16 +4489,16 @@ def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
         FROM gold.strategy_definitions
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     if not result:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    
+
     # Count positions by mode
     sim_count = db.execute(text("""
         SELECT COUNT(*) FROM gold.paper_strategies
         WHERE strategy_id = :strategy_id AND execution_mode = 'SIMULATION'
     """), {"strategy_id": strategy_id}).scalar() or 0
-    
+
     return {
         "strategy_id": result.strategy_id,
         "strategy_name": result.name,
@@ -4386,34 +4527,34 @@ def add_stocks_to_paper_trading(payload: dict, db: Session = Depends(get_db)):
     strategy_id = payload.get("strategy_id")
     tickers = payload.get("tickers", [])
     capital = payload.get("capital_per_position", 10000)
-    
+
     if not strategy_id or not tickers:
         raise HTTPException(status_code=400, detail="strategy_id and tickers required")
-    
+
     # Get strategy definition
     strategy = db.execute(text("""
         SELECT * FROM gold.strategy_definitions
         WHERE strategy_id = :sid AND jt_ready = TRUE
     """), {"sid": strategy_id}).fetchone()
-    
+
     if not strategy:
         # Check if it's a regular template
         strategy = db.execute(text("""
             SELECT * FROM gold.strategy_templates
             WHERE id = :sid
         """), {"sid": strategy_id}).fetchone()
-    
+
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-    
+
     created = []
     failed = []
-    
+
     for ticker in tickers:
         try:
             # Create paper trading strategy instance
             db.execute(text("""
-                INSERT INTO gold.paper_strategies 
+                INSERT INTO gold.paper_strategies
                 (strategy_id, ticker, capital, status, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', NOW(), NOW())
                 ON CONFLICT (strategy_id, ticker) DO UPDATE SET
@@ -4428,9 +4569,9 @@ def add_stocks_to_paper_trading(payload: dict, db: Session = Depends(get_db)):
             created.append(ticker)
         except Exception as e:
             failed.append({"ticker": ticker, "error": str(e)})
-    
+
     db.commit()
-    
+
     return {
         "success": True,
         "strategy_id": strategy_id,
@@ -4445,7 +4586,7 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
     """Get detailed description for a strategy"""
     # Try researcher strategies first
     result = db.execute(text("""
-        SELECT 
+        SELECT
             strategy_id as id,
             name,
             description,
@@ -4464,7 +4605,7 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
         FROM gold.strategy_definitions
         WHERE strategy_id = :sid AND jt_ready = TRUE
     """), {"sid": strategy_id}).fetchone()
-    
+
     if result:
         return {
             "id": result.id,
@@ -4486,14 +4627,14 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
             "backtest_period": result.backtest_period,
             "source": "trade_algo_researcher"
         }
-    
+
     # Fall back to regular templates
     result = db.execute(text("""
         SELECT id, name, description, asset_class, min_win_rate, min_sharpe, max_holding_days
         FROM gold.strategy_templates
         WHERE id = :sid
     """), {"sid": strategy_id}).fetchone()
-    
+
     if result:
         return {
             "id": result.id,
@@ -4507,7 +4648,7 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
             },
             "source": "template"
         }
-    
+
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
 
@@ -4554,7 +4695,7 @@ def screen_stocks(strategy_id: str,
         FROM gold.strategy_templates
         WHERE id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
-    
+
     # Fall back to researcher strategies from trade-algo-researcher
     if not strategy:
         strategy = db.execute(text("""
@@ -4801,24 +4942,24 @@ def export_strategy_results(
 def compare_strategies(tickers: str = "AAPL,MSFT,NVDA"):
     """
     Compare how different strategies perform on the same set of stocks
-    
+
     Query: tickers=comma-separated list
     """
     from app.core_logic.strategies.strategy_config import get_all_strategy_templates
     from app.core_logic.strategies.strategy_screener import screen_stocks_with_strategy
-    
+
     ticker_list = [t.strip() for t in tickers.split(",") if t.strip()]
     templates = get_all_strategy_templates()
-    
+
     comparison = {}
-    
+
     for template in templates:
         results = screen_stocks_with_strategy(
             strategy_id=template.id,
             tickers=ticker_list,
             min_trades=3
         )
-        
+
         comparison[template.id] = {
             "name": template.name,
             "stocks": [{
@@ -4829,7 +4970,7 @@ def compare_strategies(tickers: str = "AAPL,MSFT,NVDA"):
                 "signal": r.signal
             } for r in results]
         }
-    
+
     return {
         "tickers": ticker_list,
         "strategies": comparison
@@ -4842,7 +4983,7 @@ def compare_strategies(tickers: str = "AAPL,MSFT,NVDA"):
 def get_institutional_data(ticker: str, db: Session = Depends(get_db)):
     """Get institutional holdings and analyst ratings for a stock"""
     ticker = ticker.upper()
-    
+
     # Get consensus ratings
     consensus = db.execute(text("""
         SELECT * FROM gold.consensus_ratings
@@ -4850,7 +4991,7 @@ def get_institutional_data(ticker: str, db: Session = Depends(get_db)):
         ORDER BY report_date DESC
         LIMIT 1
     """), {"ticker": ticker}).fetchone()
-    
+
     # Get top institutional holders
     holders = db.execute(text("""
         SELECT holder_name, shares, pct_out, value
@@ -4859,10 +5000,10 @@ def get_institutional_data(ticker: str, db: Session = Depends(get_db)):
         ORDER BY shares DESC
         LIMIT 10
     """), {"ticker": ticker}).fetchall()
-    
+
     if not consensus and not holders:
         raise HTTPException(status_code=404, detail=f"No institutional data for {ticker}")
-    
+
     return {
         "ticker": ticker,
         "consensus": {
@@ -4892,9 +5033,9 @@ def calculate_rating_text(consensus):
     """Convert consensus numbers to rating text"""
     if not consensus or consensus.total_analysts == 0:
         return "N/A"
-    
+
     buy_ratio = (consensus.strong_buy + consensus.buy) / consensus.total_analysts
-    
+
     if buy_ratio >= 0.8:
         return "STRONG_BUY"
     elif buy_ratio >= 0.6:
@@ -4911,7 +5052,7 @@ def calculate_rating_text(consensus):
 def get_top_upside_stocks(limit: int = 20, db: Session = Depends(get_db)):
     """Get stocks with highest analyst upside potential"""
     result = db.execute(text("""
-        SELECT 
+        SELECT
             c.ticker,
             c.target_mean,
             c.current_price,
@@ -4926,7 +5067,7 @@ def get_top_upside_stocks(limit: int = 20, db: Session = Depends(get_db)):
         ORDER BY c.upside_pct DESC
         LIMIT :limit
     """), {"limit": limit}).fetchall()
-    
+
     return [{
         "ticker": r.ticker,
         "target": float(r.target_mean) if r.target_mean else None,
@@ -4944,7 +5085,7 @@ def get_top_upside_stocks(limit: int = 20, db: Session = Depends(get_db)):
 def get_strategy_stats_endpoint(db: Session = Depends(get_db)):
     """Get actual performance stats for all deployed strategies including actual win rate"""
     result = db.execute(text("""
-        SELECT 
+        SELECT
             ps.strategy_id,
             sd.name as strategy_name,
             COUNT(*) as total_positions,
@@ -4961,13 +5102,13 @@ def get_strategy_stats_endpoint(db: Session = Depends(get_db)):
         WHERE ps.status = 'ACTIVE'
         GROUP BY ps.strategy_id, sd.name
     """)).fetchall()
-    
+
     stats = {}
     for row in result:
         strategy_id = row.strategy_id
         total_pnl = (row.total_realized_pnl or 0) + (row.total_unrealized_pnl or 0)
         win_rate = (row.winning_positions / row.active_positions * 100) if row.active_positions and row.active_positions > 0 else 0
-        
+
         stats[strategy_id] = {
             "strategy_id": strategy_id,
             "strategy_name": row.strategy_name,
@@ -4983,7 +5124,7 @@ def get_strategy_stats_endpoint(db: Session = Depends(get_db)):
             "actual_win_rate": round(win_rate, 1),
             "total_trades": row.total_trades or 0
         }
-    
+
     return {"success": True, "stats": stats, "count": len(stats)}
 
 
@@ -4994,17 +5135,17 @@ def get_position_signals(db: Session = Depends(get_db)):
     Shows real-time metrics and how close each position is to triggering buy/sell.
     """
     from app.services.jt_strategy_executor import JTStrategyExecutor
-    
+
     executor = JTStrategyExecutor(db)
     positions = executor.get_active_paper_positions()
-    
+
     signals = []
     for pos in positions:
         ticker = pos['ticker'].strip().strip('"').strip("[").strip("]")
-        
+
         # Fetch market data
         df = executor.fetch_market_data(ticker, period="10d")
-        
+
         if df is None or df.empty:
             signals.append({
                 "position_id": pos['id'],
@@ -5020,25 +5161,25 @@ def get_position_signals(db: Session = Depends(get_db)):
                 "message": "No market data available"
             })
             continue
-        
+
         closes = df['Close']
         volumes = df['Volume']
         current_price = closes.iloc[-1]
         current_volume = volumes.iloc[-1]
         avg_volume = volumes.mean()
-        
+
         strategy_id = pos['strategy_id']
         metrics = {}
         buy_signal = False
         sell_signal = False
         message = ""
         signal_strength = 0  # 0-100 how close to triggering
-        
+
         # Calculate metrics based on strategy type
         if 'rsi' in strategy_id.lower():
             rsi = executor.calculate_rsi(closes).iloc[-1]
             volume_spike = current_volume / avg_volume if avg_volume > 0 else 1
-            
+
             metrics = {
                 "rsi": round(rsi, 2),
                 "rsi_threshold_buy": 30,
@@ -5047,7 +5188,7 @@ def get_position_signals(db: Session = Depends(get_db)):
                 "volume_threshold": 1.3,
                 "current_price": round(current_price, 2)
             }
-            
+
             if pos['invested_capital'] == 0:
                 # Looking for buy signal
                 buy_signal = rsi < 30 and volume_spike > 1.3
@@ -5060,7 +5201,7 @@ def get_position_signals(db: Session = Depends(get_db)):
                 sell_signal = rsi > 50
                 signal_strength = max(0, min(100, (rsi - 50) / 50 * 100)) if rsi > 50 else 0
                 message = f"RSI {rsi:.1f} (sell >50)"
-        
+
         elif 'three_day' in strategy_id.lower() or '3day' in strategy_id.lower():
             if len(df) >= 4:
                 day1_change = (closes.iloc[-3] - closes.iloc[-4]) / closes.iloc[-4] * 100
@@ -5068,7 +5209,7 @@ def get_position_signals(db: Session = Depends(get_db)):
                 day3_change = (closes.iloc[-1] - closes.iloc[-2]) / closes.iloc[-2] * 100
                 total_decline = (closes.iloc[-1] - closes.iloc[-4]) / closes.iloc[-4] * 100
                 volume_spike = current_volume / avg_volume if avg_volume > 0 else 1
-                
+
                 metrics = {
                     "day1_change": round(day1_change, 2),
                     "day2_change": round(day2_change, 2),
@@ -5079,9 +5220,9 @@ def get_position_signals(db: Session = Depends(get_db)):
                     "volume_threshold": 1.3,
                     "current_price": round(current_price, 2)
                 }
-                
+
                 three_down = day1_change < 0 and day2_change < 0 and day3_change < 0
-                
+
                 if pos['invested_capital'] == 0:
                     buy_signal = three_down and total_decline <= -5 and volume_spike > 1.3
                     signal_strength = max(0, min(100, abs(total_decline) / 5 * 100)) if three_down else 0
@@ -5093,19 +5234,19 @@ def get_position_signals(db: Session = Depends(get_db)):
                     sell_signal = recovery > 0
                     signal_strength = max(0, min(100, recovery / 3 * 100))
                     message = f"Recovery: {recovery:.1f}% from entry"
-        
+
         elif 'gap' in strategy_id.lower():
             if len(df) >= 2:
                 prev_close = closes.iloc[-2]
                 gap = (closes.iloc[-1] - prev_close) / prev_close * 100
-                
+
                 metrics = {
                     "gap_pct": round(gap, 2),
                     "gap_threshold": 0.5,
                     "prev_close": round(prev_close, 2),
                     "current_price": round(current_price, 2)
                 }
-                
+
                 if pos['invested_capital'] == 0:
                     buy_signal = abs(gap) > 0.5
                     signal_strength = max(0, min(100, abs(gap) / 0.5 * 100))
@@ -5117,19 +5258,19 @@ def get_position_signals(db: Session = Depends(get_db)):
                     sell_signal = abs(pnl) > 0.5
                     signal_strength = max(0, min(100, abs(pnl) / 0.5 * 100))
                     message = f"P&L: {pnl:.2f}% (exit at ±0.5%)"
-        
+
         elif 'momentum' in strategy_id.lower():
             if len(df) >= 20:
                 price_20d_ago = closes.iloc[-20]
                 momentum = (current_price - price_20d_ago) / price_20d_ago * 100
-                
+
                 metrics = {
                     "momentum_20d": round(momentum, 2),
                     "momentum_threshold": 5,
                     "price_20d_ago": round(price_20d_ago, 2),
                     "current_price": round(current_price, 2)
                 }
-                
+
                 if pos['invested_capital'] == 0:
                     buy_signal = momentum > 5
                     signal_strength = max(0, min(100, momentum / 5 * 100))
@@ -5140,24 +5281,24 @@ def get_position_signals(db: Session = Depends(get_db)):
                     sell_signal = current_momentum < 0
                     signal_strength = max(0, min(100, (5 - current_momentum) / 5 * 100)) if current_momentum < 5 else 0
                     message = f"Position momentum: {current_momentum:.1f}% (exit <0%)"
-        
+
         elif 'macd' in strategy_id.lower():
             macd_line, signal_line, hist = executor.calculate_macd(closes)
             current_hist = hist.iloc[-1]
             prev_hist = hist.iloc[-2] if len(hist) > 1 else current_hist
-            
+
             metrics = {
                 "macd_histogram": round(current_hist, 4),
                 "macd_signal": round(signal_line.iloc[-1], 4),
                 "prev_histogram": round(prev_hist, 4),
                 "current_price": round(current_price, 2)
             }
-            
+
             # Divergence check
             price_change = closes.iloc[-1] - closes.iloc[-3]
             hist_change = current_hist - prev_hist
             divergence = (price_change > 0 and hist_change < 0) or (price_change < 0 and hist_change > 0)
-            
+
             if pos['invested_capital'] == 0:
                 buy_signal = divergence
                 signal_strength = 80 if divergence else 0
@@ -5166,12 +5307,12 @@ def get_position_signals(db: Session = Depends(get_db)):
                 sell_signal = current_hist > 0  # MACD crosses zero
                 signal_strength = max(0, min(100, current_hist / 0.01 * 100)) if current_hist > 0 else 0
                 message = f"Histogram: {current_hist:.4f} (exit when >0)"
-        
+
         # Generic exit logic for ALL active positions - Take Profit +5%, Stop Loss -5%
         entry_price = pos.get('entry_price') or current_price
         if entry_price and pos.get('invested_capital', 0) > 0:
             pnl_pct = (current_price - entry_price) / entry_price * 100
-            
+
             # Take Profit at +5%
             if pnl_pct >= 5:
                 sell_signal = True
@@ -5192,13 +5333,13 @@ def get_position_signals(db: Session = Depends(get_db)):
                 sell_signal = False
                 signal_strength = min(100, (abs(pnl_pct) / 5) * 100)  # % toward -5% limit
                 message = f"📉 Losing: {pnl_pct:.1f}% (stop at -5%)"
-            
+
             # Add P&L to metrics for all positions
             metrics["pnl_pct"] = round(pnl_pct, 2)
             metrics["entry_price"] = round(entry_price, 2)
             metrics["take_profit_target"] = round(entry_price * 1.05, 2)
             metrics["stop_loss_limit"] = round(entry_price * 0.95, 2)
-        
+
         signals.append({
             "position_id": pos['id'],
             "ticker": ticker,
@@ -5213,7 +5354,7 @@ def get_position_signals(db: Session = Depends(get_db)):
             "sell_signal": bool(sell_signal),
             "message": message
         })
-    
+
     return {
         "success": True,
         "signals": signals,
@@ -5236,7 +5377,7 @@ def get_hkex_ipos(
 ):
     """
     Get HKEX IPO data with optional filtering
-    
+
     Query params:
     - status: 'upcoming', 'listed', 'all'
     - sector: Filter by sector
@@ -5244,7 +5385,7 @@ def get_hkex_ipos(
     - limit: Max results (default: 50)
     """
     query = """
-        SELECT 
+        SELECT
             c.ticker,
             c.stock_name,
             c.listing_date,
@@ -5259,7 +5400,7 @@ def get_hkex_ipos(
             p.first_day_return_pct,
             p.return_day30_pct,
             p.performance_tier,
-            CASE 
+            CASE
                 WHEN c.listing_date > CURRENT_DATE THEN 'Upcoming'
                 WHEN c.listing_date = CURRENT_DATE THEN 'Listing Today'
                 ELSE 'Listed'
@@ -5269,27 +5410,27 @@ def get_hkex_ipos(
         LEFT JOIN gold.hk_ipo_performance p ON c.ticker = p.ticker
         WHERE 1=1
     """
-    
+
     params = {}
-    
+
     if status == 'upcoming':
         query += " AND c.listing_date >= CURRENT_DATE"
     elif status == 'listed':
         query += " AND c.listing_date < CURRENT_DATE"
-    
+
     if sector:
         query += " AND c.sector = :sector"
         params['sector'] = sector
-    
+
     if year:
         query += " AND EXTRACT(YEAR FROM c.listing_date) = :year"
         params['year'] = year
-    
+
     query += " ORDER BY c.listing_date DESC LIMIT :limit"
     params['limit'] = limit
-    
+
     result = db.execute(text(query), params).fetchall()
-    
+
     return {
         "ipos": [{
             "ticker": r.ticker,
@@ -5320,7 +5461,7 @@ def get_hkex_ipo_leaderboard(
 ):
     """
     Get HKEX IPO performance leaderboard
-    
+
     Query params:
     - period: 'first_day', 'day30', 'total'
     - limit: Max results (default: 20)
@@ -5330,9 +5471,9 @@ def get_hkex_ipo_leaderboard(
         "day30": "p.return_day30_pct",
         "total": "p.total_return_pct"
     }.get(period, "p.first_day_return_pct")
-    
+
     result = db.execute(text(f"""
-        SELECT 
+        SELECT
             c.ticker,
             c.stock_name,
             c.listing_date,
@@ -5351,7 +5492,7 @@ def get_hkex_ipo_leaderboard(
         ORDER BY {order_col} DESC NULLS LAST
         LIMIT :limit
     """), {"limit": limit}).fetchall()
-    
+
     return {
         "leaderboard": [{
             "rank": i + 1,
@@ -5375,7 +5516,7 @@ def get_hkex_ipo_leaderboard(
 def get_hkex_ipo_sectors(db: Session = Depends(get_db)):
     """Get IPO performance by sector"""
     result = db.execute(text("""
-        SELECT 
+        SELECT
             c.sector,
             COUNT(*) as ipo_count,
             AVG(p.first_day_return_pct) as avg_first_day_return,
@@ -5387,7 +5528,7 @@ def get_hkex_ipo_sectors(db: Session = Depends(get_db)):
         GROUP BY c.sector
         ORDER BY avg_first_day_return DESC NULLS LAST
     """)).fetchall()
-    
+
     return {
         "sectors": [{
             "sector": r.sector,
@@ -5406,20 +5547,20 @@ def get_hkex_ipo_detail(ticker: str, db: Session = Depends(get_db)):
     calendar = db.execute(text("""
         SELECT * FROM gold.hk_ipo_calendar WHERE ticker = :ticker
     """), {"ticker": ticker}).fetchone()
-    
+
     if not calendar:
         raise HTTPException(status_code=404, detail=f"IPO {ticker} not found")
-    
+
     # Details
     details = db.execute(text("""
         SELECT * FROM gold.hk_ipo_details WHERE ticker = :ticker
     """), {"ticker": ticker}).fetchone()
-    
+
     # Performance
     performance = db.execute(text("""
         SELECT * FROM gold.hk_ipo_performance WHERE ticker = :ticker
     """), {"ticker": ticker}).fetchone()
-    
+
     return {
         "ticker": calendar.ticker,
         "stock_name": calendar.stock_name,

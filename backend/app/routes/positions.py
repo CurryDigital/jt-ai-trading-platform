@@ -34,8 +34,12 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
 def get_portfolio_dashboard(db: Session = Depends(get_db)):
     """Portfolio risk dashboard."""
     try:
+        # NOTE: Performance_Portfolio_Summary dropped - calculating summary manually
         summary = db.execute(text("""
-            SELECT * FROM consumption.Performance_Portfolio_Summary WHERE portfolio_type = 'PAPER'
+            SELECT 
+                COALESCE(SUM(realized_pnl) + SUM(unrealized_pnl), 0) as total_pnl
+            FROM gold.paper_strategies
+            WHERE status = 'ACTIVE'
         """)).fetchone()
         positions = db.execute(text("""
             SELECT ticker, market_value, weight_pct FROM consumption.Portfolio_Positions_Current
@@ -102,11 +106,12 @@ def get_paper_strategies(db: Session = Depends(get_db)):
 @router.get("/paper-strategies/{strategy_id:path}/daily-pnl")
 def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = Depends(get_db)):
     """Get daily P&L breakdown for a paper strategy."""
+    # NOTE: Performance_Trades_History dropped - using trade_executions
     closed_trades = db.execute(text("""
-        SELECT DATE(exit_date) as trade_date, SUM(realized_pnl) as day_realized, COUNT(*) as trade_count
-        FROM consumption.Performance_Trades_History
-        WHERE strategy_id = :strategy_id AND exit_date IS NOT NULL
-        GROUP BY DATE(exit_date) ORDER BY trade_date DESC LIMIT :days
+        SELECT DATE(executed_at) as trade_date, SUM(pnl) as day_realized, COUNT(*) as trade_count
+        FROM gold.trade_executions
+        WHERE strategy_id = :strategy_id AND pnl IS NOT NULL
+        GROUP BY DATE(executed_at) ORDER BY trade_date DESC LIMIT :days
     """), {"strategy_id": strategy_id, "days": days}).fetchall()
 
     open_positions = db.execute(text("""

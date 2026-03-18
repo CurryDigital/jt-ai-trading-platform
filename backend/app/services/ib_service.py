@@ -8,6 +8,12 @@ import logging
 from queue import Queue
 from ib_insync import IB, Forex, Stock, MarketOrder
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 class IBKRThreadedService:
@@ -20,12 +26,10 @@ class IBKRThreadedService:
     - 4002 = PAPER trading (simulated)
     """
     
-    # Default: 52.74.14.181:4002 (paper trading)
-    # To switch to live: change port to 4001
-    def __init__(self, host='52.74.14.181', port=4002, client_id=1):
-        self.host = host
-        self.port = port
-        self.client_id = client_id
+    def __init__(self, host=None, port=None, client_id=None):
+        self.host = host or os.getenv('IBKR_HOST', '52.74.14.181')
+        self.port = int(port or os.getenv('IBKR_PORT', 4002))
+        self.client_id = int(client_id or os.getenv('IBKR_CLIENT_ID', 1))
         self._ib = None
         self._connected = False
         self._thread = None
@@ -331,8 +335,15 @@ class IBKRThreadedService:
             
         return status
 
-# Create singleton instance
-ib_threaded_service = IBKRThreadedService()
+# Lazy singleton instance - created on first access
+_ib_threaded_service_instance = None
+
+def get_ib_threaded_service():
+    """Get or create the IBKR threaded service singleton (lazy initialization)"""
+    global _ib_threaded_service_instance
+    if _ib_threaded_service_instance is None:
+        _ib_threaded_service_instance = IBKRThreadedService()
+    return _ib_threaded_service_instance
 
 # Legacy compatibility
 class IBKRQuantService:
@@ -342,27 +353,33 @@ class IBKRQuantService:
         self.host = host
         self.port = port
         self.client_id = client_id
-        # Auto-start the threaded service
-        ib_threaded_service.start()
+        # Lazy start - don't block startup, connect when first needed
+        self._started = False
+    
+    def _ensure_started(self):
+        """Start the service on first use"""
+        if not self._started:
+            get_ib_threaded_service().start()
+            self._started = True
     
     @property
     def is_connected(self):
-        return ib_threaded_service.is_connected
+        return get_ib_threaded_service().is_connected
     
     def get_status(self):
         """Get connection status from threaded service"""
-        return ib_threaded_service.get_status()
+        return get_ib_threaded_service().get_status()
     
     def get_account_summary(self):
         """Get account summary - requires connected IB instance with health validation"""
         # First check connection with health validation
-        if not ib_threaded_service.is_connected:
+        if not get_ib_threaded_service().is_connected:
             logger.warning("Cannot fetch account summary: IBKR not connected")
             return None
         
         try:
             # Access the IB instance from threaded service
-            ib = ib_threaded_service._ib
+            ib = get_ib_threaded_service()._ib
             if not ib:
                 logger.warning("IB instance is None despite is_connected=True")
                 return None
@@ -370,7 +387,7 @@ class IBKRQuantService:
             # Double-check connection is alive before fetching
             if not ib.isConnected():
                 logger.warning("IB isConnected() returned False during account fetch")
-                ib_threaded_service._connected = False
+                get_ib_threaded_service()._connected = False
                 return None
             
             # Get account summary
@@ -442,28 +459,28 @@ class IBKRQuantService:
         except Exception as e:
             logger.error(f"Failed to get account summary: {e}")
             # Mark connection as potentially broken
-            ib_threaded_service._connected = False
+            get_ib_threaded_service()._connected = False
             return None
     
     async def connect(self):
-        """Connect - service auto-starts, just return status"""
-        ib_threaded_service.start()
+        """Connect - service starts on demand, just return status"""
+        self._ensure_started()
         import time
         time.sleep(1)
-        if ib_threaded_service.is_connected:
+        if get_ib_threaded_service().is_connected:
             return {"status": "Connected", "port": self.port}
         return {"status": "Failed", "reason": "Gateway not responding. Check if Gateway is running."}
     
     async def get_fx_realtime(self, pair='EURUSD'):
         """Get real-time FX data"""
-        if not ib_threaded_service.is_connected:
+        if not get_ib_threaded_service().is_connected:
             return None
         # This would need proper async bridge - simplified for now
         return {"bid": None, "ask": None, "last": None, "note": "Streaming not yet implemented in threaded mode"}
     
     async def execute_quant_trade(self, pair, action, quantity):
         """Execute trade - placeholder"""
-        if not ib_threaded_service.is_connected:
+        if not get_ib_threaded_service().is_connected:
             return {"status": "error", "message": "Not connected"}
         return {"status": "success", "message": "Trade execution requires full implementation"}
     
@@ -482,16 +499,16 @@ class IBKRQuantService:
         Returns:
             dict with success status and order_id
         """
-        if not ib_threaded_service.is_connected:
+        if not get_ib_threaded_service().is_connected:
             logger.error("Cannot place order: IBKR not connected")
             return {"success": False, "error": "Not connected to IBKR"}
         
         # Use the threaded service's submit_order method
-        return ib_threaded_service.submit_order(symbol, action, quantity, order_type)
+        return get_ib_threaded_service().submit_order(symbol, action, quantity, order_type)
     
     def get_price(self, symbol):
         """Get current market price for a symbol from IBKR"""
-        return ib_threaded_service.get_price(symbol)
+        return get_ib_threaded_service().get_price(symbol)
 
-# Keep the old name for compatibility
+# Keep the old name for compatibility - lazy initialization
 ib_quant_service = IBKRQuantService()
