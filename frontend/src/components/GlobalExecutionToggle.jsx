@@ -246,9 +246,15 @@ export const GlobalExecutionToggle = () => {
           <div className="p-4 space-y-3">
             {/* Mode Selection */}
             {[
-              { key: 'SIMULATION', label: 'Simulation', icon: '🧪', color: 'emerald', risk: 'Zero Risk' },
-              { key: 'PAPER_TRADING', label: 'Paper Trading', icon: '📝', color: 'amber', risk: 'Fake Money' },
-              { key: 'LIVE_TRADING', label: 'LIVE Trading', icon: '💰', color: 'rose', risk: 'REAL MONEY' }
+              { key: 'SIMULATION', label: 'Simulation', icon: '🧪', risk: 'Zero Risk',
+                activeBg: 'bg-emerald-500/20', activeBorder: 'border-emerald-500 ring-1 ring-emerald-500',
+                activeText: 'text-emerald-400', activeDot: 'bg-emerald-500' },
+              { key: 'PAPER_TRADING', label: 'Paper Trading', icon: '📝', risk: 'Fake Money',
+                activeBg: 'bg-amber-500/20', activeBorder: 'border-amber-500 ring-1 ring-amber-500',
+                activeText: 'text-amber-400', activeDot: 'bg-amber-500' },
+              { key: 'LIVE_TRADING', label: 'LIVE Trading', icon: '💰', risk: 'REAL MONEY',
+                activeBg: 'bg-rose-500/20', activeBorder: 'border-rose-500 ring-1 ring-rose-500',
+                activeText: 'text-rose-400', activeDot: 'bg-rose-500' }
             ].map((m) => (
                 <button
                 key={m.key}
@@ -262,20 +268,20 @@ export const GlobalExecutionToggle = () => {
                 disabled={loading}
                 className={`w-full p-3 rounded-lg border text-left transition-all ${
                   mode === m.key
-                    ? `bg-${m.color}-500/20 border-${m.color}-500 ring-1 ring-${m.color}-500`
+                    ? `${m.activeBg} ${m.activeBorder}`
                     : 'bg-slate-800 border-white/5 hover:border-white/20'
                 } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-xl">{m.icon}</span>
                   <div className="flex-1">
-                    <div className={`text-sm font-bold ${mode === m.key ? `text-${m.color}-400` : 'text-white'}`}>
+                    <div className={`text-sm font-bold ${mode === m.key ? m.activeText : 'text-white'}`}>
                       {m.label}
                     </div>
                     <div className="text-[10px] text-slate-400">{m.risk}</div>
                   </div>
                   {mode === m.key && (
-                    <div className={`w-2 h-2 rounded-full bg-${m.color}-500`} />
+                    <div className={`w-2 h-2 rounded-full ${m.activeDot}`} />
                   )}
                 </div>
               </button>

@@ -366,6 +366,8 @@ def get_full_portfolio_dashboard(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/inventory/analyze")
 async def api_trigger_sell_analysis(bg: BackgroundTasks, db: Session = Depends(get_db)):
     bg.add_task(run_deep_sell_analysis, db)
     return {"status": "Analysis Started"}
@@ -676,6 +678,159 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
         "count": len(results),
         "ibkr_connected": ib_connected
     }
+
+
+@app.get("/api/settings")
+def get_platform_settings(db: Session = Depends(get_db)):
+    """Get all platform settings from gold.platform_settings"""
+    try:
+        result = db.execute(text("""
+            SELECT key, value FROM gold.platform_settings
+        """)).fetchall()
+
+        settings = {}
+        for row in result:
+            key = row.key
+            val = row.value
+            # Try to parse numeric values
+            try:
+                val = float(val)
+                if val == int(val):
+                    val = int(val)
+            except (ValueError, TypeError):
+                pass
+            settings[key] = val
+
+        # Map stored keys to frontend field names
+        return {
+            "defaultCapital": settings.get("simulation_capital", 100000),
+            "maxPositionsPerStrategy": settings.get("max_positions_per_strategy", 4),
+            "tradeSizePercent": settings.get("trade_size_percent", 25),
+            "autoRefreshInterval": settings.get("auto_refresh_interval", 30),
+            "priceAlerts": settings.get("price_alerts", "true") == "true" if isinstance(settings.get("price_alerts"), str) else bool(settings.get("price_alerts", True)),
+            "emailNotifications": settings.get("email_notifications", "false") == "true" if isinstance(settings.get("email_notifications"), str) else bool(settings.get("email_notifications", False)),
+        }
+    except Exception as e:
+        logger.error(f"Settings fetch error: {e}")
+        return {
+            "defaultCapital": 100000,
+            "maxPositionsPerStrategy": 4,
+            "tradeSizePercent": 25,
+            "autoRefreshInterval": 30,
+            "priceAlerts": True,
+            "emailNotifications": False,
+        }
+
+
+@app.post("/api/settings")
+def save_platform_settings(payload: dict, db: Session = Depends(get_db)):
+    """Save platform settings to gold.platform_settings"""
+    try:
+        # Map frontend field names to storage keys
+        field_map = {
+            "defaultCapital": "simulation_capital",
+            "maxPositionsPerStrategy": "max_positions_per_strategy",
+            "tradeSizePercent": "trade_size_percent",
+            "autoRefreshInterval": "auto_refresh_interval",
+            "priceAlerts": "price_alerts",
+            "emailNotifications": "email_notifications",
+        }
+
+        for frontend_key, db_key in field_map.items():
+            if frontend_key in payload:
+                value = str(payload[frontend_key]).lower() if isinstance(payload[frontend_key], bool) else str(payload[frontend_key])
+                db.execute(text("""
+                    INSERT INTO gold.platform_settings (key, value, updated_at)
+                    VALUES (:key, :value, NOW())
+                    ON CONFLICT (key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        updated_at = NOW()
+                """), {"key": db_key, "value": value})
+
+        db.commit()
+        return {"success": True, "message": "Settings saved"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Settings save error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sync/status")
+def get_sync_status(db: Session = Depends(get_db)):
+    """Get last sync timestamps for each data component"""
+    try:
+        components = ["stocks", "fx", "crypto", "commodities", "earnings", "consensus"]
+        result = {}
+        for comp in components:
+            row = db.execute(text("""
+                SELECT value FROM gold.platform_settings
+                WHERE key = :key
+            """), {"key": f"last_sync_{comp}"}).fetchone()
+            result[comp] = {
+                "last_sync": row.value if row else None,
+                "status": "synced" if row else "unknown"
+            }
+        return result
+    except Exception as e:
+        logger.error(f"Sync status error: {e}")
+        return {comp: {"last_sync": None, "status": "unknown"} for comp in ["stocks", "fx", "crypto", "commodities", "earnings", "consensus"]}
+
+
+@app.post("/api/sync/{component}")
+def trigger_sync(component: str, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    """Trigger data sync for a specific component"""
+    valid_components = ["stocks", "fx", "crypto", "commodities", "earnings", "consensus"]
+    if component not in valid_components:
+        raise HTTPException(status_code=400, detail=f"Invalid component. Use one of: {valid_components}")
+
+    refresh_map = {
+        "stocks": refresh_stock_layer,
+        "fx": refresh_fx_layer,
+        "crypto": refresh_crypto_layer,
+        "commodities": refresh_commodity_layer,
+    }
+
+    if component in refresh_map:
+        bg.add_task(refresh_map[component], db)
+        # Record sync timestamp
+        db.execute(text("""
+            INSERT INTO gold.platform_settings (key, value, updated_at)
+            VALUES (:key, :ts, NOW())
+            ON CONFLICT (key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = NOW()
+        """), {"key": f"last_sync_{component}", "ts": datetime.datetime.now().isoformat()})
+        db.commit()
+        return {"success": True, "message": f"{component} sync started"}
+    else:
+        return {"success": True, "message": f"{component} sync not yet implemented"}
+
+
+@app.get("/api/earnings/upcoming")
+def get_upcoming_earnings(db: Session = Depends(get_db)):
+    """Get upcoming earnings from consumption data"""
+    try:
+        result = db.execute(text("""
+            SELECT ticker, earnings_date, eps_estimate, revenue_estimate
+            FROM consumption.stock
+            WHERE earnings_date IS NOT NULL
+              AND earnings_date >= CURRENT_DATE
+              AND earnings_date <= CURRENT_DATE + INTERVAL '14 days'
+            ORDER BY earnings_date ASC
+            LIMIT 20
+        """)).fetchall()
+
+        return {
+            "earnings": [{
+                "ticker": r.ticker,
+                "date": r.earnings_date.isoformat() if r.earnings_date else None,
+                "eps_estimate": float(r.eps_estimate) if r.eps_estimate else None,
+                "revenue_estimate": float(r.revenue_estimate) if r.revenue_estimate else None
+            } for r in result]
+        }
+    except Exception as e:
+        logger.error(f"Earnings fetch error: {e}")
+        return {"earnings": []}
 
 
 @app.get("/api/settings/data-sources")

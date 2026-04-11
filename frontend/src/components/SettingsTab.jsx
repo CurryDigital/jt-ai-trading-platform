@@ -179,7 +179,7 @@ export const SettingsTab = () => {
               </span>
               <div>
                 <h3 className="text-sm font-bold text-white">
-                  Current Mode: {executionMode.replace('_', ' ')}
+                  Current Mode: {executionMode.replaceAll('_', ' ')}
                 </h3>
                 <p className="text-xs text-slate-400">
                   {executionMode === 'LIVE_TRADING' 

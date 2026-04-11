@@ -3,12 +3,12 @@
 
 :root {
   --primary: #3b82f6;
-  --primary-glow: rgba(59, 130, 246, 0.4);
+  --primary-glow: rgba(59, 130, 246, 0.3);
   --secondary: #10b981;
   --accent: #f59e0b;
   --bg-dark: #05070a;
-  --bg-card: rgba(13, 17, 28, 0.6);
-  --border-glass: rgba(255, 255, 255, 0.05);
+  --bg-card: rgba(13, 17, 28, 0.5);
+  --border-glass: rgba(255, 255, 255, 0.06);
 }
 
 * {
@@ -48,13 +48,13 @@ body {
 }
 
 .glass-hover {
-  @apply transition-all duration-500 ease-out;
+  @apply transition-all duration-300 ease-out;
 }
 .glass-hover:hover {
   background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
 }
 
 .glow-blue { box-shadow: 0 0 30px rgba(59, 130, 246, 0.15); }

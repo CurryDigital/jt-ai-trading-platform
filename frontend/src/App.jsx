@@ -1,41 +1,80 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { MarketsTab } from './components/MarketsTab';
 import { SettingsTab } from './components/SettingsTab';
 import { StrategyLab } from './components/StrategyLab';
 import { ResearchTab } from './components/ResearchTab';
-import { fmt, fmtK, fmtPct, pnlCl, pnlBg, api } from './utils';
+import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
+import { fmt, fmtK, fmtPct, pnlCl, api } from './utils';
 
-// Icons
-const Icons = {
-  Dashboard: '📊', Strategies: '🎯', Chart: '📈', Research: '🔬',
-  Performance: '📈', Portfolio: '💼', Markets: '🌐', Settings: '⚙️'
+// SVG Icon Components
+const Icon = {
+  Command: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+    </svg>
+  ),
+  Lab: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+    </svg>
+  ),
+  Research: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+    </svg>
+  ),
+  Performance: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+    </svg>
+  ),
+  Portfolio: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  ),
+  Markets: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  Settings: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  ),
 };
 
 // Compact UI Components
 const Pill = ({ c, children }) => {
-  const colors = { emerald: 'bg-emerald-500/15 text-emerald-400', rose: 'bg-rose-500/15 text-rose-400', blue: 'bg-blue-500/15 text-blue-400', amber: 'bg-amber-500/15 text-amber-400', slate: 'bg-slate-700/50 text-slate-400' };
-  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${colors[c] || colors.slate}`}>{children}</span>;
+  const colors = {
+    emerald: 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20',
+    rose: 'bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/20',
+    blue: 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/20',
+    amber: 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/20',
+    slate: 'bg-slate-700/50 text-slate-400 ring-1 ring-slate-500/20',
+  };
+  return <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ${colors[c] || colors.slate}`}>{children}</span>;
 };
 
-const Dot = ({ on }) => <span className={`inline-block w-1.5 h-1.5 rounded-full ${on ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />;
-
 const KPI = ({ l, v, sub, pos }) => (
-  <div className="px-3 py-2 bg-slate-900/60 rounded-lg border border-white/5 min-w-0">
-    <div className="text-[9px] text-slate-500 uppercase tracking-wider truncate">{l}</div>
-    <div className="text-base font-bold text-white font-mono leading-tight mt-0.5">{v}</div>
-    {sub && <div className={`text-[10px] mt-0.5 ${pos != null ? (pos ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}`}>{sub}</div>}
+  <div className="px-4 py-3 bg-slate-900/60 rounded-xl border border-white/[0.06] hover:border-white/10 transition-colors min-w-0">
+    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-medium truncate">{l}</div>
+    <div className="text-lg font-bold text-white font-mono leading-tight mt-1">{v}</div>
+    {sub && <div className={`text-[11px] mt-1 font-medium ${pos != null ? (pos ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}`}>{sub}</div>}
   </div>
 );
 
 // Portfolio Component
 const PortfolioTab = ({ data }) => {
   const [search, setSearch] = useState('');
-  const positions = useMemo(() => 
+  const positions = useMemo(() =>
     data.positions.filter(p => !search || p.ticker?.toLowerCase().includes(search.toLowerCase())),
     [data.positions, search]
   );
-  
+
   const totalValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
   const totalPnL = positions.reduce((s, p) => s + (p.pnl || 0), 0);
   const longVal = positions.filter(p => p.side === 'LONG').reduce((s, p) => s + (p.market_value || 0), 0);
@@ -55,25 +94,26 @@ const PortfolioTab = ({ data }) => {
         <KPI l="Short" v={fmtK(shortVal)} pos={false} />
       </div>
 
-      <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
-        <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+      <div className="bg-slate-900/50 rounded-xl border border-white/[0.06] overflow-hidden">
+        <div className="px-3 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
           <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Positions</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter..." 
-            className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-[10px] text-white w-28" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter..."
+            className="px-2.5 py-1 bg-slate-800/80 border border-white/10 rounded-lg text-[11px] text-white w-28 placeholder-slate-600 focus:outline-none focus:border-blue-500/50" />
         </div>
-        
+
+        {/* Desktop table */}
         <table className="w-full text-xs hidden md:table">
           <thead className="bg-slate-900/80">
             <tr className="text-[9px] text-slate-500 uppercase">
-              {['Ticker', 'Strategy', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h => 
-                <th key={h} className="text-right py-2 px-2">{h}</th>)}
+              {['Ticker', 'Strategy', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
+                <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
             {positions.map(p => {
               const pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
               return (
-                <tr key={p.id || p.ticker} className="hover:bg-white/5">
+                <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
                   <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
                   <td className="py-2 px-2 text-slate-400">{p.strategy}</td>
                   <td className="py-2 px-2 text-center">
@@ -88,9 +128,36 @@ const PortfolioTab = ({ data }) => {
                 </tr>
               );
             })}
-            {!positions.length && <tr><td colSpan={9} className="py-6 text-center text-slate-600">No positions</td></tr>}
+            {!positions.length && <tr><td colSpan={9} className="py-8 text-center text-slate-600 text-sm">No positions</td></tr>}
           </tbody>
         </table>
+
+        {/* Mobile card view */}
+        <div className="md:hidden divide-y divide-white/5">
+          {positions.map(p => {
+            const pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
+            return (
+              <div key={p.id || p.ticker} className="p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-sm">{p.ticker}</span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{p.side}</span>
+                  </div>
+                  <span className={`font-mono font-bold text-sm ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>{p.strategy}</span>
+                  <span className="font-mono">{fmt(p.quantity, 0)} @ ${fmt(p.entry_price)}</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500">Current: <span className="text-white font-mono">${fmt(p.current_price)}</span></span>
+                  <span className={`font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</span>
+                </div>
+              </div>
+            );
+          })}
+          {!positions.length && <div className="py-8 text-center text-slate-600 text-sm">No positions</div>}
+        </div>
       </div>
     </div>
   );
@@ -100,14 +167,19 @@ const PortfolioTab = ({ data }) => {
 const PerformanceTab = ({ data }) => {
   const [tf, setTf] = useState('1M');
   const strategies = data.strategies || [];
-  
+
+  // Sort without mutating state - use spread to create a new array
+  const bestStrategy = useMemo(() => {
+    return [...strategies].sort((a, b) => (b.returns || 0) - (a.returns || 0))[0];
+  }, [strategies]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-sm font-bold text-white">Performance</h2><p className="text-[10px] text-slate-500">Backtest vs Live</p></div>
-        <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/5">
-          {['1W', '1M', '3M', '1Y', 'ALL'].map(t => 
-            <button key={t} onClick={() => setTf(t)} className={`px-3 py-1 rounded text-[10px] font-bold ${tf === t ? 'bg-blue-500 text-white' : 'text-slate-400'}`}>{t}</button>)}
+        <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
+          {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>
+            <button key={t} onClick={() => setTf(t)} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${tf === t ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>{t}</button>)}
         </div>
       </div>
 
@@ -115,43 +187,45 @@ const PerformanceTab = ({ data }) => {
         <KPI l="Active" v={strategies.filter(s => s.live_trades > 0).length} />
         <KPI l="Avg Live WR" v={`${(strategies.filter(s => s.live_win_rate).reduce((a, s) => a + (s.live_win_rate || 0), 0) / Math.max(1, strategies.filter(s => s.live_win_rate).length)).toFixed(0)}%`} pos={true} />
         <KPI l="Total Trades" v={strategies.reduce((a, s) => a + (s.live_trades || 0), 0)} />
-        <KPI l="Best" v={strategies.sort((a, b) => (b.returns || 0) - (a.returns || 0))[0]?.strategy_name?.slice(0, 10) || '—'} pos={true} />
+        <KPI l="Best" v={bestStrategy?.strategy_name?.slice(0, 10) || '\u2014'} pos={true} />
       </div>
 
-      <div className="bg-slate-900/50 rounded-lg border border-white/5 overflow-hidden">
-        <div className="px-3 py-2 border-b border-white/5">
-          <span className="text-[10px] text-slate-500 uppercase font-bold">Strategy Comparison</span>
+      <div className="bg-slate-900/50 rounded-xl border border-white/[0.06] overflow-hidden">
+        <div className="px-3 py-2.5 border-b border-white/[0.06]">
+          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Strategy Comparison</span>
         </div>
-        <table className="w-full text-xs">
-          <thead className="text-[9px] text-slate-500 uppercase border-b border-white/10 bg-slate-900/30">
-            <tr>
-              {['Strategy', 'Tier', 'BT WR', 'Live WR', 'Δ WR', 'BT PF', 'Live PF', 'Returns'].map(h => 
-                <th key={h} className="text-right py-2 px-2">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {strategies.map(s => {
-              const delta = s.backtest_win_rate != null && s.live_win_rate != null ? s.live_win_rate - s.backtest_win_rate : null;
-              return (
-                <tr key={s.strategy_id} className="hover:bg-white/[0.02]">
-                  <td className="py-2 px-2">
-                    <div className="font-bold text-white">{s.strategy_name || s.strategy_id}</div>
-                    <div className="text-[9px] text-slate-500">{s.asset_class}</div>
-                  </td>
-                  <td className="py-2 px-2 text-right">
-                    <span className={`text-[10px] font-bold ${s.tier?.includes('T1') ? 'text-emerald-400' : s.tier?.includes('T2') ? 'text-amber-400' : 'text-slate-400'}`}>{s.tier || 'T4'}</span>
-                  </td>
-                  <td className="py-2 px-2 text-right font-mono text-slate-400">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '—'}</td>
-                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(s.live_win_rate - 50)}`}>{s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '—'}</td>
-                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(delta)}`}>{delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}pp` : '—'}</td>
-                  <td className="py-2 px-2 text-right font-mono text-slate-400">{s.backtest_pf?.toFixed(2) || '—'}</td>
-                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(s.live_profit_factor - 1.5)}`}>{s.live_profit_factor?.toFixed(2) || '—'}</td>
-                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-[9px] text-slate-500 uppercase border-b border-white/10 bg-slate-900/30">
+              <tr>
+                {['Strategy', 'Tier', 'BT WR', 'Live WR', '\u0394 WR', 'BT PF', 'Live PF', 'Returns'].map(h =>
+                  <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {strategies.map(s => {
+                const delta = s.backtest_win_rate != null && s.live_win_rate != null ? s.live_win_rate - s.backtest_win_rate : null;
+                return (
+                  <tr key={s.strategy_id} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="py-2 px-2">
+                      <div className="font-bold text-white">{s.strategy_name || s.strategy_id}</div>
+                      <div className="text-[9px] text-slate-500">{s.asset_class}</div>
+                    </td>
+                    <td className="py-2 px-2 text-right">
+                      <span className={`text-[10px] font-bold ${s.tier?.includes('T1') ? 'text-emerald-400' : s.tier?.includes('T2') ? 'text-amber-400' : 'text-slate-400'}`}>{s.tier || 'T4'}</span>
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono text-slate-400">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '\u2014'}</td>
+                    <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(s.live_win_rate - 50)}`}>{s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '\u2014'}</td>
+                    <td className={`py-2 px-2 text-right font-mono ${pnlCl(delta)}`}>{delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}pp` : '\u2014'}</td>
+                    <td className="py-2 px-2 text-right font-mono text-slate-400">{s.backtest_pf?.toFixed(2) || '\u2014'}</td>
+                    <td className={`py-2 px-2 text-right font-mono ${pnlCl(s.live_profit_factor - 1.5)}`}>{s.live_profit_factor?.toFixed(2) || '\u2014'}</td>
+                    <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '\u2014'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -161,29 +235,30 @@ const PerformanceTab = ({ data }) => {
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { mode: urlMode } = useParams();
-  
+
   const [data, setData] = useState({ strategies: [], positions: [], paperStrategies: [], dailyPnl: [], trades: [], summary: {}, mode: 'SIMULATION' });
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);
-  const [deploy, setDeploy] = useState(null);
+  const [executionMode, setExecutionMode] = useState('SIMULATION');
+  const [ibkrConnected, setIbkrConnected] = useState(false);
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const currentMode = pathParts[0] || 'sim';
   const currentTab = pathParts[1] || 'command';
 
-  // Sync mode with backend
+  // Fetch execution mode and IBKR status
   useEffect(() => {
-    const sync = async () => {
+    const fetchMode = async () => {
       const modeData = await api.get('/api/execution/global-mode');
-      const backendMode = modeData?.execution_mode || 'SIMULATION';
-      const urlMode = currentMode === 'paper' ? 'PAPER_TRADING' : 'SIMULATION';
-      if (backendMode !== urlMode && urlMode !== 'SIMULATION') {
-        await api.post('/api/execution/global-mode', { mode: urlMode });
+      if (modeData) {
+        setExecutionMode(modeData.execution_mode || 'SIMULATION');
+        setIbkrConnected(modeData.ibkr_connected || false);
       }
     };
-    sync();
-  }, [currentMode]);
+    fetchMode();
+    const interval = setInterval(fetchMode, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch data
   useEffect(() => {
@@ -194,7 +269,7 @@ export default function App() {
         api.get('/api/performance/strategy'),
         api.get('/api/paper-strategies')
       ]);
-      
+
       setData({
         strategies: strategies?.strategies || [],
         positions: positions?.positions || positions || [],
@@ -203,67 +278,85 @@ export default function App() {
         monthlyReturns: performance?.monthly_returns || [],
         trades: [],
         summary: performance?.summary || {},
-        mode: 'SIMULATION'
+        mode: executionMode,
       });
       setLoading(false);
     };
-    
+
     fetchAll();
     const interval = setInterval(fetchAll, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [executionMode]);
 
   const navItems = [
-    { id: 'command', label: 'Command', icon: Icons.Dashboard },
-    { id: 'lab', label: 'Lab', icon: Icons.Chart },
-    { id: 'research', label: 'Research', icon: Icons.Research },
-    { id: 'performance', label: 'Performance', icon: Icons.Performance },
-    { id: 'portfolio', label: 'Portfolio', icon: Icons.Portfolio },
-    { id: 'markets', label: 'Markets', icon: Icons.Markets },
-    { id: 'settings', label: 'Settings', icon: Icons.Settings },
+    { id: 'command', label: 'Command', IconComponent: Icon.Command },
+    { id: 'lab', label: 'Lab', IconComponent: Icon.Lab },
+    { id: 'research', label: 'Research', IconComponent: Icon.Research },
+    { id: 'performance', label: 'Performance', IconComponent: Icon.Performance },
+    { id: 'portfolio', label: 'Portfolio', IconComponent: Icon.Portfolio },
+    { id: 'markets', label: 'Markets', IconComponent: Icon.Markets },
+    { id: 'settings', label: 'Settings', IconComponent: Icon.Settings },
   ];
 
   const navigateToTab = (tab) => navigate(`/${currentMode}/${tab}`);
-  const modeColor = data.mode === 'LIVE_TRADING' ? 'rose' : data.mode === 'PAPER_TRADING' ? 'amber' : 'emerald';
-  const isConnected = data.ibStatus?.connected;
 
   if (loading) return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-      <div className="text-slate-500 flex items-center gap-2">
-        <div className="w-4 h-4 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin" />
-        <span className="text-xs">Loading...</span>
+    <div className="min-h-screen bg-[#05070a] flex items-center justify-center">
+      <div className="text-slate-500 flex flex-col items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-black text-white animate-pulse">JT</div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+          <span className="text-xs text-slate-500">Loading platform...</span>
+        </div>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans">
-      <header className="fixed top-0 left-0 right-0 z-40 border-b border-white/5 bg-slate-950/90 backdrop-blur-xl">
-        <div className="flex items-center justify-between px-3 py-2 max-w-[1800px] mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-black">JT</div>
-              <span className="text-xs font-bold text-white hidden md:inline">JTCML</span>
+    <div className="min-h-screen bg-[#05070a] text-white font-sans">
+      {/* Header */}
+      <header className="fixed top-0 left-0 right-0 z-40 border-b border-white/[0.06] bg-[#05070a]/80 backdrop-blur-xl">
+        <div className="flex items-center justify-between px-4 py-2.5 max-w-[1800px] mx-auto">
+          <div className="flex items-center gap-4">
+            {/* Logo */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-black shadow-lg shadow-blue-500/20">JT</div>
+              <div className="hidden md:block">
+                <span className="text-sm font-bold text-white tracking-tight">JTCML</span>
+                <span className="text-[10px] text-slate-500 block -mt-0.5">Trading Platform</span>
+              </div>
             </div>
-            <nav className="hidden md:flex gap-1">
+
+            {/* Desktop Nav */}
+            <nav className="hidden md:flex gap-0.5 p-1 rounded-xl bg-slate-900/40 border border-white/[0.04]">
               {navItems.map(n => (
                 <button key={n.id} onClick={() => navigateToTab(n.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${currentTab === n.id ? 'bg-white text-black' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
+                    currentTab === n.id
+                      ? 'bg-white/10 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
                 >
-                  <span>{n.icon}</span><span>{n.label}</span>
+                  <n.IconComponent />
+                  <span>{n.label}</span>
                 </button>
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-2">
-            <Pill c={modeColor}>{data.mode.replace('_TRADING', '').replace('_', ' ')}</Pill>
-            <div className="flex items-center gap-1"><Dot on={isConnected} /><span className="text-[10px] text-slate-500 hidden sm:inline">IBKR</span></div>
-            <span className="text-[10px] text-slate-600 hidden lg:inline">{new Date().toLocaleTimeString()}</span>
+
+          {/* Right side status */}
+          <div className="flex items-center gap-3">
+            <GlobalExecutionToggle />
+            <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${ibkrConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+              <span className="text-[10px] text-slate-500">IBKR</span>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="pt-16 md:pt-20 pb-20 md:pb-6 px-3 md:px-6 max-w-[1600px] mx-auto">
+      {/* Main Content */}
+      <main className="pt-16 md:pt-14 pb-20 md:pb-6 px-3 md:px-6 max-w-[1600px] mx-auto">
         {currentTab === 'portfolio' && <PortfolioTab data={data} />}
         {currentTab === 'performance' && <PerformanceTab data={data} />}
         {currentTab === 'markets' && <MarketsTab onTickerClick={t => setDetail(t)} />}
@@ -271,22 +364,85 @@ export default function App() {
         {currentTab === 'lab' && <StrategyLab />}
         {currentTab === 'research' && <ResearchTab onTickerClick={t => setDetail(t)} />}
         {currentTab === 'command' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <KPI l="Strategies" v={data.strategies.length} />
-              <KPI l="Positions" v={data.positions.length} />
-              <KPI l="P&L Today" v={fmtK(data.dailyPnl[0]?.pnl)} pos={data.dailyPnl[0]?.pnl >= 0} />
-              <KPI l="Win Rate" v={`${(data.summary?.win_rate * 100 || 0).toFixed(1)}%`} pos={data.summary?.win_rate > 0.5} />
+          <div className="space-y-6">
+            {/* Welcome header */}
+            <div>
+              <h1 className="text-lg font-bold text-white">Command Center</h1>
+              <p className="text-xs text-slate-500 mt-0.5">Platform overview and key metrics</p>
             </div>
+
+            {/* Top KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <KPI l="Strategies" v={data.strategies.length} sub={`${data.strategies.filter(s => s.live_trades > 0).length} active`} />
+              <KPI l="Positions" v={data.positions.length} sub={data.positions.length > 0 ? `${fmtK(data.positions.reduce((s, p) => s + (p.market_value || 0), 0))} value` : 'No open positions'} />
+              <KPI l="P&L Today" v={fmtK(data.dailyPnl[0]?.pnl)} pos={data.dailyPnl[0]?.pnl >= 0} sub={data.dailyPnl[0]?.pnl != null ? (data.dailyPnl[0].pnl >= 0 ? 'Profitable' : 'Loss') : 'No data'} />
+              <KPI l="Win Rate" v={`${((data.summary?.win_rate || 0) * 100).toFixed(1)}%`} pos={(data.summary?.win_rate || 0) > 0.5} sub={data.summary?.total_trades ? `${data.summary.total_trades} trades` : 'No trades'} />
+            </div>
+
+            {/* Quick actions */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { tab: 'lab', label: 'Strategy Lab', desc: 'Screen & deploy strategies', IconComponent: Icon.Lab, color: 'blue' },
+                { tab: 'research', label: 'Research', desc: 'Signals & analyst ratings', IconComponent: Icon.Research, color: 'violet' },
+                { tab: 'portfolio', label: 'Portfolio', desc: 'Active positions & P&L', IconComponent: Icon.Portfolio, color: 'emerald' },
+                { tab: 'markets', label: 'Markets', desc: 'Market intelligence', IconComponent: Icon.Markets, color: 'amber' },
+              ].map(item => (
+                <button
+                  key={item.tab}
+                  onClick={() => navigateToTab(item.tab)}
+                  className="p-4 rounded-xl bg-slate-900/40 border border-white/[0.06] hover:border-white/10 text-left transition-all group"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="text-slate-400 group-hover:text-white transition-colors">
+                      <item.IconComponent />
+                    </div>
+                    <span className="text-sm font-bold text-white">{item.label}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">{item.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {/* Strategy overview */}
+            {data.strategies.length > 0 && (
+              <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
+                <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+                  <span className="text-xs font-bold text-white">Top Strategies</span>
+                  <button onClick={() => navigateToTab('lab')} className="text-[10px] text-blue-400 hover:text-blue-300 font-medium">View all</button>
+                </div>
+                <div className="divide-y divide-white/5">
+                  {[...data.strategies].sort((a, b) => (b.returns || 0) - (a.returns || 0)).slice(0, 5).map(s => (
+                    <div key={s.strategy_id || s.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+                      <div>
+                        <span className="text-xs font-bold text-white">{s.strategy_name || s.name || s.strategy_id || s.id}</span>
+                        <span className="text-[10px] text-slate-500 ml-2">{s.asset_class}</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {s.win_rate != null && <span className="text-[10px] text-slate-400 font-mono">WR {(s.win_rate * 100).toFixed(0)}%</span>}
+                        <span className={`text-xs font-bold font-mono ${pnlCl(s.returns)}`}>
+                          {s.returns != null ? fmtPct(s.returns) : '\u2014'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
 
+      {/* Mobile Bottom Nav */}
       <nav className="bottom-nav md:hidden">
-        <div className="flex items-center justify-around px-2 py-1">
-          {navItems.slice(0, 5).map(n => (
-            <button key={n.id} onClick={() => navigateToTab(n.id)} className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg ${currentTab === n.id ? 'text-blue-400' : 'text-slate-500'}`}>
-              <span className="text-lg">{n.icon}</span><span className="text-[9px] font-medium">{n.label}</span>
+        <div className="flex items-center justify-around px-1 py-1">
+          {navItems.map(n => (
+            <button key={n.id} onClick={() => navigateToTab(n.id)}
+              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg min-w-0 transition-colors ${
+                currentTab === n.id ? 'text-blue-400' : 'text-slate-500'
+              }`}
+            >
+              <n.IconComponent />
+              <span className="text-[8px] font-medium truncate">{n.label}</span>
             </button>
           ))}
         </div>

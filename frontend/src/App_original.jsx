@@ -484,7 +484,7 @@ function App() {
           await fetch('/api/execution/global-mode', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: urlRepresentsMode })
+            body: JSON.stringify({ execution_mode: urlRepresentsMode })
           });
         }
       } catch (e) {
