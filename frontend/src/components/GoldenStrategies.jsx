@@ -687,8 +687,12 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
   const [activeTab, setActiveTab] = useState('deploy'); // 'deploy' or 'available'
   const [executionMode, setExecutionMode] = useState('SIMULATION');
   
+  // Pipeline summary
+  const [pipelineSummary, setPipelineSummary] = useState(null);
+
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterPriority, setFilterPriority] = useState('ALL');
   const [filterAssetClass, setFilterAssetClass] = useState('ALL');
   const [filterMarket, setFilterMarket] = useState('ALL');
   const [filterMinWinRate, setFilterMinWinRate] = useState(0);
@@ -732,21 +736,23 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
     localStorage.setItem('goldenStrategies_defaultPool', defaultPoolSize.toString());
   }, [defaultPoolSize]);
 
-  useEffect(() => { 
-    fetchStrategies(); 
-    fetchPaperStrategies(); 
+  useEffect(() => {
+    fetchStrategies();
+    fetchPaperStrategies();
     fetchStrategyStats();
-    
+    fetchPipelineSummary();
+
     // Refresh every 60 seconds
     const interval = setInterval(() => {
       fetchPaperStrategies();
       fetchStrategyStats();
+      fetchPipelineSummary();
     }, 60000);
     return () => clearInterval(interval);
   }, []);
 
   const fetchStrategies = () => {
-    fetch('/api/strategies/researcher')
+    fetch('/api/strategies/researcher?priority=ALL')
       .then(r => r.json())
       .then(data => {
         if (data.strategies) {
@@ -765,6 +771,13 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+  };
+
+  const fetchPipelineSummary = () => {
+    fetch('/api/strategies/pipeline-summary')
+      .then(r => r.json())
+      .then(data => setPipelineSummary(data))
+      .catch(e => console.error('Failed to fetch pipeline summary:', e));
   };
 
   const fetchPaperStrategies = () => {
@@ -969,6 +982,31 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
         </button>
       </div>
 
+      {/* Pipeline Stage Summary */}
+      {pipelineSummary && (
+        <div className="flex items-center gap-1 p-1 bg-slate-900/50 rounded-xl border border-white/5">
+          {[
+            { key: 'experimental', label: 'Experimental', color: 'slate', icon: '🧪' },
+            { key: 'near_golden', label: 'Near Golden', color: 'blue', icon: '🔵' },
+            { key: 'golden', label: 'Golden', color: 'amber', icon: '⭐' },
+            { key: 'deployed', label: 'Deployed', color: 'emerald', icon: '🚀' },
+          ].map((stage, i) => (
+            <React.Fragment key={stage.key}>
+              {i > 0 && <span className="text-slate-700 text-xs">→</span>}
+              <div className={`flex-1 text-center py-2 px-2 rounded-lg transition-all ${
+                stage.key === 'experimental' ? 'bg-slate-800/50' :
+                stage.key === 'near_golden' ? 'bg-blue-500/10' :
+                stage.key === 'golden' ? 'bg-amber-500/10' :
+                'bg-emerald-500/10'
+              }`}>
+                <div className="text-lg font-bold text-white">{pipelineSummary[stage.key] || 0}</div>
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">{stage.label}</div>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
       {/* DEPLOYED TAB */}
       {activeTab === 'deploy' && (
         <div className="space-y-4">
@@ -1069,7 +1107,7 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
       {activeTab === 'available' && (
         <>
           {/* Multi-Deploy Header */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-black text-white flex items-center gap-2">
                 <span className="text-2xl">🏆</span>
@@ -1077,24 +1115,51 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
               </h2>
               <p className="text-sm text-slate-400 mt-1">Research-validated strategies across US, HK, CN, SG markets</p>
             </div>
-            
+
             <div className="flex items-center gap-2">
               {selectedStrategies.size > 0 && (
-                <button 
-                  onClick={handleMultiDeploy} 
+                <button
+                  onClick={handleMultiDeploy}
                   disabled={deploying === 'multi'}
                   className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-sm font-bold rounded-lg"
                 >
                   {deploying === 'multi' ? 'Deploying...' : `Deploy ${selectedStrategies.size} Selected`}
                 </button>
               )}
-              <button 
-                onClick={toggleAll} 
+              <button
+                onClick={toggleAll}
                 className="px-3 py-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg"
               >
                 {selectedStrategies.size === strategies.length ? 'Deselect All' : 'Select All'}
               </button>
             </div>
+          </div>
+
+          {/* Priority Filter Pills */}
+          <div className="flex items-center gap-2 mb-4">
+            {[
+              { key: 'ALL', label: 'All', badgeClass: 'bg-slate-700/50 text-slate-300' },
+              { key: 'GOLDEN', label: 'Golden', badgeClass: 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30' },
+              { key: 'NEAR_GOLDEN', label: 'Near Golden', badgeClass: 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30' },
+              { key: 'EXPERIMENTAL', label: 'Experimental', badgeClass: 'bg-slate-600/20 text-slate-400 ring-1 ring-slate-500/30' },
+            ].map(p => {
+              const count = p.key === 'ALL'
+                ? strategies.length
+                : strategies.filter(s => s.priority === p.key).length;
+              return (
+                <button
+                  key={p.key}
+                  onClick={() => setFilterPriority(p.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    filterPriority === p.key
+                      ? p.key === 'ALL' ? 'bg-white/10 text-white ring-1 ring-white/20' : p.badgeClass
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {p.label} ({count})
+                </button>
+              );
+            })}
           </div>
           
           {/* Default Capital Setting */}
@@ -1185,11 +1250,12 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
             </div>
             
             {/* Clear Filters */}
-            {(searchQuery || filterAssetClass !== 'ALL' || filterMarket !== 'ALL' || filterMinWinRate > 0 || filterSignalType !== 'ALL') && (
+            {(searchQuery || filterPriority !== 'ALL' || filterAssetClass !== 'ALL' || filterMarket !== 'ALL' || filterMinWinRate > 0 || filterSignalType !== 'ALL') && (
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => {
                     setSearchQuery('');
+                    setFilterPriority('ALL');
                     setFilterAssetClass('ALL');
                     setFilterMarket('ALL');
                     setFilterMinWinRate(0);
@@ -1239,8 +1305,11 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
               
               // Signal type filter (would need current signal data)
               const matchesSignal = filterSignalType === 'ALL'; // Simplified for now
-              
-              return matchesSearch && matchesAsset && matchesMarket && matchesWinRate && matchesSignal;
+
+              // Priority filter
+              const matchesPriority = filterPriority === 'ALL' || strategy.priority === filterPriority;
+
+              return matchesSearch && matchesAsset && matchesMarket && matchesWinRate && matchesSignal && matchesPriority;
             }).map(strategy => {
               const isSelected = selectedStrategies.has(strategy.id);
               const isExpanded = expandedStrategy === strategy.id;
@@ -1265,9 +1334,18 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
                         />
                         
                         <div>
-                          <h3 className="text-sm font-bold text-white">{strategy.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-bold text-white">{strategy.name}</h3>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider ${
+                              strategy.priority === 'GOLDEN' ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30' :
+                              strategy.priority === 'NEAR_GOLDEN' ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30' :
+                              'bg-slate-600/30 text-slate-400 ring-1 ring-slate-500/30'
+                            }`}>
+                              {strategy.priority === 'NEAR_GOLDEN' ? 'Near Golden' : strategy.priority?.toLowerCase() || 'experimental'}
+                            </span>
+                          </div>
                           <p className="text-xs text-slate-400 mt-1 line-clamp-2">{strategy.description}</p>
-                          
+
                           <div className="flex flex-wrap gap-2 mt-2">
                             <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
                               {strategy.sharpe?.toFixed(2)} Sharpe
@@ -1314,45 +1392,100 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
 
                   {isExpanded && (
                     <div className="px-4 pb-4 border-t border-white/10 pt-4">
-                      <StrategyCapitalPool 
-                        strategyId={strategy.id} 
+                      <StrategyCapitalPool
+                        strategyId={strategy.id}
                         strategyName={strategy.name}
                         onUpdate={fetchPaperStrategies}
                       />
-                      
-                      {/* Signal Logic */}
-                      <div className="grid grid-cols-2 gap-3 mb-4">
+
+                      {/* Review Panel - Win Rate Gauge */}
+                      {strategy.win_rate != null && (
+                        <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-white/5">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Backtest Win Rate</h4>
+                            <span className={`text-lg font-black font-mono ${
+                              strategy.win_rate >= 60 ? 'text-emerald-400' : strategy.win_rate >= 50 ? 'text-amber-400' : 'text-rose-400'
+                            }`}>{typeof strategy.win_rate === 'number' ? strategy.win_rate.toFixed(1) : strategy.win_rate}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                strategy.win_rate >= 60 ? 'bg-emerald-500' : strategy.win_rate >= 50 ? 'bg-amber-500' : 'bg-rose-500'
+                              }`}
+                              style={{ width: `${Math.min(strategy.win_rate, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Entry & Exit Logic */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                         <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
                           <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                            🟢 BUY Signal
+                            Entry Logic
                           </h4>
-                          <p className="text-sm text-slate-300">{strategy.signal_logic || 'See strategy description'}</p>
+                          <p className="text-sm text-slate-300 whitespace-pre-wrap">{strategy.entry_logic || strategy.signal_logic || 'See strategy description'}</p>
                         </div>
-                        
+
                         <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">
                           <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                            🔴 SELL Signal
+                            Exit Logic
                           </h4>
-                          <p className="text-sm text-slate-300">{strategy.exit_logic || 'Take profit or stop loss hit'}</p>
+                          <p className="text-sm text-slate-300 whitespace-pre-wrap">{strategy.exit_logic || 'Take profit or stop loss hit'}</p>
                         </div>
                       </div>
-                      
+
                       {/* Universe */}
                       <div className="mb-4">
                         <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                           Asset Universe ({strategy.assetCount})
                         </h4>
                         <div className="flex flex-wrap gap-1">
-                          {strategy.universe?.slice(0, 10).map(t => (
+                          {strategy.universe?.slice(0, 20).map(t => (
                             <span key={t} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300">{t}</span>
                           ))}
-                          {strategy.universe?.length > 10 && (
+                          {strategy.universe?.length > 20 && (
                             <span className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-500">
-                              +{strategy.universe.length - 10} more
+                              +{strategy.universe.length - 20} more
                             </span>
                           )}
                         </div>
                       </div>
+
+                      {/* Approve / Reject Actions */}
+                      {strategy.status === 'TESTING' && (
+                        <div className="flex items-center gap-3 pt-3 border-t border-white/5">
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/strategies/${encodeURIComponent(strategy.id)}/approve`, { method: 'POST' });
+                                if (res.ok) {
+                                  fetchStrategies();
+                                  fetchPipelineSummary();
+                                }
+                              } catch (e) { console.error('Approve failed:', e); }
+                            }}
+                            className="flex-1 py-2 px-4 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-sm font-bold rounded-lg border border-emerald-500/30 transition-all"
+                          >
+                            Approve for Deployment
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Reject this strategy? It will be marked as DEPRECATED.')) return;
+                              try {
+                                const res = await fetch(`/api/strategies/${encodeURIComponent(strategy.id)}/reject`, { method: 'POST' });
+                                if (res.ok) {
+                                  fetchStrategies();
+                                  fetchPipelineSummary();
+                                }
+                              } catch (e) { console.error('Reject failed:', e); }
+                            }}
+                            className="py-2 px-4 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-sm font-bold rounded-lg border border-rose-500/20 transition-all"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

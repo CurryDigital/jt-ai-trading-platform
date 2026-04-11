@@ -5,6 +5,9 @@ import { SettingsTab } from './components/SettingsTab';
 import { StrategyLab } from './components/StrategyLab';
 import { ResearchTab } from './components/ResearchTab';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
+import { GoldenStrategies } from './components/GoldenStrategies';
+import { StrategyPerformance } from './components/StrategyPerformance';
+import { AgenticResearch } from './components/AgenticResearch';
 import { fmt, fmtK, fmtPct, pnlCl, api } from './utils';
 
 // SVG Icon Components
@@ -43,6 +46,16 @@ const Icon = {
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  ),
+  Strategies: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+    </svg>
+  ),
+  Agents: () => (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
     </svg>
   ),
 };
@@ -166,6 +179,7 @@ const PortfolioTab = ({ data }) => {
 // Performance Component
 const PerformanceTab = ({ data }) => {
   const [tf, setTf] = useState('1M');
+  const [view, setView] = useState('overview'); // 'overview' or 'analytics'
   const strategies = data.strategies || [];
 
   // Sort without mutating state - use spread to create a new array
@@ -173,13 +187,32 @@ const PerformanceTab = ({ data }) => {
     return [...strategies].sort((a, b) => (b.returns || 0) - (a.returns || 0))[0];
   }, [strategies]);
 
+  if (view === 'analytics') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div><h2 className="text-sm font-bold text-white">Deep Analytics</h2><p className="text-[10px] text-slate-500">Comprehensive strategy performance</p></div>
+          <button onClick={() => setView('overview')} className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-900/50 border border-white/[0.06] text-slate-400 hover:text-white transition-colors">
+            Back to Overview
+          </button>
+        </div>
+        <StrategyPerformance />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-sm font-bold text-white">Performance</h2><p className="text-[10px] text-slate-500">Backtest vs Live</p></div>
-        <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
-          {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>
-            <button key={t} onClick={() => setTf(t)} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${tf === t ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>{t}</button>)}
+        <div className="flex items-center gap-2">
+          <button onClick={() => setView('analytics')} className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors">
+            Deep Analytics
+          </button>
+          <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
+            {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>
+              <button key={t} onClick={() => setTf(t)} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${tf === t ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>{t}</button>)}
+          </div>
         </div>
       </div>
 
@@ -241,6 +274,7 @@ export default function App() {
   const [detail, setDetail] = useState(null);
   const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [ibkrConnected, setIbkrConnected] = useState(false);
+  const [pipelineSummary, setPipelineSummary] = useState(null);
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const currentMode = pathParts[0] || 'sim';
@@ -257,6 +291,17 @@ export default function App() {
     };
     fetchMode();
     const interval = setInterval(fetchMode, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch pipeline summary
+  useEffect(() => {
+    const fetchPipeline = async () => {
+      const ps = await api.get('/api/strategies/pipeline-summary');
+      if (ps) setPipelineSummary(ps);
+    };
+    fetchPipeline();
+    const interval = setInterval(fetchPipeline, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -291,6 +336,8 @@ export default function App() {
   const navItems = [
     { id: 'command', label: 'Command', IconComponent: Icon.Command },
     { id: 'lab', label: 'Lab', IconComponent: Icon.Lab },
+    { id: 'strategies', label: 'Strategies', IconComponent: Icon.Strategies },
+    { id: 'agents', label: 'Agents', IconComponent: Icon.Agents },
     { id: 'research', label: 'Research', IconComponent: Icon.Research },
     { id: 'performance', label: 'Performance', IconComponent: Icon.Performance },
     { id: 'portfolio', label: 'Portfolio', IconComponent: Icon.Portfolio },
@@ -362,6 +409,8 @@ export default function App() {
         {currentTab === 'markets' && <MarketsTab onTickerClick={t => setDetail(t)} />}
         {currentTab === 'settings' && <SettingsTab />}
         {currentTab === 'lab' && <StrategyLab />}
+        {currentTab === 'strategies' && <GoldenStrategies />}
+        {currentTab === 'agents' && <AgenticResearch />}
         {currentTab === 'research' && <ResearchTab onTickerClick={t => setDetail(t)} />}
         {currentTab === 'command' && (
           <div className="space-y-6">
@@ -382,6 +431,7 @@ export default function App() {
             {/* Quick actions */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
+                { tab: 'strategies', label: 'Golden Strategies', desc: 'Review & deploy AI strategies', IconComponent: Icon.Strategies, color: 'amber' },
                 { tab: 'lab', label: 'Strategy Lab', desc: 'Screen & deploy strategies', IconComponent: Icon.Lab, color: 'blue' },
                 { tab: 'research', label: 'Research', desc: 'Signals & analyst ratings', IconComponent: Icon.Research, color: 'violet' },
                 { tab: 'portfolio', label: 'Portfolio', desc: 'Active positions & P&L', IconComponent: Icon.Portfolio, color: 'emerald' },
@@ -402,6 +452,34 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            {/* Strategy Pipeline Card */}
+            {pipelineSummary && (
+              <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
+                <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
+                  <span className="text-xs font-bold text-white">Strategy Pipeline</span>
+                  <button onClick={() => navigateToTab('strategies')} className="text-[10px] text-blue-400 hover:text-blue-300 font-medium">Manage</button>
+                </div>
+                <div className="p-4">
+                  <div className="flex items-center gap-2">
+                    {[
+                      { key: 'experimental', label: 'Experimental', bg: 'bg-slate-700/50', text: 'text-slate-300' },
+                      { key: 'near_golden', label: 'Near Golden', bg: 'bg-blue-500/15', text: 'text-blue-400' },
+                      { key: 'golden', label: 'Golden', bg: 'bg-amber-500/15', text: 'text-amber-400' },
+                      { key: 'deployed', label: 'Deployed', bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
+                    ].map((stage, i) => (
+                      <React.Fragment key={stage.key}>
+                        {i > 0 && <span className="text-slate-700 text-[10px]">&rarr;</span>}
+                        <div className={`flex-1 text-center py-2 px-1 rounded-lg ${stage.bg}`}>
+                          <div className={`text-sm font-bold ${stage.text}`}>{pipelineSummary[stage.key] || 0}</div>
+                          <div className="text-[8px] text-slate-500 uppercase tracking-wider">{stage.label}</div>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Strategy overview */}
             {data.strategies.length > 0 && (
