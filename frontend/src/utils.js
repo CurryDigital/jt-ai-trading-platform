@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+
 // Utils - Compact formatting functions
 export const fmt = (n, d = 2) => n == null || isNaN(n) ? '—' : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 export const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(0)}`;
@@ -41,10 +43,11 @@ export const api = {
 
 // Data fetching hook
 export const useData = (urls) => {
-  const [data, setData] = React.useState(null);
-  const [loading, setLoading] = React.useState(true);
-  
-  React.useEffect(() => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const urlKey = JSON.stringify(urls);
+
+  useEffect(() => {
     const fetchData = async () => {
       const results = await Promise.all(
         urls.map(url => api.get(url).catch(() => null))
@@ -55,7 +58,7 @@ export const useData = (urls) => {
     fetchData();
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
-  }, urls);
-  
+  }, [urlKey]);
+
   return { data, loading };
 };

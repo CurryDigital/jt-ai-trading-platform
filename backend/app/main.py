@@ -366,6 +366,8 @@ def get_full_portfolio_dashboard(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/inventory/analyze")
 async def api_trigger_sell_analysis(bg: BackgroundTasks, db: Session = Depends(get_db)):
     bg.add_task(run_deep_sell_analysis, db)
     return {"status": "Analysis Started"}
