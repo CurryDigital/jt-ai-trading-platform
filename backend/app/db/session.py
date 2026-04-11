@@ -261,6 +261,17 @@ class StrategyRegistry(Base):
     exit_logic = Column(Text)
     target_assets = Column(Text)  # Ticker list
 
+class AgentActivity(Base):
+    __tablename__ = "agent_activity"
+    __table_args__ = {"schema": "gold"}
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(String(50), index=True)  # e.g. qr_hub, qr_algo
+    strategy_id = Column(String(10), nullable=True)  # FK to strategy_registry
+    action = Column(String(50))  # e.g. REVIEW, APPROVE, COMMENT, SIGNAL, VALIDATE
+    message = Column(Text)
+    metadata = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=get_hkt_now)
+
 class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = {"schema": "consumption"}

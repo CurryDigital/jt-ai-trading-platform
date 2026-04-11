@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Internal Imports
 from app.db.session import (
     SessionLocal, Base, engine, Inventory, GlobalState,
-    ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy, StrategyRegistry
+    ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy, StrategyRegistry, AgentActivity
 )
 from app.core_logic.data.wholistic_pipeline import (
     refresh_indices_and_mood, refresh_fx_layer, refresh_commodity_layer, refresh_crypto_layer, refresh_stock_layer, refresh_hft_layer
@@ -4289,8 +4289,236 @@ def get_cash_position_summary(db: Session = Depends(get_db)):
 
 # --- TRADE ALGO RESEARCHER STRATEGIES ---
 
+@app.get("/api/strategies/review-queue")
+def get_strategy_review_queue(db: Session = Depends(get_db)):
+    """Get strategies awaiting review (TESTING status with GOLDEN or NEAR_GOLDEN priority)"""
+    try:
+        strategies = db.query(StrategyRegistry).filter(
+            StrategyRegistry.status == 'TESTING',
+            StrategyRegistry.priority.in_(['GOLDEN', 'NEAR_GOLDEN'])
+        ).all()
+
+        result = []
+        for s in strategies:
+            tickers = [t.strip() for t in s.target_assets.split(',')] if s.target_assets else []
+            result.append({
+                "id": s.strategy_id,
+                "name": s.strategy_name,
+                "priority": s.priority,
+                "status": s.status,
+                "version": s.version,
+                "win_rate": float(s.win_rate) if s.win_rate else None,
+                "entry_logic": s.entry_logic,
+                "exit_logic": s.exit_logic,
+                "target_assets": tickers,
+            })
+        return {"strategies": result, "count": len(result)}
+    except Exception as e:
+        logger.error(f"Review queue error: {e}")
+        return {"strategies": [], "count": 0}
+
+
+@app.post("/api/strategies/{strategy_id:path}/approve")
+def approve_strategy(strategy_id: str, db: Session = Depends(get_db)):
+    """Approve a TESTING strategy — sets status to ACTIVE"""
+    try:
+        strategy = db.query(StrategyRegistry).filter(
+            StrategyRegistry.strategy_id == strategy_id
+        ).first()
+        if not strategy:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        strategy.status = 'ACTIVE'
+        db.commit()
+        return {"success": True, "strategy_id": strategy_id, "new_status": "ACTIVE"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Approve error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/strategies/{strategy_id:path}/reject")
+def reject_strategy(strategy_id: str, db: Session = Depends(get_db)):
+    """Reject a strategy — sets status to DEPRECATED"""
+    try:
+        strategy = db.query(StrategyRegistry).filter(
+            StrategyRegistry.strategy_id == strategy_id
+        ).first()
+        if not strategy:
+            raise HTTPException(status_code=404, detail="Strategy not found")
+
+        strategy.status = 'DEPRECATED'
+        db.commit()
+        return {"success": True, "strategy_id": strategy_id, "new_status": "DEPRECATED"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Reject error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Agentic Research Endpoints ──────────────────────────────────────────
+
+AGENT_REGISTRY = {
+    "qr_hub":            {"name": "Hub",            "icon": "🔀", "role": "Orchestrates research pipeline, routes tasks between agents"},
+    "qr_frontend":       {"name": "Frontend",       "icon": "🖥️", "role": "Generates UI reports and visual summaries"},
+    "qr_monitor":        {"name": "Monitor",        "icon": "🔭", "role": "Watches market conditions and triggers alerts"},
+    "qr_idea_intake":    {"name": "Intake",         "icon": "📥", "role": "Receives new strategy ideas from Telegram and other sources"},
+    "qr_etl_manager":    {"name": "ETL",            "icon": "🏭", "role": "Manages data pipelines — ingestion, cleaning, enrichment"},
+    "qr_exp_manager":    {"name": "ExpManager",     "icon": "🧬", "role": "Runs backtests and manages experiment lifecycle"},
+    "qr_data_validator": {"name": "Validator",       "icon": "🔬", "role": "Validates data quality and checks for anomalies"},
+    "qr_algo":           {"name": "Algo",           "icon": "⚙️", "role": "Designs and codes quantitative trading algorithms"},
+    "qr_risk":           {"name": "Risk",           "icon": "🛡️", "role": "Evaluates risk metrics — drawdown, VaR, correlation"},
+    "qr_qa":             {"name": "QA",             "icon": "🚦", "role": "Quality assurance — tests strategy logic and validates results"},
+    "qr_debate":         {"name": "Debate",         "icon": "⚔️", "role": "Red-team / blue-team debate on strategy viability"},
+    "qr_researcher":     {"name": "Researcher",     "icon": "🔍", "role": "Deep-dives into market signals and academic research"},
+    "qr_macro_sentinel": {"name": "MacroSentinel",  "icon": "🌍", "role": "Monitors macro-economic conditions and regime changes"},
+    "qr_architect":      {"name": "Architect",      "icon": "🏗️", "role": "Designs system architecture and strategy frameworks"},
+}
+
+
+@app.get("/api/agents")
+def get_agents():
+    """Get the list of registered OpenClaw agents"""
+    agents = []
+    for agent_id, info in AGENT_REGISTRY.items():
+        agents.append({
+            "agent_id": agent_id,
+            "name": info["name"],
+            "icon": info["icon"],
+            "role": info["role"],
+        })
+    return {"agents": agents}
+
+
+@app.get("/api/agents/activity")
+def get_agent_activity(
+    agent_id: str = None,
+    strategy_id: str = None,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get recent agent activity across all agents or filtered by agent/strategy"""
+    try:
+        query = db.query(AgentActivity).order_by(AgentActivity.timestamp.desc())
+
+        if agent_id:
+            query = query.filter(AgentActivity.agent_id == agent_id)
+        if strategy_id:
+            query = query.filter(AgentActivity.strategy_id == strategy_id)
+
+        activities = query.limit(limit).all()
+
+        result = []
+        for a in activities:
+            agent_info = AGENT_REGISTRY.get(a.agent_id, {"name": a.agent_id, "icon": "🤖", "role": ""})
+            result.append({
+                "id": a.id,
+                "agent_id": a.agent_id,
+                "agent_name": agent_info["name"],
+                "agent_icon": agent_info["icon"],
+                "strategy_id": a.strategy_id,
+                "action": a.action,
+                "message": a.message,
+                "metadata": a.metadata,
+                "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+            })
+
+        return {"activities": result, "count": len(result)}
+    except Exception as e:
+        logger.error(f"Agent activity error: {e}")
+        return {"activities": [], "count": 0}
+
+
+@app.post("/api/agents/activity")
+def log_agent_activity(payload: dict, db: Session = Depends(get_db)):
+    """Log a new agent activity event (called by OpenClaw agents)"""
+    try:
+        activity = AgentActivity(
+            agent_id=payload.get("agent_id"),
+            strategy_id=payload.get("strategy_id"),
+            action=payload.get("action", "COMMENT"),
+            message=payload.get("message", ""),
+            metadata=payload.get("metadata"),
+        )
+        db.add(activity)
+        db.commit()
+        db.refresh(activity)
+        return {"success": True, "id": activity.id}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Log activity error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/agents/strategy-assignments")
+def get_strategy_agent_assignments(db: Session = Depends(get_db)):
+    """Get which agents are currently working on which strategies"""
+    try:
+        # Get the latest activity per agent to determine current assignment
+        latest = db.execute(text("""
+            SELECT DISTINCT ON (agent_id) agent_id, strategy_id, action, message, timestamp
+            FROM gold.agent_activity
+            WHERE strategy_id IS NOT NULL
+            ORDER BY agent_id, timestamp DESC
+        """)).fetchall()
+
+        assignments = {}
+        for row in latest:
+            if row.strategy_id not in assignments:
+                assignments[row.strategy_id] = []
+            agent_info = AGENT_REGISTRY.get(row.agent_id, {"name": row.agent_id, "icon": "🤖"})
+            assignments[row.strategy_id].append({
+                "agent_id": row.agent_id,
+                "agent_name": agent_info["name"],
+                "agent_icon": agent_info["icon"],
+                "action": row.action,
+                "message": row.message,
+                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+            })
+
+        return {"assignments": assignments}
+    except Exception as e:
+        logger.error(f"Strategy assignments error: {e}")
+        return {"assignments": {}}
+
+
+@app.get("/api/strategies/pipeline-summary")
+def get_strategy_pipeline_summary(db: Session = Depends(get_db)):
+    """Get counts of strategies at each pipeline stage"""
+    try:
+        counts = db.execute(text("""
+            SELECT priority, COUNT(*) as cnt
+            FROM gold.strategy_registry
+            WHERE status IN ('ACTIVE', 'TESTING')
+            GROUP BY priority
+        """)).fetchall()
+
+        summary = {"experimental": 0, "near_golden": 0, "golden": 0, "total": 0}
+        for row in counts:
+            key = row.priority.lower() if row.priority else "experimental"
+            if key in summary:
+                summary[key] = row.cnt
+            summary["total"] += row.cnt
+
+        # Count deployed strategies from paper_strategies
+        deployed = db.execute(text("""
+            SELECT COUNT(DISTINCT strategy_id) as cnt
+            FROM gold.paper_strategies
+        """)).fetchone()
+        summary["deployed"] = deployed.cnt if deployed else 0
+
+        return summary
+    except Exception as e:
+        logger.error(f"Pipeline summary error: {e}")
+        return {"experimental": 0, "near_golden": 0, "golden": 0, "deployed": 0, "total": 0}
+
+
 @app.get("/api/strategies/researcher")
-def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get_db)):
+def get_researcher_strategies(asset_class: str = None, priority: str = None, db: Session = Depends(get_db)):
     """Get JT Researcher strategies from strategy_registry with real backtest data"""
     try:
         # Query from StrategyRegistry (canonical source of truth from DE)
@@ -4299,8 +4527,11 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
         # Filter by status - only active strategies
         query = query.filter(StrategyRegistry.status.in_(['ACTIVE', 'TESTING']))
 
-        # Filter GOLDEN priority as the "JT-Ready" strategies
-        query = query.filter(StrategyRegistry.priority.in_(['GOLDEN', 'NEAR_GOLDEN']))
+        # Filter by priority - default to GOLDEN + NEAR_GOLDEN, or allow all
+        if priority and priority != 'ALL':
+            query = query.filter(StrategyRegistry.priority == priority)
+        else:
+            query = query.filter(StrategyRegistry.priority.in_(['GOLDEN', 'NEAR_GOLDEN', 'EXPERIMENTAL']))
 
         strategies = query.all()
 
@@ -4369,8 +4600,6 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
         return {"strategies": result, "count": len(result)}
     except Exception as e:
         logger.error(f"Error fetching from strategy_registry: {e}")
-        # Fallback to legacy table for backward compatibility during migration
-        return _get_strategies_from_definitions(db, asset_class)
         # Fallback to legacy table for backward compatibility during migration
         return _get_strategies_from_definitions(db, asset_class)
 
