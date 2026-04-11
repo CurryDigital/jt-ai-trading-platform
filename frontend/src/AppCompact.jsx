@@ -179,7 +179,7 @@ export default function App() {
       const backendMode = modeData?.execution_mode || 'SIMULATION';
       const urlMode = currentMode === 'paper' ? 'PAPER_TRADING' : 'SIMULATION';
       if (backendMode !== urlMode && urlMode !== 'SIMULATION') {
-        await api.post('/api/execution/global-mode', { mode: urlMode });
+        await api.post('/api/execution/global-mode', { execution_mode: urlMode });
       }
     };
     sync();
