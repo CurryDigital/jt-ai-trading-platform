@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "BlockMath",
+    "slug": "blockmath",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#FFF3E0"
+    },
+    "platforms": ["ios", "android", "web"],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FFF3E0"
+      },
+      "package": "com.blockmath.app"
+    },
+    "ios": {
+      "bundleIdentifier": "com.blockmath.app"
+    }
+  }
+}
