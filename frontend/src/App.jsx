@@ -337,7 +337,7 @@ export default function App() {
     { id: 'command', label: 'Command', IconComponent: Icon.Command },
     { id: 'lab', label: 'Lab', IconComponent: Icon.Lab },
     { id: 'strategies', label: 'Strategies', IconComponent: Icon.Strategies },
-    { id: 'agents', label: 'Agents', IconComponent: Icon.Agents },
+    { id: 'agentic_research', label: 'Agentic Research', IconComponent: Icon.Agents },
     { id: 'research', label: 'Research', IconComponent: Icon.Research },
     { id: 'performance', label: 'Performance', IconComponent: Icon.Performance },
     { id: 'portfolio', label: 'Portfolio', IconComponent: Icon.Portfolio },
@@ -410,7 +410,7 @@ export default function App() {
         {currentTab === 'settings' && <SettingsTab />}
         {currentTab === 'lab' && <StrategyLab />}
         {currentTab === 'strategies' && <GoldenStrategies />}
-        {currentTab === 'agents' && <AgenticResearch />}
+        {currentTab === 'agentic_research' && <AgenticResearch />}
         {currentTab === 'research' && <ResearchTab onTickerClick={t => setDetail(t)} />}
         {currentTab === 'command' && (
           <div className="space-y-6">

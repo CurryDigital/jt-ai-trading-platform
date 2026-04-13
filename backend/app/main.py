@@ -4360,130 +4360,342 @@ def reject_strategy(strategy_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Agentic Research Endpoints ──────────────────────────────────────────
+# ── Agentic Research Endpoints (reads from openclaw_researcher schema) ───
 
 AGENT_REGISTRY = {
-    "qr_hub":            {"name": "Hub",            "icon": "🔀", "role": "Orchestrates research pipeline, routes tasks between agents"},
-    "qr_frontend":       {"name": "Frontend",       "icon": "🖥️", "role": "Generates UI reports and visual summaries"},
-    "qr_monitor":        {"name": "Monitor",        "icon": "🔭", "role": "Watches market conditions and triggers alerts"},
-    "qr_idea_intake":    {"name": "Intake",         "icon": "📥", "role": "Receives new strategy ideas from Telegram and other sources"},
-    "qr_etl_manager":    {"name": "ETL",            "icon": "🏭", "role": "Manages data pipelines — ingestion, cleaning, enrichment"},
-    "qr_exp_manager":    {"name": "ExpManager",     "icon": "🧬", "role": "Runs backtests and manages experiment lifecycle"},
-    "qr_data_validator": {"name": "Validator",       "icon": "🔬", "role": "Validates data quality and checks for anomalies"},
-    "qr_algo":           {"name": "Algo",           "icon": "⚙️", "role": "Designs and codes quantitative trading algorithms"},
-    "qr_risk":           {"name": "Risk",           "icon": "🛡️", "role": "Evaluates risk metrics — drawdown, VaR, correlation"},
-    "qr_qa":             {"name": "QA",             "icon": "🚦", "role": "Quality assurance — tests strategy logic and validates results"},
-    "qr_debate":         {"name": "Debate",         "icon": "⚔️", "role": "Red-team / blue-team debate on strategy viability"},
-    "qr_researcher":     {"name": "Researcher",     "icon": "🔍", "role": "Deep-dives into market signals and academic research"},
-    "qr_macro_sentinel": {"name": "MacroSentinel",  "icon": "🌍", "role": "Monitors macro-economic conditions and regime changes"},
-    "qr_architect":      {"name": "Architect",      "icon": "🏗️", "role": "Designs system architecture and strategy frameworks"},
+    "qr_hub":            {"name": "Hub",            "icon": "🔀", "role": "Orchestrates research pipeline, routes tasks between agents", "order": 1},
+    "qr_idea_intake":    {"name": "Intake",         "icon": "📥", "role": "Receives new strategy ideas from Telegram and other sources", "order": 2},
+    "qr_researcher":     {"name": "Researcher",     "icon": "🔍", "role": "Deep-dives into market signals and academic research", "order": 3},
+    "qr_macro_sentinel": {"name": "MacroSentinel",  "icon": "🌍", "role": "Monitors macro-economic conditions and regime changes", "order": 4},
+    "qr_data_validator": {"name": "Validator",       "icon": "🔬", "role": "Validates data quality and checks for anomalies", "order": 5},
+    "qr_etl_manager":    {"name": "ETL",            "icon": "🏭", "role": "Manages data pipelines — ingestion, cleaning, enrichment", "order": 6},
+    "qr_algo":           {"name": "Algo",           "icon": "⚙️", "role": "Designs and codes quantitative trading algorithms", "order": 7},
+    "qr_exp_manager":    {"name": "ExpManager",     "icon": "🧬", "role": "Runs backtests and manages experiment lifecycle", "order": 8},
+    "qr_risk":           {"name": "Risk",           "icon": "🛡️", "role": "Evaluates risk metrics — drawdown, VaR, correlation", "order": 9},
+    "qr_debate":         {"name": "Debate",         "icon": "⚔️", "role": "Red-team / blue-team debate on strategy viability", "order": 10},
+    "qr_qa":             {"name": "QA",             "icon": "🚦", "role": "Quality assurance — tests strategy logic and validates results", "order": 11},
+    "qr_architect":      {"name": "Architect",      "icon": "🏗️", "role": "Designs system architecture and strategy frameworks", "order": 12},
+    "qr_monitor":        {"name": "Monitor",        "icon": "🔭", "role": "Watches market conditions and triggers alerts", "order": 13},
 }
 
 
 @app.get("/api/agents")
 def get_agents():
-    """Get the list of registered OpenClaw agents"""
+    """Get the list of registered OpenClaw agents (excludes main & qr_frontend)"""
     agents = []
-    for agent_id, info in AGENT_REGISTRY.items():
+    for agent_id, info in sorted(AGENT_REGISTRY.items(), key=lambda x: x[1]["order"]):
         agents.append({
             "agent_id": agent_id,
             "name": info["name"],
             "icon": info["icon"],
             "role": info["role"],
+            "order": info["order"],
         })
     return {"agents": agents}
 
 
-@app.get("/api/agents/activity")
-def get_agent_activity(
+@app.get("/api/agents/workflow-summary")
+def get_workflow_summary_endpoint(db: Session = Depends(get_db)):
+    """Get workflow summary — counts by status, by agent, pending/golden/rejected"""
+    try:
+        result = db.execute(text(
+            "SELECT openclaw_researcher.get_workflow_summary() AS summary"
+        )).fetchone()
+        return result.summary if result and result.summary else {}
+    except Exception as e:
+        logger.error(f"Workflow summary error: {e}")
+        return {}
+
+
+@app.get("/api/agents/strategy-workflows")
+def get_strategy_workflows(status: str = None, limit: int = 50, db: Session = Depends(get_db)):
+    """Get strategy workflows with full state (event count, history, etc.)"""
+    try:
+        query = """
+            SELECT strategy_id, name, workflow_status, assigned_to,
+                   workflow_result, event_count, event_history,
+                   workflow_created, workflow_updated
+            FROM openclaw_researcher.v_strategy_full_state
+        """
+        params = {}
+        if status:
+            query += " WHERE workflow_status = :status"
+            params["status"] = status
+        query += " ORDER BY workflow_updated DESC LIMIT :limit"
+        params["limit"] = limit
+
+        rows = db.execute(text(query), params).fetchall()
+        strategies = []
+        for r in rows:
+            strategies.append({
+                "strategy_id": r.strategy_id,
+                "name": r.name,
+                "status": r.workflow_status,
+                "assigned_to": r.assigned_to,
+                "result": r.workflow_result,
+                "event_count": r.event_count,
+                "event_history": r.event_history,
+                "created_at": r.workflow_created.isoformat() if r.workflow_created else None,
+                "updated_at": r.workflow_updated.isoformat() if r.workflow_updated else None,
+            })
+        return {"strategies": strategies, "count": len(strategies)}
+    except Exception as e:
+        logger.error(f"Strategy workflows error: {e}")
+        return {"strategies": [], "count": 0}
+
+
+@app.get("/api/agents/events")
+def get_agent_events(
     agent_id: str = None,
     strategy_id: str = None,
+    domain: str = None,
     limit: int = 50,
     db: Session = Depends(get_db)
 ):
-    """Get recent agent activity across all agents or filtered by agent/strategy"""
+    """Get events from the openclaw_researcher event log with processing status"""
     try:
-        query = db.query(AgentActivity).order_by(AgentActivity.timestamp.desc())
-
+        query = """
+            SELECT e.id, e.event_type, e.strategy_id, e.domain,
+                   e.source_agent, e.payload_json, e.created_at, e.status,
+                   (SELECT string_agg(ep.agent_name, ', ' ORDER BY ep.processed_at)
+                    FROM openclaw_researcher.event_processing ep
+                    WHERE ep.event_id = e.id) AS processed_by
+            FROM openclaw_researcher.events e
+            WHERE 1=1
+        """
+        params = {}
         if agent_id:
-            query = query.filter(AgentActivity.agent_id == agent_id)
+            query += " AND e.source_agent = :agent_id"
+            params["agent_id"] = agent_id
         if strategy_id:
-            query = query.filter(AgentActivity.strategy_id == strategy_id)
+            query += " AND e.strategy_id = :strategy_id"
+            params["strategy_id"] = strategy_id
+        if domain:
+            query += " AND e.domain = :domain"
+            params["domain"] = domain
+        query += " ORDER BY e.created_at DESC LIMIT :limit"
+        params["limit"] = limit
 
-        activities = query.limit(limit).all()
-
-        result = []
-        for a in activities:
-            agent_info = AGENT_REGISTRY.get(a.agent_id, {"name": a.agent_id, "icon": "🤖", "role": ""})
-            result.append({
-                "id": a.id,
-                "agent_id": a.agent_id,
+        rows = db.execute(text(query), params).fetchall()
+        events = []
+        for r in rows:
+            agent_info = AGENT_REGISTRY.get(r.source_agent, {"name": r.source_agent, "icon": "🤖"})
+            events.append({
+                "id": str(r.id),
+                "event_type": r.event_type,
+                "strategy_id": r.strategy_id,
+                "domain": r.domain,
+                "source_agent": r.source_agent,
                 "agent_name": agent_info["name"],
                 "agent_icon": agent_info["icon"],
-                "strategy_id": a.strategy_id,
-                "action": a.action,
-                "message": a.message,
-                "metadata": a.metadata,
-                "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+                "payload": r.payload_json,
+                "status": r.status,
+                "processed_by": r.processed_by,
+                "timestamp": r.created_at.isoformat() if r.created_at else None,
+            })
+        return {"events": events, "count": len(events)}
+    except Exception as e:
+        logger.error(f"Agent events error: {e}")
+        return {"events": [], "count": 0}
+
+
+@app.get("/api/agents/pending-work")
+def get_pending_work(agent_id: str = None, db: Session = Depends(get_db)):
+    """Get pending (unprocessed) work items per agent from routing rules"""
+    try:
+        query = """
+            SELECT domain, target_agent, event_id, event_type,
+                   strategy_id, emitted_by, created_at
+            FROM openclaw_researcher.v_pending_work
+        """
+        params = {}
+        if agent_id:
+            query += " WHERE target_agent = :agent_id"
+            params["agent_id"] = agent_id
+        query += " ORDER BY created_at"
+
+        rows = db.execute(text(query), params).fetchall()
+        work_items = []
+        for r in rows:
+            agent_info = AGENT_REGISTRY.get(r.target_agent, {"name": r.target_agent, "icon": "🤖"})
+            emitter_info = AGENT_REGISTRY.get(r.emitted_by, {"name": r.emitted_by, "icon": "🤖"})
+            work_items.append({
+                "domain": r.domain,
+                "target_agent": r.target_agent,
+                "target_agent_name": agent_info["name"],
+                "target_agent_icon": agent_info["icon"],
+                "event_id": str(r.event_id),
+                "event_type": r.event_type,
+                "strategy_id": r.strategy_id,
+                "emitted_by": r.emitted_by,
+                "emitter_name": emitter_info["name"],
+                "emitter_icon": emitter_info["icon"],
+                "created_at": r.created_at.isoformat() if r.created_at else None,
             })
 
-        return {"activities": result, "count": len(result)}
+        # Group by agent for summary
+        agent_counts = {}
+        for w in work_items:
+            key = w["target_agent"]
+            if key not in agent_counts:
+                agent_counts[key] = 0
+            agent_counts[key] += 1
+
+        return {"work_items": work_items, "count": len(work_items), "by_agent": agent_counts}
     except Exception as e:
-        logger.error(f"Agent activity error: {e}")
-        return {"activities": [], "count": 0}
+        logger.error(f"Pending work error: {e}")
+        return {"work_items": [], "count": 0, "by_agent": {}}
 
 
-@app.post("/api/agents/activity")
-def log_agent_activity(payload: dict, db: Session = Depends(get_db)):
-    """Log a new agent activity event (called by OpenClaw agents)"""
+@app.get("/api/agents/routing-rules")
+def get_routing_rules(db: Session = Depends(get_db)):
+    """Get event routing configuration — which events get routed to which agents"""
     try:
-        activity = AgentActivity(
-            agent_id=payload.get("agent_id"),
-            strategy_id=payload.get("strategy_id"),
-            action=payload.get("action", "COMMENT"),
-            message=payload.get("message", ""),
-            metadata=payload.get("metadata"),
-        )
-        db.add(activity)
-        db.commit()
-        db.refresh(activity)
-        return {"success": True, "id": activity.id}
+        rows = db.execute(text("""
+            SELECT event_type, target_agent, enabled, domain
+            FROM openclaw_researcher.routing_rules
+            WHERE enabled = true
+            ORDER BY domain, event_type, target_agent
+        """)).fetchall()
+
+        rules = []
+        for r in rows:
+            agent_info = AGENT_REGISTRY.get(r.target_agent, {"name": r.target_agent, "icon": "🤖"})
+            rules.append({
+                "event_type": r.event_type,
+                "target_agent": r.target_agent,
+                "target_agent_name": agent_info["name"],
+                "target_agent_icon": agent_info["icon"],
+                "domain": r.domain,
+            })
+        return {"rules": rules, "count": len(rules)}
     except Exception as e:
-        db.rollback()
-        logger.error(f"Log activity error: {e}")
+        logger.error(f"Routing rules error: {e}")
+        return {"rules": [], "count": 0}
+
+
+@app.get("/api/agents/strategy/{strategy_id}")
+def get_strategy_agent_detail(strategy_id: str, db: Session = Depends(get_db)):
+    """Get full agent activity for a specific strategy — workflow + events + lineage"""
+    try:
+        # Workflow state
+        wf = db.execute(text("""
+            SELECT strategy_id, name, status, assigned_to, assigned_at,
+                   progress_percent, progress_note, result, result_data,
+                   risk_score, risk_flags, risk_approved, risk_notes,
+                   conviction_score, debate_summary, frequency,
+                   strategy_description, created_at, updated_at
+            FROM openclaw_researcher.strategy_workflow
+            WHERE strategy_id = :sid
+        """), {"sid": strategy_id}).fetchone()
+
+        # Events for this strategy
+        events = db.execute(text("""
+            SELECT e.id, e.event_type, e.source_agent, e.domain,
+                   e.payload_json, e.created_at, e.status
+            FROM openclaw_researcher.events e
+            WHERE e.strategy_id = :sid
+            ORDER BY e.created_at
+        """), {"sid": strategy_id}).fetchall()
+
+        # Lineage for this strategy
+        lineage = db.execute(text("""
+            SELECT strategy_id, dataset_version, backtest_engine_version,
+                   strategy_parameters, result_metrics, experiment_id,
+                   sharpe_oos, max_drawdown, trade_count_oos, created_at
+            FROM openclaw_researcher.strategy_lineage
+            WHERE strategy_id = :sid
+            ORDER BY created_at DESC
+        """), {"sid": strategy_id}).fetchall()
+
+        if not wf:
+            raise HTTPException(status_code=404, detail="Strategy not found in workflow")
+
+        event_list = []
+        for e in events:
+            agent_info = AGENT_REGISTRY.get(e.source_agent, {"name": e.source_agent, "icon": "🤖"})
+            event_list.append({
+                "id": str(e.id),
+                "event_type": e.event_type,
+                "source_agent": e.source_agent,
+                "agent_name": agent_info["name"],
+                "agent_icon": agent_info["icon"],
+                "domain": e.domain,
+                "payload": e.payload_json,
+                "status": e.status,
+                "timestamp": e.created_at.isoformat() if e.created_at else None,
+            })
+
+        lineage_list = []
+        for l in lineage:
+            lineage_list.append({
+                "experiment_id": l.experiment_id,
+                "dataset_version": l.dataset_version,
+                "engine_version": l.backtest_engine_version,
+                "parameters": l.strategy_parameters,
+                "metrics": l.result_metrics,
+                "sharpe_oos": float(l.sharpe_oos) if l.sharpe_oos else None,
+                "max_drawdown": float(l.max_drawdown) if l.max_drawdown else None,
+                "trade_count_oos": l.trade_count_oos,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            })
+
+        return {
+            "workflow": {
+                "strategy_id": wf.strategy_id,
+                "name": wf.name,
+                "status": wf.status,
+                "assigned_to": wf.assigned_to,
+                "assigned_at": wf.assigned_at.isoformat() if wf.assigned_at else None,
+                "progress_percent": wf.progress_percent,
+                "progress_note": wf.progress_note,
+                "result": wf.result,
+                "result_data": wf.result_data,
+                "risk_score": float(wf.risk_score) if wf.risk_score else None,
+                "risk_flags": wf.risk_flags,
+                "risk_approved": wf.risk_approved,
+                "risk_notes": wf.risk_notes,
+                "conviction_score": float(wf.conviction_score) if wf.conviction_score else None,
+                "debate_summary": wf.debate_summary,
+                "frequency": wf.frequency,
+                "description": wf.strategy_description,
+                "created_at": wf.created_at.isoformat() if wf.created_at else None,
+                "updated_at": wf.updated_at.isoformat() if wf.updated_at else None,
+            },
+            "events": event_list,
+            "lineage": lineage_list,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Strategy agent detail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/agents/strategy-assignments")
-def get_strategy_agent_assignments(db: Session = Depends(get_db)):
-    """Get which agents are currently working on which strategies"""
+@app.get("/api/agents/gold-layer-status")
+def get_gold_layer_status(db: Session = Depends(get_db)):
+    """Get current gold layer data refresh state"""
     try:
-        # Get the latest activity per agent to determine current assignment
-        latest = db.execute(text("""
-            SELECT DISTINCT ON (agent_id) agent_id, strategy_id, action, message, timestamp
-            FROM gold.agent_activity
-            WHERE strategy_id IS NOT NULL
-            ORDER BY agent_id, timestamp DESC
-        """)).fetchall()
-
-        assignments = {}
-        for row in latest:
-            if row.strategy_id not in assignments:
-                assignments[row.strategy_id] = []
-            agent_info = AGENT_REGISTRY.get(row.agent_id, {"name": row.agent_id, "icon": "🤖"})
-            assignments[row.strategy_id].append({
-                "agent_id": row.agent_id,
-                "agent_name": agent_info["name"],
-                "agent_icon": agent_info["icon"],
-                "action": row.action,
-                "message": row.message,
-                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-            })
-
-        return {"assignments": assignments}
+        row = db.execute(text("""
+            SELECT state, refreshed_at, hours_since_refresh,
+                   sources_ok, sources_failed, locked_since, notes, updated_at
+            FROM openclaw_researcher.v_gold_layer_status
+            LIMIT 1
+        """)).fetchone()
+        if not row:
+            return {"state": "unknown"}
+        return {
+            "state": row.state,
+            "refreshed_at": row.refreshed_at.isoformat() if row.refreshed_at else None,
+            "hours_since_refresh": float(row.hours_since_refresh) if row.hours_since_refresh else None,
+            "sources_ok": row.sources_ok,
+            "sources_failed": row.sources_failed,
+            "locked_since": row.locked_since.isoformat() if row.locked_since else None,
+            "notes": row.notes,
+        }
     except Exception as e:
-        logger.error(f"Strategy assignments error: {e}")
-        return {"assignments": {}}
+        logger.error(f"Gold layer status error: {e}")
+        return {"state": "error", "error": str(e)}
 
 
 @app.get("/api/strategies/pipeline-summary")
