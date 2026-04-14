@@ -55,7 +55,21 @@ jt_strategy_executor = None
 
 app = FastAPI()
 
-# Include stock detail router
+# Include all routers
+app.include_router(market.router)
+app.include_router(stocks.router)
+app.include_router(fx.router)
+app.include_router(crypto.router)
+app.include_router(strategies.router)
+app.include_router(positions.router)
+app.include_router(performance.router)
+app.include_router(execution.router)
+app.include_router(ibkr.router)
+app.include_router(alerts.router)
+app.include_router(metadata.router)
+app.include_router(hkex.router)
+
+# Include stock detail router (conditional)
 if HAS_STOCK_DETAIL_API and stock_detail_router:
     app.include_router(stock_detail_router)
 
