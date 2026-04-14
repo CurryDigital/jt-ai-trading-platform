@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError, OperationalError
+from fastapi.responses import JSONResponse
 import logging
 
 # Route modules
@@ -26,6 +28,7 @@ from app.db.session import (
     SessionLocal, Base, engine, Inventory, GlobalState,
     ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy, StrategyRegistry, AgentActivity
 )
+from app.db.safe_query import safe_query, safe_query_one
 from app.core_logic.data.wholistic_pipeline import (
     refresh_indices_and_mood, refresh_fx_layer, refresh_commodity_layer, refresh_crypto_layer, refresh_stock_layer, refresh_hft_layer
 )
@@ -66,6 +69,39 @@ app.add_middleware(
 )
 
 import asyncio
+
+# ---------------------------------------------------------------------------
+# Global Exception Handlers — fault tolerance for missing tables / DB errors
+# ---------------------------------------------------------------------------
+
+@app.exception_handler(ProgrammingError)
+async def sqlalchemy_programming_error_handler(request: Request, exc: ProgrammingError):
+    """Handle missing tables/columns — return empty data instead of 500."""
+    error_msg = str(exc.orig) if exc.orig else str(exc)
+    logger.warning(f"DB schema error on {request.url.path}: {error_msg}")
+    return JSONResponse(status_code=200, content={
+        "data": [], "count": 0,
+        "error": "data_not_available",
+        "message": "Data source not yet available. The DE pipeline may not have created this view yet.",
+    })
+
+@app.exception_handler(OperationalError)
+async def sqlalchemy_operational_error_handler(request: Request, exc: OperationalError):
+    """Handle DB connection errors — return 503 instead of 500."""
+    logger.error(f"DB connection error on {request.url.path}: {exc.orig}")
+    return JSONResponse(status_code=503, content={
+        "error": "database_unavailable",
+        "message": "Database temporarily unavailable. Please retry.",
+    })
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Catch-all — no unhandled exception ever returns a raw 500 traceback."""
+    logger.error(f"Unhandled error on {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(status_code=500, content={
+        "error": "internal_error",
+        "message": f"An unexpected error occurred: {type(exc).__name__}",
+    })
 
 # REMOVED: scheduler_loop() - Platform is READ-ONLY
 # Data refresh schedules are managed by DE agent, not Platform
@@ -139,8 +175,13 @@ async def run_deep_sell_analysis(db: Session):
 
 def get_db():
     db = SessionLocal()
-    try: yield db
-    finally: db.close()
+    try:
+        yield db
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 # --- POSITION & EXECUTION TRACKING ---
 
@@ -388,10 +429,10 @@ class InventoryAdd(BaseModel):
 @app.get("/api/macro/pulse")
 def get_macro_pulse(db: Session = Depends(get_db)):
     """Get market pulse from consumption Dashboard_Market_Overview"""
-    result = db.execute(text("""
+    result = safe_query(db, """
         SELECT region, index_name, current_value, change_pct, trend, sentiment_score
         FROM consumption.Dashboard_Market_Overview
-    """)).fetchall()
+    """, label="macro_pulse")
 
     pulse_data = {}
     for row in result:
@@ -404,7 +445,7 @@ def get_macro_pulse(db: Session = Depends(get_db)):
         }
 
     # Get risk from system config
-    risk = db.execute(text("SELECT value FROM gold.system_config WHERE component='risk_mgmt' AND key='max_portfolio_risk_daily'")).fetchone()
+    risk = safe_query_one(db, "SELECT value FROM gold.system_config WHERE component='risk_mgmt' AND key='max_portfolio_risk_daily'", label="risk_config")
 
     return {
         "indices": pulse_data,
@@ -419,7 +460,7 @@ def get_signals(db: Session = Depends(get_db)):
     from datetime import datetime
 
     # Get signals from consumption
-    signals_result = db.execute(text("""
+    signals_result = safe_query(db, """
         SELECT
             s.strategy_id, s.ticker, s.signal as action, s.signal_strength as total_conf,
             s.confidence_score, s.entry_price, s.current_price, s.stop_loss, s.take_profit,
@@ -429,7 +470,7 @@ def get_signals(db: Session = Depends(get_db)):
         WHERE s.signal IN ('BUY', 'SELL')
         ORDER BY s.confidence_score DESC
         LIMIT 20
-    """)).fetchall()
+    """, label="signals_current")
 
     res = []
     for s in signals_result:
@@ -490,12 +531,12 @@ def get_signals(db: Session = Depends(get_db)):
 
 @app.get("/api/fx/pairs")
 def get_fx_pairs(db: Session = Depends(get_db)):
-    result = db.execute(text("""
+    result = safe_query(db, """
         SELECT pair as ticker, bid as price, change_pct as change, trend,
                signal as action, signal_strength as confidence, rsi_14 as rsi,
                carry_annual_pct as carry, updated_at as timestamp
         FROM consumption.Markets_FX_Overview ORDER BY pair
-    """)).fetchall()
+    """, label="fx_pairs")
     return [{"ticker": r.ticker, "price": round(r.price or 0, 4), "change": round(r.change or 0, 2),
              "trend": r.trend or "NEUTRAL", "action": r.action or "HOLD",
              "confidence": round((r.confidence or 0) * 100, 1), "rsi": round(r.rsi or 50, 1),
@@ -504,13 +545,13 @@ def get_fx_pairs(db: Session = Depends(get_db)):
 
 @app.get("/api/crypto/pairs")
 def get_crypto_pairs(db: Session = Depends(get_db)):
-    result = db.execute(text("""
+    result = safe_query(db, """
         SELECT ticker, name, price, change_pct as change, change_24h_pct as change_24h,
                volume_24h as volume, market_cap, market_cap_rank as rank, trend,
                signal as action, signal_strength as confidence, rsi_14 as rsi,
                funding_rate, fear_greed_index, updated_at as timestamp
         FROM consumption.Markets_Crypto_Overview ORDER BY market_cap DESC NULLS LAST
-    """)).fetchall()
+    """, label="crypto_pairs")
     return [{"ticker": r.ticker, "asset": r.name, "action": r.action or "HOLD",
              "total_conf": round((r.confidence or 0) * 100, 1),
              "price": round(r.price or 0, 2), "change": round(r.change or 0, 2),
@@ -519,12 +560,12 @@ def get_crypto_pairs(db: Session = Depends(get_db)):
 
 @app.get("/api/commodities/all")
 def get_commodities(db: Session = Depends(get_db)):
-    result = db.execute(text("""
+    result = safe_query(db, """
         SELECT ticker, name, category, exchange, price, change_pct as change, trend,
                signal as action, signal_strength as confidence, current_month_bias,
                next_month_bias, seasonal_strength, updated_at as timestamp
         FROM consumption.Markets_Commodities_Overview ORDER BY category, ticker
-    """)).fetchall()
+    """, label="commodities_overview")
     return [{"ticker": r.ticker, "asset": r.name, "action": r.action or "HOLD",
              "total_conf": round((r.confidence or 0) * 100, 1),
              "price": round(r.price or 0, 2), "change": round(r.change or 0, 2),
@@ -1441,13 +1482,13 @@ def get_market_sentiment(db: Session = Depends(get_db)):
 
 @app.get("/api/inventory/evaluate")
 def get_inventory_evaluate(db: Session = Depends(get_db)):
-    result = db.execute(text("""
+    result = safe_query(db, """
         SELECT position_id, ticker, name, asset_class, side, quantity,
                avg_entry_price as entry_price, current_price, market_value,
                weight_pct as portfolio_weight, unrealized_pnl as pnl,
                unrealized_pnl_pct as pnl_pct, strategy_name, days_held
         FROM consumption.Portfolio_Positions_Current ORDER BY market_value DESC
-    """)).fetchall()
+    """, label="inventory_evaluate")
     positions = [{"id": r.position_id, "ticker": r.ticker, "name": r.name,
                   "asset_class": r.asset_class, "side": r.side,
                   "quantity": float(r.quantity or 0), "entry_price": float(r.entry_price or 0),
@@ -1626,60 +1667,53 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     Get all portfolio positions with current market data.
     Unified view of all assets across strategies.
     """
-    try:
-        # Get positions from consumption view
-        result = db.execute(text("""
-            SELECT
-                position_id as id,
-                ticker,
-                name as strategy_name,
-                asset_class,
-                side,
-                quantity,
-                avg_entry_price as entry_price,
-                current_price,
-                market_value,
-                unrealized_pnl as pnl,
-                unrealized_pnl_pct as pnl_pct,
-                strategy_name as strategy,
-                days_held
-            FROM consumption.Portfolio_Positions_Current
-            WHERE quantity > 0
-            ORDER BY market_value DESC
-        """)).fetchall()
+    result = safe_query(db, """
+        SELECT
+            position_id as id,
+            ticker,
+            name as strategy_name,
+            asset_class,
+            side,
+            quantity,
+            avg_entry_price as entry_price,
+            current_price,
+            market_value,
+            unrealized_pnl as pnl,
+            unrealized_pnl_pct as pnl_pct,
+            strategy_name as strategy,
+            days_held
+        FROM consumption.Portfolio_Positions_Current
+        WHERE quantity > 0
+        ORDER BY market_value DESC
+    """, label="portfolio_positions")
 
-        positions = []
-        for r in result:
-            positions.append({
-                "id": r.id,
-                "ticker": r.ticker,
-                "strategy": r.strategy,
-                "asset_class": r.asset_class,
-                "side": r.side,
-                "quantity": float(r.quantity or 0),
-                "entry_price": float(r.entry_price or 0),
-                "current_price": float(r.current_price or 0),
-                "market_value": float(r.market_value or 0),
-                "pnl": float(r.pnl or 0),
-                "pnl_pct": float(r.pnl_pct or 0),
-                "days_held": r.days_held
-            })
+    positions = []
+    for r in result:
+        positions.append({
+            "id": r.id,
+            "ticker": r.ticker,
+            "strategy": r.strategy,
+            "asset_class": r.asset_class,
+            "side": r.side,
+            "quantity": float(r.quantity or 0),
+            "entry_price": float(r.entry_price or 0),
+            "current_price": float(r.current_price or 0),
+            "market_value": float(r.market_value or 0),
+            "pnl": float(r.pnl or 0),
+            "pnl_pct": float(r.pnl_pct or 0),
+            "days_held": r.days_held
+        })
 
-        # Calculate totals
-        total_value = sum(p["market_value"] for p in positions)
-        total_pnl = sum(p["pnl"] for p in positions)
+    total_value = sum(p["market_value"] for p in positions)
+    total_pnl = sum(p["pnl"] for p in positions)
 
-        return {
-            "positions": positions,
-            "total_positions": len(positions),
-            "total_value": total_value,
-            "total_pnl": total_pnl,
-            "active_positions": len([p for p in positions if p["quantity"] > 0])
-        }
-
-    except Exception as e:
-        logger.error(f"Error fetching portfolio positions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch positions: {str(e)}")
+    return {
+        "positions": positions,
+        "total_positions": len(positions),
+        "total_value": total_value,
+        "total_pnl": total_pnl,
+        "active_positions": len([p for p in positions if p["quantity"] > 0])
+    }
 
 # --- MAINTENANCE & REFRESH APIS (5 DOMAINS) ---
 @app.post("/api/maintenance/refresh/indices")
@@ -2400,11 +2434,16 @@ def get_strategy_performance(db: Session = Depends(get_db)):
 
     Only returns strategies for the current execution mode (SIMULATION/PAPER_TRADING/LIVE_TRADING)
     """
+    _empty_perf = {
+        "strategies": [], "monthly_returns": [],
+        "summary": {"total_return": 0, "sharpe": 0, "max_drawdown": 0, "win_rate": 0},
+    }
+
     # Get current execution mode
-    mode_result = db.execute(text("""
+    mode_result = safe_query_one(db, """
         SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
-    """)).fetchone()
+    """, label="perf_mode")
 
     current_mode = mode_result.value if mode_result else 'SIMULATION'
 
@@ -2417,32 +2456,22 @@ def get_strategy_performance(db: Session = Depends(get_db)):
     portfolio_type = portfolio_type_map.get(current_mode, 'SIMULATION')
 
     # Get strategy attribution for CURRENT MODE ONLY
-    attribution = db.execute(text("""
+    attribution = safe_query(db, """
         SELECT strategy_id, strategy_name, allocated_capital_pct as allocation,
                contribution_pct as contribution, return_pct as returns, num_trades,
                win_rate, sharpe_ratio
         FROM consumption.Performance_Strategy_Attribution
         WHERE portfolio_type = :portfolio_type
         ORDER BY return_pct DESC
-    """), {"portfolio_type": portfolio_type}).fetchall()
+    """, {"portfolio_type": portfolio_type}, label="perf_attribution")
 
     # If no data for current mode, return empty (not historical data from other modes)
     if not attribution:
-        return {
-            "strategies": [],
-            "monthly_returns": [],
-            "summary": {
-                "total_return": 0,
-                "sharpe": 0,
-                "max_drawdown": 0,
-                "win_rate": 0
-            },
-            "execution_mode": current_mode,
-            "note": f"No strategies deployed in {current_mode} mode"
-        }
+        return {**_empty_perf, "execution_mode": current_mode,
+                "note": f"No strategies deployed in {current_mode} mode"}
 
     # Get backtest win rates
-    backtests = db.execute(text("""
+    backtests = safe_query(db, """
         SELECT strategy_id, AVG(win_rate) as backtest_win_rate,
                AVG(profit_factor) as profit_factor,
                AVG(max_drawdown_pct) as max_drawdown,
@@ -2451,20 +2480,20 @@ def get_strategy_performance(db: Session = Depends(get_db)):
                AVG(total_return_pct) as backtest_return
         FROM consumption.Strategies_Backtest_Results
         GROUP BY strategy_id
-    """)).fetchall()
+    """, label="perf_backtests")
 
     # Get actual/live win rates from trade history (using paper_strategies)
-    live_stats = db.execute(text("""
+    live_stats = safe_query(db, """
         SELECT strategy_id,
                COUNT(*) as total_trades,
                SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades
         FROM gold.paper_strategies
         WHERE status = 'ACTIVE'
         GROUP BY strategy_id
-    """)).fetchall()
+    """, label="perf_live_stats")
 
     # Get CURRENT SIGNALS - the strongest active signal for each strategy
-    current_signals = db.execute(text("""
+    current_signals = safe_query(db, """
         SELECT DISTINCT ON (strategy_id)
             strategy_id,
             ticker,
@@ -2475,7 +2504,7 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         FROM consumption.Strategies_Signals_Current
         WHERE signal IN ('BUY', 'SELL')
         ORDER BY strategy_id, confidence_score DESC
-    """)).fetchall()
+    """, label="perf_signals")
 
     # Create lookup dicts
     backtest_data = {b.strategy_id: b for b in backtests}
@@ -2520,18 +2549,18 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         })
 
     # Get monthly returns for CURRENT MODE
-    monthly = db.execute(text("""
+    monthly = safe_query(db, """
         SELECT year, month, return_pct
         FROM consumption.Performance_Monthly_Returns
         WHERE portfolio_type = :portfolio_type
         ORDER BY year DESC, month DESC LIMIT 12
-    """), {"portfolio_type": portfolio_type}).fetchall()
+    """, {"portfolio_type": portfolio_type}, label="perf_monthly")
 
     # Get summary for CURRENT MODE
-    summary = db.execute(text("""
+    summary = safe_query_one(db, """
         SELECT * FROM consumption.Performance_Portfolio_Summary
         WHERE portfolio_type = :portfolio_type
-    """), {"portfolio_type": portfolio_type}).fetchone()
+    """, {"portfolio_type": portfolio_type}, label="perf_portfolio_summary")
 
     return {
         "strategies": strategies,
@@ -2543,17 +2572,6 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             "win_rate": float(summary.win_rate or 0) * 100 if summary else 0
         },
         "execution_mode": current_mode
-    }
-
-    return {
-        "strategies": strategies,
-        "monthly_returns": [{"year": r.year, "month": r.month, "return": float(r.return_pct or 0)} for r in monthly],
-        "summary": {
-            "total_return": float(summary.total_pnl_pct or 0) if summary else 0,
-            "sharpe": float(summary.sharpe_ratio or 0) if summary else 0,
-            "max_drawdown": float(summary.max_drawdown_pct or 0) if summary else 0,
-            "win_rate": float(summary.win_rate or 0) * 100 if summary else 0
-        }
     }
 
 @app.get("/api/performance/daily-pnl")
@@ -2574,7 +2592,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
     """), {"days": days}).fetchall()
 
     # Get open positions by entry date (unrealized P&L)
-    open_positions = db.execute(text("""
+    open_positions = safe_query(db, """
         SELECT
             DATE(entry_date) as entry_date,
             SUM(unrealized_pnl) as day_pnl,
@@ -2584,7 +2602,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
         GROUP BY DATE(entry_date)
         ORDER BY entry_date DESC
         LIMIT :days
-    """), {"days": days}).fetchall()
+    """, {"days": days}, label="daily_pnl_open_positions")
 
     # Combine data
     daily_map = {}
@@ -2864,12 +2882,12 @@ def get_strategy_score(strategy_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
         
         # Get backtest data for this strategy
-        backtest = db.execute(text("""
+        backtest = safe_query_one(db, """
             SELECT win_rate, profit_factor, sharpe_ratio, max_drawdown_pct
             FROM consumption.Strategies_Backtest_Results
             WHERE strategy_id = :sid
             LIMIT 1
-        """), {"sid": strategy_id}).fetchone()
+        """, {"sid": strategy_id}, label="strategy_score_backtest")
         
         # Get recent trade performance
         trades = db.execute(text("""
@@ -3119,7 +3137,7 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
     """), {"strategy_id": strategy_id, "days": days}).fetchall()
 
     # Second check: Get open positions by entry date (unrealized P&L)
-    open_positions = db.execute(text("""
+    open_positions = safe_query(db, """
         SELECT
             DATE(entry_date) as entry_date,
             SUM(unrealized_pnl) as day_unrealized,
@@ -3130,7 +3148,7 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
         GROUP BY DATE(entry_date)
         ORDER BY entry_date DESC
         LIMIT :days
-    """), {"strategy_id": strategy_id, "days": days}).fetchall()
+    """, {"strategy_id": strategy_id, "days": days}, label="strategy_daily_pnl_open")
 
     # Combine data
     daily_map = {}
@@ -4159,15 +4177,20 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
     params = {f't{i}': t for i, t in enumerate(universe)}
     params['strategy_id'] = strategy_id
 
-    signals_result = db.execute(text(f"""
-        SELECT ticker, signal, confidence_score, signal_strength
-        FROM consumption.Strategies_Signals_Current
-        WHERE strategy_id = :strategy_id
-        AND ticker IN ({placeholders})
-        AND signal = 'BUY'
-        ORDER BY confidence_score DESC
-        LIMIT :max_pos
-    """), {**params, "max_pos": max_positions}).fetchall()
+    try:
+        signals_result = db.execute(text(f"""
+            SELECT ticker, signal, confidence_score, signal_strength
+            FROM consumption.Strategies_Signals_Current
+            WHERE strategy_id = :strategy_id
+            AND ticker IN ({placeholders})
+            AND signal = 'BUY'
+            ORDER BY confidence_score DESC
+            LIMIT :max_pos
+        """), {**params, "max_pos": max_positions}).fetchall()
+    except Exception as e:
+        logger.warning(f"Signals query failed (table may not exist): {e}")
+        db.rollback()
+        signals_result = []
 
     tickers_with_buy = [s.ticker for s in signals_result]
 

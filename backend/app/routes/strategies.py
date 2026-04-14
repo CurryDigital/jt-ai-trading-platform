@@ -6,6 +6,7 @@ import time
 
 from app.dependencies import get_db, logger
 from app.db.session import QuantStrategy, Trade
+from app.db.safe_query import safe_query, safe_query_one
 
 router = APIRouter(prefix="/api", tags=["strategies"])
 
@@ -88,33 +89,37 @@ def delete_strategy(strat_id: int, db: Session = Depends(get_db)):
 @router.get("/strategies/researcher")
 def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get_db)):
     """Get JT Researcher strategies from strategy_definitions."""
-    query = """
-        SELECT strategy_id as id, name, description, asset_class, direction, time_horizon,
-               sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct, venue, status
-        FROM gold.strategy_definitions WHERE jt_ready = TRUE
-    """
-    params = {}
-    if asset_class:
-        query += " AND asset_class = :asset_class"
-        params["asset_class"] = asset_class
-    query += " ORDER BY sharpe_ratio DESC"
+    try:
+        query = """
+            SELECT strategy_id as id, name, description, asset_class, direction, time_horizon,
+                   sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct, venue, status
+            FROM gold.strategy_definitions WHERE jt_ready = TRUE
+        """
+        params = {}
+        if asset_class:
+            query += " AND asset_class = :asset_class"
+            params["asset_class"] = asset_class
+        query += " ORDER BY sharpe_ratio DESC"
 
-    result = db.execute(text(query), params)
-    strategies = []
-    for row in result:
-        tickers = row.universe_tickers.split(",") if row.universe_tickers else []
-        strategies.append({
-            "id": row.id, "name": row.name, "description": row.description,
-            "asset_class": row.asset_class, "direction": row.direction,
-            "time_horizon": row.time_horizon,
-            "sharpe_ratio": float(row.sharpe_ratio) if row.sharpe_ratio else 0,
-            "max_drawdown": float(row.max_drawdown) if row.max_drawdown else 0,
-            "win_rate": float(row.win_rate) if row.win_rate else 0,
-            "universe": tickers, "universe_count": len(tickers),
-            "max_position_pct": float(row.max_position_pct) if row.max_position_pct else 0.05,
-            "venue": row.venue, "status": row.status, "source": "trade_algo_researcher",
-        })
-    return {"strategies": strategies, "count": len(strategies)}
+        result = safe_query(db, query, params, label="route_researcher_strategies")
+        strategies = []
+        for row in result:
+            tickers = row.universe_tickers.split(",") if row.universe_tickers else []
+            strategies.append({
+                "id": row.id, "name": row.name, "description": row.description,
+                "asset_class": row.asset_class, "direction": row.direction,
+                "time_horizon": row.time_horizon,
+                "sharpe_ratio": float(row.sharpe_ratio) if row.sharpe_ratio else 0,
+                "max_drawdown": float(row.max_drawdown) if row.max_drawdown else 0,
+                "win_rate": float(row.win_rate) if row.win_rate else 0,
+                "universe": tickers, "universe_count": len(tickers),
+                "max_position_pct": float(row.max_position_pct) if row.max_position_pct else 0.05,
+                "venue": row.venue, "status": row.status, "source": "trade_algo_researcher",
+            })
+        return {"strategies": strategies, "count": len(strategies)}
+    except Exception as e:
+        logger.error(f"Route researcher strategies error: {e}")
+        return {"strategies": [], "count": 0}
 
 
 # =============================================================================
