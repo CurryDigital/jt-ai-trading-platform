@@ -12,9 +12,8 @@ router = APIRouter(prefix="/api/market", tags=["market"])
 def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
     """Get major market indices with proper timeframe-based change calculation."""
     try:
-        # For now, use latest 2 rows to calculate change since data is sparse
-        # This gives us the most recent daily change regardless of timeframe
-        # until qr_etl_manager refreshes the data
+        # Use latest rows with non-NULL close prices to get most recent valid close
+        # This handles the case where today's row exists but market is still open
         rows = db.execute(text("""
             WITH ranked_prices AS (
                 SELECT ticker, close as price, date,
@@ -23,6 +22,7 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
                        ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
                 FROM silver.unified_prices
                 WHERE ticker IN ('^GSPC', '^IXIC', '^DJI', '^VIX', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
+                  AND close IS NOT NULL
             )
             SELECT ticker, price, date, prev_price, prev_date
             FROM ranked_prices
