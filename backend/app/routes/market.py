@@ -10,15 +10,20 @@ router = APIRouter(prefix="/api/market", tags=["market"])
 
 @router.get("/indices")
 def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
-    """Get major market indices — same as global but structured for MarketsTab."""
+    """Get major market indices — uses latest available data regardless of date."""
     try:
+        # Get latest price and previous price for each index
         rows = db.execute(text("""
-            SELECT ticker, close as price, date,
-                   LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close
-            FROM silver.unified_prices
-            WHERE ticker IN ('^GSPC', '^IXIC', '^DJI', '^VIX', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
-            AND date >= CURRENT_DATE - INTERVAL '5 days'
-            ORDER BY date DESC
+            WITH latest_prices AS (
+                SELECT ticker, close as price, date,
+                       LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM silver.unified_prices
+                WHERE ticker IN ('^GSPC', '^IXIC', '^DJI', '^VIX', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
+            )
+            SELECT ticker, price, date, prev_close
+            FROM latest_prices
+            WHERE rn = 1 AND prev_close IS NOT NULL
         """)).fetchall()
 
         index_map = {
@@ -34,10 +39,9 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
             "^AXJO": {"name": "ASX 200", "symbol": "ASX"},
         }
 
-        seen = set()
         indices = []
         for row in rows:
-            if row.ticker not in seen and row.ticker in index_map and row.prev_close:
+            if row.ticker in index_map and row.prev_close:
                 info = index_map[row.ticker]
                 change_pct = ((row.price - row.prev_close) / row.prev_close * 100)
                 indices.append({
@@ -47,7 +51,6 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
                     "value": float(row.price),
                     "change": round(float(row.price - row.prev_close), 2),
                 })
-                seen.add(row.ticker)
 
         if indices:
             return {"data": indices}
@@ -153,15 +156,19 @@ def get_volume_leaders(db: Session = Depends(get_db)):
 
 @router.get("/global")
 def get_global_markets(db: Session = Depends(get_db)):
-    """Get global market indices from DB."""
+    """Get global market indices — uses latest available data regardless of date."""
     try:
         rows = db.execute(text("""
-            SELECT ticker, close as price, 
-                   LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close
-            FROM silver.unified_prices
-            WHERE ticker IN ('^GSPC', '^IXIC', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
-            AND date >= CURRENT_DATE - INTERVAL '5 days'
-            ORDER BY date DESC
+            WITH latest_prices AS (
+                SELECT ticker, close as price, date,
+                       LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM silver.unified_prices
+                WHERE ticker IN ('^GSPC', '^IXIC', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
+            )
+            SELECT ticker, price, date, prev_close
+            FROM latest_prices
+            WHERE rn = 1 AND prev_close IS NOT NULL
         """)).fetchall()
 
         index_map = {
@@ -175,14 +182,12 @@ def get_global_markets(db: Session = Depends(get_db)):
             "^AXJO": {"name": "ASX 200", "region": "Asia", "flag": "🇦🇺"},
         }
 
-        seen = set()
         markets = []
         for row in rows:
-            if row.ticker not in seen and row.ticker in index_map and row.prev_close:
+            if row.ticker in index_map and row.prev_close:
                 info = index_map[row.ticker]
                 change_pct = ((row.price - row.prev_close) / row.prev_close * 100)
                 markets.append({**info, "price": float(row.price), "change_percent": round(float(change_pct), 2)})
-                seen.add(row.ticker)
 
         if markets:
             return {"data": markets}
