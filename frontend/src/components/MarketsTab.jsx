@@ -19,7 +19,7 @@ const PnLBadge = ({ value, size = 'md' }) => {
 
 // Enhanced Markets Tab with Comprehensive Market Intelligence
 export const MarketsTab = ({ onTickerClick }) => {
-  const [activeView, setActiveView] = useState('overview'); // overview, movers, sectors, global
+  const [activeView, setActiveView] = useState('overview');
   const [marketData, setMarketData] = useState({
     indices: [],
     gainers: [],
@@ -41,11 +41,44 @@ export const MarketsTab = ({ onTickerClick }) => {
     putCall: 1.0
   });
   const [loading, setLoading] = useState(true);
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1D'); // 1D, 1W, 1M, YTD
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1D');
+  const [selectedMarket, setSelectedMarket] = useState('ALL'); // ALL, US, HK, CN, etc.
+
+  // Helper to detect market from ticker
+  const getMarketFromTicker = (ticker) => {
+    if (!ticker) return 'US';
+    if (ticker.endsWith('.HK')) return 'HK';
+    if (ticker.startsWith('0') && ticker.length === 6) return 'CN'; // Shanghai/Shenzhen
+    if (ticker.endsWith('.SS') || ticker.endsWith('.SZ')) return 'CN';
+    if (ticker.endsWith('.TO') || ticker.endsWith('.V')) return 'CA';
+    if (ticker.endsWith('.L')) return 'UK';
+    if (ticker.endsWith('.DE') || ticker.endsWith('.XETRA')) return 'DE';
+    if (ticker.endsWith('.PA') || ticker.endsWith('.EPA')) return 'FR';
+    if (ticker.endsWith('.JP')) return 'JP';
+    if (ticker.endsWith('.AU')) return 'AU';
+    if (ticker.endsWith('.SG')) return 'SG';
+    return 'US';
+  };
+
+  const marketFlags = {
+    'US': '🇺🇸', 'HK': '🇭🇰', 'CN': '🇨🇳', 'JP': '🇯🇵', 'AU': '🇦🇺',
+    'UK': '🇬🇧', 'DE': '🇩🇪', 'FR': '🇫🇷', 'CA': '🇨🇦', 'SG': '🇸🇬'
+  };
+
+  // Group stocks by market
+  const groupByMarket = (stocks) => {
+    const grouped = {};
+    stocks.forEach(stock => {
+      const market = getMarketFromTicker(stock.ticker);
+      if (!grouped[market]) grouped[market] = [];
+      grouped[market].push(stock);
+    });
+    return grouped;
+  };
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 60000); // Refresh every 60s
+    const interval = setInterval(fetchMarketData, 60000);
     return () => clearInterval(interval);
   }, [selectedTimeframe]);
 
@@ -318,69 +351,105 @@ export const MarketsTab = ({ onTickerClick }) => {
             </div>
           </div>
 
-          {/* Top Movers Preview */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Top Gainers */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-emerald-400 uppercase mb-3 flex items-center gap-2">
-                🚀 Top Gainers
-                <span className="text-slate-500 font-normal">{selectedTimeframe}</span>
-              </h3>
-              <div className="space-y-2">
-                {marketData.gainers.slice(0, 5).map((stock, idx) => (
-                  <div 
-                    key={stock.ticker}
-                    onClick={() => onTickerClick && onTickerClick(stock.ticker)}
-                    className="flex items-center justify-between p-2 bg-emerald-500/5 rounded-lg cursor-pointer hover:bg-emerald-500/10 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-slate-500 w-4">{idx + 1}</span>
-                      <div>
-                        <span className="text-sm font-bold text-white">{stock.ticker}</span>
-                        <p className="text-[10px] text-slate-500">{stock.name}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-emerald-400">+{stock.change_percent?.toFixed(2)}%</span>
-                      <p className="text-[10px] text-slate-500">${stock.price?.toFixed(2)}</p>
-                    </div>
-                  </div>
-                ))}
-                {marketData.gainers.length === 0 && (
-                  <p className="text-xs text-slate-500 text-center py-4">No gainers data</p>
-                )}
-              </div>
+          {/* Compact Market-Grouped Movers */}
+          <div className="space-y-3">
+            {/* Market Filter */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <span className="text-[10px] text-slate-500 uppercase font-medium">Market:</span>
+              {['ALL', 'US', 'HK', 'CN'].map(m => (
+                <button
+                  key={m}
+                  onClick={() => setSelectedMarket(m)}
+                  className={`px-2 py-1 rounded text-[10px] font-bold transition-colors whitespace-nowrap ${
+                    selectedMarket === m
+                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {marketFlags[m]} {m}
+                </button>
+              ))}
             </div>
 
-            {/* Top Losers */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-rose-400 uppercase mb-3 flex items-center gap-2">
-                📉 Top Losers
-                <span className="text-slate-500 font-normal">{selectedTimeframe}</span>
-              </h3>
-              <div className="space-y-2">
-                {marketData.losers.slice(0, 5).map((stock, idx) => (
-                  <div 
-                    key={stock.ticker}
-                    onClick={() => onTickerClick && onTickerClick(stock.ticker)}
-                    className="flex items-center justify-between p-2 bg-rose-500/5 rounded-lg cursor-pointer hover:bg-rose-500/10 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-slate-500 w-4">{idx + 1}</span>
-                      <div>
-                        <span className="text-sm font-bold text-white">{stock.ticker}</span>
-                        <p className="text-[10px] text-slate-500">{stock.name}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Compact Gainers */}
+              <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[10px] font-bold text-emerald-400 uppercase flex items-center gap-1.5">
+                    🚀 Gainers <span className="text-slate-500 font-normal">{selectedTimeframe}</span>
+                  </h3>
+                  <span className="text-[9px] text-slate-500">
+                    {selectedMarket === 'ALL' ? marketData.gainers.length : (groupByMarket(marketData.gainers)[selectedMarket] || []).length} stocks
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {(selectedMarket === 'ALL' ? marketData.gainers : (groupByMarket(marketData.gainers)[selectedMarket] || []))
+                    .slice(0, 5).map((stock, idx) => (
+                    <div
+                      key={stock.ticker}
+                      onClick={() => onTickerClick && onTickerClick(stock.ticker)}
+                      className="flex items-center justify-between px-2 py-1.5 bg-emerald-500/5 rounded cursor-pointer hover:bg-emerald-500/10 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[9px] text-slate-500 w-4 shrink-0">{idx + 1}</span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                            <span className="text-[8px] text-slate-500">{marketFlags[getMarketFromTicker(stock.ticker)]}</span>
+                          </div>
+                          <p className="text-[8px] text-slate-500 truncate">{stock.name}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[10px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(2)}%</span>
+                        <p className="text-[8px] text-slate-500">${stock.price?.toFixed(2)}</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-rose-400">{stock.change_percent?.toFixed(2)}%</span>
-                      <p className="text-[10px] text-slate-500">${stock.price?.toFixed(2)}</p>
+                  ))}
+                  {(selectedMarket === 'ALL' ? marketData.gainers : (groupByMarket(marketData.gainers)[selectedMarket] || [])).length === 0 && (
+                    <p className="text-[9px] text-slate-500 text-center py-3">No gainers</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Compact Losers */}
+              <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[10px] font-bold text-rose-400 uppercase flex items-center gap-1.5">
+                    📉 Losers <span className="text-slate-500 font-normal">{selectedTimeframe}</span>
+                  </h3>
+                  <span className="text-[9px] text-slate-500">
+                    {selectedMarket === 'ALL' ? marketData.losers.length : (groupByMarket(marketData.losers)[selectedMarket] || []).length} stocks
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {(selectedMarket === 'ALL' ? marketData.losers : (groupByMarket(marketData.losers)[selectedMarket] || []))
+                    .slice(0, 5).map((stock, idx) => (
+                    <div
+                      key={stock.ticker}
+                      onClick={() => onTickerClick && onTickerClick(stock.ticker)}
+                      className="flex items-center justify-between px-2 py-1.5 bg-rose-500/5 rounded cursor-pointer hover:bg-rose-500/10 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[9px] text-slate-500 w-4 shrink-0">{idx + 1}</span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                            <span className="text-[8px] text-slate-500">{marketFlags[getMarketFromTicker(stock.ticker)]}</span>
+                          </div>
+                          <p className="text-[8px] text-slate-500 truncate">{stock.name}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span className="text-[10px] font-bold text-rose-400">{stock.change_percent?.toFixed(2)}%</span>
+                        <p className="text-[8px] text-slate-500">${stock.price?.toFixed(2)}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-                {marketData.losers.length === 0 && (
-                  <p className="text-xs text-slate-500 text-center py-4">No losers data</p>
-                )}
+                  ))}
+                  {(selectedMarket === 'ALL' ? marketData.losers : (groupByMarket(marketData.losers)[selectedMarket] || [])).length === 0 && (
+                    <p className="text-[9px] text-slate-500 text-center py-3">No losers</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
