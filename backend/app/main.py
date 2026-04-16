@@ -202,54 +202,53 @@ def get_db():
 @app.get("/api/positions")
 def get_open_positions(db: Session = Depends(get_db)):
     """Get all open positions (inventory) with current P&L"""
-    try:
-        positions = db.execute(text("""
-            SELECT i.*, s.close_price as current_market_price
-            FROM consumption.inventory i
-            LEFT JOIN consumption.stock s ON i.ticker = s.ticker
-            WHERE i.status = 'held'
-            ORDER BY i.purchase_date DESC
-        """)).fetchall()
+    # Use safe_query to handle missing tables gracefully
+    positions = safe_query(db, """
+        SELECT 
+            position_id as id,
+            ticker,
+            asset_class,
+            quantity,
+            avg_entry_price as buy_price,
+            current_price,
+            unrealized_pnl,
+            days_held as purchase_date
+        FROM consumption.Portfolio_Positions_Current
+        WHERE quantity > 0
+        ORDER BY market_value DESC
+    """, label="open_positions")
 
-        result = []
-        for p in positions:
-            current_price = p.current_market_price or p.current_price or p.buy_price
-            quantity = float(p.quantity) if p.quantity else 0
-            buy_price = float(p.buy_price) if p.buy_price else 0
+    result = []
+    for p in positions:
+        current_price = float(p.current_price or p.buy_price or 0)
+        quantity = float(p.quantity or 0)
+        buy_price = float(p.buy_price or 0)
+        unrealized_pnl = float(p.unrealized_pnl or 0)
+        pnl_pct = ((current_price / buy_price) - 1) * 100 if buy_price > 0 else 0
 
-            unrealized_pnl = (current_price - buy_price) * quantity
-            pnl_pct = ((current_price / buy_price) - 1) * 100 if buy_price > 0 else 0
+        result.append({
+            "id": p.id,
+            "ticker": p.ticker,
+            "asset_class": p.asset_class,
+            "quantity": quantity,
+            "buy_price": buy_price,
+            "current_price": current_price,
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "unrealized_pnl_pct": round(pnl_pct, 2),
+            "purchase_date": p.purchase_date,
+            "estimates": {"1d": "---", "7d": "---", "1m": "---"},
+            "analysis": {},
+            "status": "held"
+        })
 
-            result.append({
-                "id": p.id,
-                "ticker": p.ticker,
-                "asset_class": p.asset_class,
-                "quantity": quantity,
-                "buy_price": buy_price,
-                "current_price": current_price,
-                "unrealized_pnl": round(unrealized_pnl, 2),
-                "unrealized_pnl_pct": round(pnl_pct, 2),
-                "purchase_date": p.purchase_date.isoformat() if p.purchase_date else None,
-                "estimates": {
-                    "1d": p.est_1d,
-                    "7d": p.est_7d,
-                    "1m": p.est_1m
-                },
-                "analysis": p.analysis,
-                "status": p.status
-            })
-
-        return {
-            "positions": result,
-            "summary": {
-                "total_positions": len(result),
-                "total_unrealized_pnl": round(sum(p["unrealized_pnl"] for p in result), 2),
-                "by_asset_class": {}
-            }
+    return {
+        "positions": result,
+        "summary": {
+            "total_positions": len(result),
+            "total_unrealized_pnl": round(sum(p["unrealized_pnl"] for p in result), 2),
+            "by_asset_class": {}
         }
-    except Exception as e:
-        print(f"Positions API Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    }
 
 
 @app.get("/api/execution/status")
