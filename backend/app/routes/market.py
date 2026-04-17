@@ -212,18 +212,26 @@ def get_global_markets(db: Session = Depends(get_db)):
 
 
 @router.get("/breadth")
-def get_market_breadth(db: Session = Depends(get_db)):
-    """Get market breadth from consumption view."""
+def get_market_breadth(country: str = "US", db: Session = Depends(get_db)):
+    """Get market breadth by country. Supports US, HK, CN."""
     try:
-        # Try consumption view
-        rows = db.execute(text("""
+        # Define ticker suffix patterns by country
+        country_patterns = {
+            "US": "AND NOT (ticker LIKE '%.HK' OR ticker LIKE '%.SS' OR ticker LIKE '%.SZ' OR ticker ~ '^[0-9]{6}$')",
+            "HK": "AND ticker LIKE '%.HK'",
+            "CN": "AND (ticker LIKE '%.SS' OR ticker LIKE '%.SZ' OR ticker ~ '^[0-9]{6}$')"
+        }
+        suffix_filter = country_patterns.get(country, country_patterns["US"])
+
+        # Basic breadth metrics
+        rows = db.execute(text(f"""
             SELECT 
                 SUM(CASE WHEN change_pct > 0 THEN 1 ELSE 0 END) as advancing,
                 SUM(CASE WHEN change_pct < 0 THEN 1 ELSE 0 END) as declining,
                 SUM(CASE WHEN change_pct = 0 THEN 1 ELSE 0 END) as unchanged,
                 COUNT(*) as total
             FROM consumption.Markets_Stocks_Overview
-            WHERE change_pct IS NOT NULL
+            WHERE change_pct IS NOT NULL {suffix_filter}
         """)).fetchone()
 
         if rows and rows.total:
@@ -233,37 +241,65 @@ def get_market_breadth(db: Session = Depends(get_db)):
                 "unchanged": rows.unchanged or 0,
                 "newHighs": 0, "newLows": 0,
                 "above50MA": None, "above200MA": None,
-                "overbought": None, "oversold": None,
+                "country": country
             }
     except Exception as e:
-        logger.warning(f"Consumption breadth failed: {e}")
+        logger.warning(f"Consumption breadth failed for {country}: {e}")
 
-    return {"advancing": 0, "declining": 0, "unchanged": 0, "newHighs": 0, "newLows": 0}
+    return {"advancing": 0, "declining": 0, "unchanged": 0, "newHighs": 0, "newLows": 0, "country": country}
 
 
 @router.get("/sentiment")
-def get_market_sentiment(db: Session = Depends(get_db)):
-    """Get market sentiment indicators from DB."""
+def get_market_sentiment(country: str = "US", db: Session = Depends(get_db)):
+    """Get market sentiment indicators by country. VIX is US-only; others use proxies."""
     try:
-        vix_row = db.execute(text("""
-            SELECT close FROM silver.unified_prices
-            WHERE ticker = '^VIX' ORDER BY date DESC LIMIT 1
-        """)).fetchone()
+        # VIX is US-specific
+        if country == "US":
+            vix_row = db.execute(text("""
+                SELECT close FROM silver.unified_prices
+                WHERE ticker = '^VIX' ORDER BY date DESC LIMIT 1
+            """)).fetchone()
+            vix = float(vix_row.close) if vix_row and vix_row.close else 20.0
 
-        vix = float(vix_row.close) if vix_row and vix_row.close else 20.0
+            if vix < 15:
+                fear_greed = 75
+            elif vix < 20:
+                fear_greed = 55
+            elif vix < 25:
+                fear_greed = 50
+            elif vix < 30:
+                fear_greed = 35
+            else:
+                fear_greed = 20
 
-        if vix < 15:
-            fear_greed = 75
-        elif vix < 20:
-            fear_greed = 55
-        elif vix < 25:
-            fear_greed = 50
-        elif vix < 30:
-            fear_greed = 35
+            return {"fearGreed": fear_greed, "vix": vix, "putCall": 1.0, "country": "US"}
+
+        # For HK/CN, use index volatility as proxy
+        index_ticker = {"HK": "^HSI", "CN": "000001.SS"}.get(country, "^GSPC")
+
+        # Get index recent volatility (5-day vs 20-day)
+        vol_row = db.execute(text("""
+            WITH prices AS (
+                SELECT close, date,
+                       STDDEV(close) OVER (ORDER BY date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) as vol_5d,
+                       STDDEV(close) OVER (ORDER BY date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as vol_20d
+                FROM silver.unified_prices
+                WHERE ticker = :ticker AND date >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY date DESC
+                LIMIT 1
+            )
+            SELECT vol_5d, vol_20d FROM prices
+        """), {"ticker": index_ticker}).fetchone()
+
+        # Estimate fear/greed from volatility ratio (simplified)
+        if vol_row and vol_row.vol_20d and vol_row.vol_20d > 0:
+            vol_ratio = vol_row.vol_5d / vol_row.vol_20d if vol_row.vol_5d else 1.0
+            # High recent vol = fear (0-30), Low vol = greed (70-100)
+            fear_greed = int(max(0, min(100, 100 - (vol_ratio - 0.5) * 100)))
         else:
-            fear_greed = 20
+            fear_greed = 50
 
-        return {"fearGreed": fear_greed, "vix": vix, "putCall": 1.0}
+        return {"fearGreed": fear_greed, "vix": None, "putCall": 1.0, "country": country}
     except Exception as e:
-        logger.error(f"Error in market sentiment: {e}")
-        return {"fearGreed": 50, "vix": 20.0, "putCall": 1.0}
+        logger.error(f"Error in market sentiment for {country}: {e}")
+        return {"fearGreed": 50, "vix": None, "putCall": 1.0, "country": country}
