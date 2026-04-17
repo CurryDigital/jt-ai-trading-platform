@@ -234,19 +234,77 @@ def get_market_breadth(country: str = "US", db: Session = Depends(get_db)):
             WHERE change_pct IS NOT NULL {suffix_filter}
         """)).fetchone()
 
-        if rows and rows.total:
-            return {
-                "advancing": rows.advancing or 0,
-                "declining": rows.declining or 0,
-                "unchanged": rows.unchanged or 0,
-                "newHighs": 0, "newLows": 0,
-                "above50MA": None, "above200MA": None,
-                "country": country
-            }
+        # Calculate 52W highs/lows from unified_prices
+        highs_lows = db.execute(text(f"""
+            WITH latest_prices AS (
+                SELECT ticker, close as current_price, date
+                FROM silver.unified_prices
+                WHERE ticker IN (
+                    SELECT ticker FROM consumption.Markets_Stocks_Overview
+                    WHERE change_pct IS NOT NULL {suffix_filter}
+                )
+                AND date = (SELECT MAX(date) FROM silver.unified_prices)
+            ),
+            yearly_extremes AS (
+                SELECT 
+                    ticker,
+                    MAX(close) as high_52w,
+                    MIN(close) as low_52w
+                FROM silver.unified_prices
+                WHERE date >= CURRENT_DATE - INTERVAL '52 weeks'
+                  AND ticker IN (SELECT ticker FROM latest_prices)
+                GROUP BY ticker
+            )
+            SELECT 
+                SUM(CASE WHEN l.current_price >= y.high_52w * 0.995 THEN 1 ELSE 0 END) as new_highs,
+                SUM(CASE WHEN l.current_price <= y.low_52w * 1.005 THEN 1 ELSE 0 END) as new_lows
+            FROM latest_prices l
+            JOIN yearly_extremes y ON l.ticker = y.ticker
+        """)).fetchone()
+
+        # Calculate MA percentages (simplified - last 50/200 days)
+        ma_data = db.execute(text(f"""
+            WITH price_stats AS (
+                SELECT 
+                    ticker,
+                    close,
+                    AVG(close) OVER (PARTITION BY ticker ORDER BY date ROWS BETWEEN 49 PRECEDING AND CURRENT ROW) as ma50,
+                    AVG(close) OVER (PARTITION BY ticker ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) as ma200,
+                    ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM silver.unified_prices
+                WHERE ticker IN (
+                    SELECT ticker FROM consumption.Markets_Stocks_Overview
+                    WHERE change_pct IS NOT NULL {suffix_filter}
+                )
+                AND date >= CURRENT_DATE - INTERVAL '1 year'
+            ),
+            latest_stats AS (
+                SELECT * FROM price_stats WHERE rn = 1
+            )
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN close > ma50 THEN 1 ELSE 0 END) as above_50ma,
+                SUM(CASE WHEN close > ma200 THEN 1 ELSE 0 END) as above_200ma
+            FROM latest_stats
+            WHERE ma50 IS NOT NULL AND ma200 IS NOT NULL
+        """)).fetchone()
+
+        result = {
+            "advancing": rows.advancing or 0,
+            "declining": rows.declining or 0,
+            "unchanged": rows.unchanged or 0,
+            "newHighs": highs_lows.new_highs or 0 if highs_lows else 0,
+            "newLows": highs_lows.new_lows or 0 if highs_lows else 0,
+            "above50MA": round((ma_data.above_50ma / ma_data.total * 100), 1) if ma_data and ma_data.total else None,
+            "above200MA": round((ma_data.above_200ma / ma_data.total * 100), 1) if ma_data and ma_data.total else None,
+            "country": country
+        }
+        return result
+
     except Exception as e:
         logger.warning(f"Consumption breadth failed for {country}: {e}")
 
-    return {"advancing": 0, "declining": 0, "unchanged": 0, "newHighs": 0, "newLows": 0, "country": country}
+    return {"advancing": 0, "declining": 0, "unchanged": 0, "newHighs": 0, "newLows": 0, "above50MA": None, "above200MA": None, "country": country}
 
 
 @router.get("/sentiment")
