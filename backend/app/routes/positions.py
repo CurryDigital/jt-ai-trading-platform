@@ -17,79 +17,17 @@ router = APIRouter(prefix="/api", tags=["positions"])
 
 @router.get("/portfolio/positions")
 def get_portfolio_positions(db: Session = Depends(get_db)):
-    """Get current portfolio positions from consumption layer, with IBKR fallback."""
-    positions = []
-    
-    # Primary source: consumption portfolio positions view
+    """Get current portfolio positions from consumption layer."""
     try:
-        rows = db.execute(text("""
-            SELECT ticker, market_value, weight_pct, side, quantity, 
-                avg_entry_price as entry_price, current_price,
-                unrealized_pnl as pnl, unrealized_pnl_pct as pnl_pct,
-                strategy_name as strategy, days_held
-            FROM consumption.Portfolio_Positions_Current 
-            WHERE ABS(quantity) > 0
-            ORDER BY market_value DESC
+        positions = db.execute(text("""
+            SELECT ticker, market_value, weight_pct
+            FROM consumption.Portfolio_Positions_Current ORDER BY market_value DESC
         """)).fetchall()
-        for r in rows:
-            positions.append({
-                "ticker": r.ticker,
-                "market_value": float(r.market_value or 0),
-                "weight_pct": float(r.weight_pct or 0),
-                "side": r.side,
-                "quantity": float(r.quantity or 0),
-                "entry_price": float(r.entry_price or 0),
-                "current_price": float(r.current_price or 0),
-                "pnl": float(r.pnl or 0),
-                "pnl_pct": float(r.pnl_pct or 0),
-                "strategy": r.strategy,
-                "days_held": r.days_held,
-                "source": "portfolio_view"
-            })
+        return [{"ticker": p.ticker, "market_value": float(p.market_value or 0), 
+                 "weight_pct": float(p.weight_pct or 0)} for p in positions]
     except Exception as e:
-        logger.error(f"Portfolio Positions primary query error: {e}")
-    
-    # Fallback: IBKR live positions (when ETL hasn't synced to consumption layer)
-    if not positions:
-        try:
-            rows = db.execute(text("""
-                SELECT
-                    id,
-                    ticker,
-                    asset_class,
-                    side,
-                    quantity,
-                    avg_cost as entry_price,
-                    market_price as current_price,
-                    market_value,
-                    unrealized_pnl as pnl,
-                    unrealized_pnl_pct as pnl_pct,
-                    currency,
-                    fetched_at
-                FROM gold.ibkr_positions_live
-                WHERE ABS(quantity) > 0
-                ORDER BY ABS(market_value) DESC
-            """)).fetchall()
-            for r in rows:
-                positions.append({
-                    "ticker": r.ticker,
-                    "market_value": abs(float(r.market_value or 0)),
-                    "weight_pct": 0,
-                    "side": r.side,
-                    "quantity": abs(float(r.quantity or 0)),
-                    "entry_price": float(r.entry_price or 0),
-                    "current_price": float(r.current_price or 0),
-                    "pnl": float(r.pnl or 0),
-                    "pnl_pct": float(r.pnl_pct or 0),
-                    "strategy": "IBKR Live",
-                    "days_held": None,
-                    "currency": r.currency,
-                    "source": "ibkr_live"
-                })
-        except Exception as e:
-            logger.error(f"IBKR fallback query error: {e}")
-    
-    return positions
+        logger.error(f"Portfolio Positions Error: {e}")
+        return []
 
 
 @router.get("/portfolio/dashboard")
