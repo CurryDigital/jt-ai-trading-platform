@@ -202,7 +202,9 @@ def get_db():
 @app.get("/api/positions")
 def get_open_positions(db: Session = Depends(get_db)):
     """Get all open positions (inventory) with current P&L"""
-    # Use safe_query to handle missing tables gracefully
+    result = []
+
+    # Primary source: curated portfolio positions view
     positions = safe_query(db, """
         SELECT 
             position_id as id,
@@ -214,11 +216,10 @@ def get_open_positions(db: Session = Depends(get_db)):
             unrealized_pnl,
             days_held as purchase_date
         FROM consumption.Portfolio_Positions_Current
-        WHERE quantity > 0
+        WHERE ABS(quantity) > 0
         ORDER BY market_value DESC
     """, label="open_positions")
 
-    result = []
     for p in positions:
         current_price = float(p.current_price or p.buy_price or 0)
         quantity = float(p.quantity or 0)
@@ -240,6 +241,46 @@ def get_open_positions(db: Session = Depends(get_db)):
             "analysis": {},
             "status": "held"
         })
+
+    # Fallback: IBKR live positions
+    if not result:
+        ibkr = safe_query(db, """
+            SELECT 
+                id,
+                ticker,
+                asset_class,
+                quantity,
+                avg_cost as buy_price,
+                market_price as current_price,
+                unrealized_pnl,
+                fetched_at as purchase_date
+            FROM gold.ibkr_positions_live
+            WHERE ABS(quantity) > 0
+            ORDER BY ABS(market_value) DESC
+        """, label="open_positions_ibkr")
+
+        for p in ibkr:
+            current_price = float(p.current_price or p.buy_price or 0)
+            quantity = abs(float(p.quantity or 0))
+            buy_price = float(p.buy_price or 0)
+            unrealized_pnl = float(p.unrealized_pnl or 0)
+            pnl_pct = ((current_price / buy_price) - 1) * 100 if buy_price > 0 else 0
+
+            result.append({
+                "id": f"IBKR_{p.id}",
+                "ticker": p.ticker,
+                "asset_class": p.asset_class or "EQUITY",
+                "quantity": quantity,
+                "buy_price": buy_price,
+                "current_price": current_price,
+                "unrealized_pnl": round(unrealized_pnl, 2),
+                "unrealized_pnl_pct": round(pnl_pct, 2),
+                "purchase_date": p.purchase_date,
+                "estimates": {"1d": "---", "7d": "---", "1m": "---"},
+                "analysis": {},
+                "status": "held",
+                "source": "ibkr_live"
+            })
 
     return {
         "positions": result,
@@ -1679,7 +1720,12 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     """
     Get all portfolio positions with current market data.
     Unified view of all assets across strategies.
+    Reads from consumption.Portfolio_Positions_Current first,
+    falls back to gold.ibkr_positions_live if empty.
     """
+    positions = []
+
+    # Primary source: curated portfolio positions view
     result = safe_query(db, """
         SELECT
             position_id as id,
@@ -1696,11 +1742,10 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
             strategy_name as strategy,
             days_held
         FROM consumption.Portfolio_Positions_Current
-        WHERE quantity > 0
+        WHERE ABS(quantity) > 0
         ORDER BY market_value DESC
     """, label="portfolio_positions")
 
-    positions = []
     for r in result:
         positions.append({
             "id": r.id,
@@ -1716,6 +1761,88 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
             "pnl_pct": float(r.pnl_pct or 0),
             "days_held": r.days_held
         })
+
+    # Fallback 1: IBKR live positions (when ETL hasn't synced to consumption layer)
+    if not positions:
+        ibkr_result = safe_query(db, """
+            SELECT
+                id,
+                ticker,
+                asset_class,
+                side,
+                quantity,
+                avg_cost as entry_price,
+                market_price as current_price,
+                market_value,
+                unrealized_pnl as pnl,
+                unrealized_pnl_pct as pnl_pct,
+                currency,
+                fetched_at
+            FROM gold.ibkr_positions_live
+            WHERE ABS(quantity) > 0
+            ORDER BY ABS(market_value) DESC
+        """, label="ibkr_positions_fallback")
+
+        for r in ibkr_result:
+            positions.append({
+                "id": f"IBKR_{r.id}",
+                "ticker": r.ticker,
+                "strategy": "IBKR Live",
+                "asset_class": r.asset_class or "EQUITY",
+                "side": r.side,
+                "quantity": abs(float(r.quantity or 0)),
+                "entry_price": float(r.entry_price or 0),
+                "current_price": float(r.current_price or 0),
+                "market_value": abs(float(r.market_value or 0)),
+                "pnl": float(r.pnl or 0),
+                "pnl_pct": float(r.pnl_pct or 0),
+                "days_held": None,
+                "source": "ibkr_live",
+                "currency": r.currency
+            })
+
+    # Fallback 2: Paper strategies with invested capital
+    if not positions:
+        paper_result = safe_query(db, """
+            SELECT
+                ps.id,
+                ps.strategy_id,
+                sd.name as strategy_name,
+                ps.ticker,
+                ps.invested_capital,
+                ps.entry_price,
+                ps.current_price,
+                ps.unrealized_pnl,
+                ps.realized_pnl,
+                ps.execution_mode
+            FROM gold.paper_strategies ps
+            LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
+            WHERE ps.status = 'ACTIVE' AND ps.invested_capital > 0
+            ORDER BY ps.invested_capital DESC
+        """, label="paper_positions_fallback")
+
+        for r in paper_result:
+            mv = float(r.invested_capital or 0)
+            entry = float(r.entry_price or 0)
+            current = float(r.current_price or entry)
+            qty = int(mv / entry) if entry > 0 else 0
+            pnl = float(r.unrealized_pnl or 0)
+            pnl_pct = (pnl / mv * 100) if mv > 0 else 0
+            positions.append({
+                "id": f"PAPER_{r.id}",
+                "ticker": r.ticker,
+                "strategy": r.strategy_name or r.strategy_id,
+                "asset_class": "EQUITY",
+                "side": "LONG",
+                "quantity": qty,
+                "entry_price": entry,
+                "current_price": current,
+                "market_value": mv,
+                "pnl": pnl,
+                "pnl_pct": pnl_pct,
+                "days_held": None,
+                "source": r.execution_mode or "PAPER"
+            })
 
     total_value = sum(p["market_value"] for p in positions)
     total_pnl = sum(p["pnl"] for p in positions)
