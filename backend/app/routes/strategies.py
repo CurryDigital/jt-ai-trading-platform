@@ -11,59 +11,6 @@ from app.db.safe_query import safe_query, safe_query_one
 router = APIRouter(prefix="/api", tags=["strategies"])
 
 
-@router.get("/strategies/pipeline-summary")
-def get_pipeline_summary(db: Session = Depends(get_db)):
-    """Get strategy pipeline summary counts."""
-    try:
-        rows = db.execute(text("""
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) as active,
-                SUM(CASE WHEN status = 'INACTIVE' THEN 1 ELSE 0 END) as inactive,
-                SUM(CASE WHEN jt_ready = TRUE THEN 1 ELSE 0 END) as jt_ready
-            FROM gold.strategy_definitions
-        """)).fetchone()
-        
-        return {
-            "total": rows.total or 0,
-            "active": rows.active or 0,
-            "inactive": rows.inactive or 0,
-            "jt_ready": rows.jt_ready or 0,
-            "in_review": 0,
-            "backlog": 0
-        }
-    except Exception as e:
-        logger.warning(f"Pipeline summary query failed: {e}")
-        return {"total": 0, "active": 0, "inactive": 0, "jt_ready": 0, "in_review": 0, "backlog": 0}
-
-
-@router.get("/strategies/stats")
-def get_strategy_stats(db: Session = Depends(get_db)):
-    """Get aggregate strategy performance stats."""
-    try:
-        rows = db.execute(text("""
-            SELECT 
-                COUNT(DISTINCT strategy_id) as total_strategies,
-                SUM(CASE WHEN trades_count > 0 THEN 1 ELSE 0 END) as active_strategies,
-                SUM(realized_pnl + unrealized_pnl) as total_pnl
-            FROM consumption.paper_strategies
-        """)).fetchone()
-        
-        return {
-            "total_strategies": rows.total_strategies or 0,
-            "active_strategies": rows.active_strategies or 0,
-            "total_pnl": float(rows.total_pnl) if rows.total_pnl else 0,
-            "winning_strategies": 0,
-            "losing_strategies": 0
-        }
-    except Exception as e:
-        logger.warning(f"Strategy stats query failed: {e}")
-        return {"total_strategies": 0, "active_strategies": 0, "total_pnl": 0, "winning_strategies": 0, "losing_strategies": 0}
-
-
-# =============================================================================
-# Quant Strategy CRUD
-# =============================================================================
 
 @router.get("/quant/templates")
 def get_strategy_templates_quant():

@@ -292,7 +292,7 @@ const StrategyDetail = ({ strategyId, onClose }) => {
 };
 
 // Pending Work View — grouped by agent
-const PendingWorkView = ({ workItems, agents }) => {
+const PendingWorkView = ({ workItems, agents, selectedAgent }) => {
   if (!workItems || workItems.length === 0) {
     return (
       <div className="text-center p-8 text-slate-500">
@@ -310,29 +310,36 @@ const PendingWorkView = ({ workItems, agents }) => {
     grouped[w.target_agent].push(w);
   });
 
+  // If an agent is selected, only show that agent's pending work
+  const agentsToShow = selectedAgent ? [selectedAgent] : Object.keys(grouped);
+
   return (
     <div className="divide-y divide-white/5">
-      {Object.entries(grouped).map(([agentId, items]) => (
-        <div key={agentId} className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-lg">{items[0].target_agent_icon}</span>
-            <span className="text-xs font-bold text-white">{items[0].target_agent_name}</span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">{items.length} pending</span>
+      {agentsToShow.map(agentId => {
+        const items = grouped[agentId];
+        if (!items || items.length === 0) return null;
+        return (
+          <div key={agentId} className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">{items[0].target_agent_icon}</span>
+              <span className="text-xs font-bold text-white">{items[0].target_agent_name}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">{items.length} pending</span>
+            </div>
+            <div className="space-y-1">
+              {items.map(w => (
+                <div key={w.event_id} className="flex items-center gap-2 py-1.5 px-2 rounded bg-slate-800/30">
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[w.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
+                    {w.event_type}
+                  </span>
+                  {w.strategy_id && <span className="text-[9px] text-amber-400 font-mono">{w.strategy_id}</span>}
+                  <span className="text-[9px] text-slate-600">from {w.emitter_icon} {w.emitter_name}</span>
+                  <span className="text-[9px] text-slate-600 ml-auto">{formatTimeAgo(w.created_at)}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="space-y-1">
-            {items.map(w => (
-              <div key={w.event_id} className="flex items-center gap-2 py-1.5 px-2 rounded bg-slate-800/30">
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[w.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
-                  {w.event_type}
-                </span>
-                {w.strategy_id && <span className="text-[9px] text-amber-400 font-mono">{w.strategy_id}</span>}
-                <span className="text-[9px] text-slate-600">from {w.emitter_icon} {w.emitter_name}</span>
-                <span className="text-[9px] text-slate-600 ml-auto">{formatTimeAgo(w.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
@@ -347,6 +354,17 @@ export const AgenticResearch = () => {
   const [selectedStrategy, setSelectedStrategy] = useState(null);
   const [activeView, setActiveView] = useState('events'); // 'events', 'workflows', 'pending'
   const [loading, setLoading] = useState(true);
+
+  // When an agent is selected via pipeline click with pending work, switch to pending view
+  const handleSelectAgent = (agentId) => {
+    if (agentId) {
+      const pendingCount = pendingWork.by_agent?.[agentId] || 0;
+      if (pendingCount > 0) {
+        setActiveView('pending');
+      }
+    }
+    setSelectedAgent(agentId);
+  };
 
   useEffect(() => {
     fetchAll();
@@ -471,7 +489,7 @@ export const AgenticResearch = () => {
           agents={agents}
           pendingByAgent={pendingWork.by_agent || {}}
           selectedAgent={selectedAgent}
-          onSelectAgent={setSelectedAgent}
+          onSelectAgent={handleSelectAgent}
         />
       </div>
 
@@ -557,7 +575,7 @@ export const AgenticResearch = () => {
               <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending Work by Agent</span>
               <span className="text-[10px] text-slate-600">{pendingWork.count || 0} items</span>
             </div>
-            <PendingWorkView workItems={pendingWork.work_items} agents={agents} />
+            <PendingWorkView workItems={pendingWork.work_items} agents={agents} selectedAgent={selectedAgent} />
           </>
         )}
       </div>
