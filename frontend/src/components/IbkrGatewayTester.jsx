@@ -255,7 +255,6 @@ export const IbkrGatewayTester = () => {
     }
   };
 
-  // Test 6: Live IBKR Order Test - Actually place an order through IBKR
   const testIBKROrder = async (action = 'BUY') => {
     try {
       // Check current execution mode
@@ -266,15 +265,7 @@ export const IbkrGatewayTester = () => {
       const modeData = await modeResponse.json();
       const currentMode = modeData.execution_mode;
       
-      if (currentMode === 'SIMULATION') {
-        return {
-          success: true,
-          message: '⚠️ In SIMULATION mode - order would be simulated only. Switch to PAPER_TRADING mode to send real orders to IBKR.',
-          data: { mode: currentMode, simulated: true }
-        };
-      }
-      
-      // Place a small test order through IBKR
+      // Place order through IBKR
       const orderResponse = await fetch('/api/ib/place-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -295,19 +286,13 @@ export const IbkrGatewayTester = () => {
       
       return {
         success: true,
-        message: `✓ ${currentMode} ${action} order submitted to IBKR! Order ID: ${orderData.order_id || 'N/A'}`,
-        data: {
-          mode: currentMode,
-          symbol: orderSymbol,
-          action: action,
-          quantity: parseInt(orderQuantity),
-          order_type: orderType,
-          order_id: orderData.order_id,
-          status: orderData.status
-        }
+        message: orderData.simulated 
+          ? `🧪 SIMULATION: ${action} ${orderQuantity} shares of ${orderSymbol} (not real)`
+          : `✓ ${currentMode} ${action} order submitted! ID: ${orderData.order_id || 'N/A'}`,
+        data: orderData
       };
     } catch (error) {
-      throw new Error(`IBKR order test failed: ${error.message}`);
+      throw new Error(`Order failed: ${error.message}`);
     }
   };
 
@@ -451,12 +436,22 @@ export const IbkrGatewayTester = () => {
         </div>
       </div>
 
-      {/* Order Controls */}
+      {/* Manual Order Section */}
       <div className="mb-8 p-6 rounded-2xl bg-white/5 border border-white/10"
       >
-        <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 font-outfit"
+        <div className="flex items-center gap-3 mb-4"
         >
-          Order Configuration
+          <span className="text-2xl">💼</span>
+          <div>
+            <div className="text-sm font-black text-white uppercase tracking-wider font-outfit"
+            >
+              Manual Order
+            </div>
+            <p className="text-xs text-slate-500 font-medium"
+            >
+              Quick buy/sell any ticker
+            </p>
+          </div>
         </div>
         <div className="grid grid-cols-4 gap-4"
         >
