@@ -134,6 +134,7 @@ const PortfolioTab = ({ data }) => {
     OPTION: { label: 'Options', icon: '⚡', color: 'rose' },
     FUTURE: { label: 'Futures', icon: '⏳', color: 'orange' },
     CASH: { label: 'Cash', icon: '💵', color: 'emerald' },
+    CASH: { label: 'Cash', icon: '💵', color: 'emerald' },
     OTHER: { label: 'Other', icon: '💼', color: 'slate' },
   };
 
