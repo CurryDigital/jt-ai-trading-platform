@@ -12,9 +12,6 @@ export const IbkrGatewayTester = () => {
     port: 4001,
     clientId: 1
   });
-  const [orderSymbol, setOrderSymbol] = useState('AAPL');
-  const [orderQuantity, setOrderQuantity] = useState(1);
-  const [orderType, setOrderType] = useState('MKT');
 
   useEffect(() => {
     setGatewayConfig({
@@ -265,34 +262,13 @@ export const IbkrGatewayTester = () => {
       const modeData = await modeResponse.json();
       const currentMode = modeData.execution_mode;
       
-      // Place order through IBKR
-      const orderResponse = await fetch('/api/ib/place-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: orderSymbol,
-          action: action,
-          quantity: parseInt(orderQuantity),
-          order_type: orderType
-        })
-      });
-      
-      if (!orderResponse.ok) {
-        const errorData = await orderResponse.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Order failed: HTTP ${orderResponse.status}`);
-      }
-      
-      const orderData = await orderResponse.json();
-      
       return {
         success: true,
-        message: orderData.simulated 
-          ? `🧪 SIMULATION: ${action} ${orderQuantity} shares of ${orderSymbol} (not real)`
-          : `✓ ${currentMode} ${action} order submitted! ID: ${orderData.order_id || 'N/A'}`,
-        data: orderData
+        message: `✓ ${currentMode} mode active — use Portfolio tab to place orders`,
+        data: { mode: currentMode }
       };
     } catch (error) {
-      throw new Error(`Order failed: ${error.message}`);
+      throw new Error(`Order check failed: ${error.message}`);
     }
   };
 
@@ -432,78 +408,6 @@ export const IbkrGatewayTester = () => {
               readOnly
               className="w-full px-4 py-2 rounded-lg bg-black/20 border border-white/10 text-white text-sm font-mono"
             />
-          </div>
-        </div>
-      </div>
-
-      {/* Manual Order Section */}
-      <div className="mb-8 p-6 rounded-2xl bg-white/5 border border-white/10"
-      >
-        <div className="flex items-center gap-3 mb-4"
-        >
-          <span className="text-2xl">💼</span>
-          <div>
-            <div className="text-sm font-black text-white uppercase tracking-wider font-outfit"
-            >
-              Manual Order
-            </div>
-            <p className="text-xs text-slate-500 font-medium"
-            >
-              Quick buy/sell any ticker
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-4 gap-4"
-        >
-          <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-2 font-outfit"
-            >Symbol</label>
-            <input
-              type="text"
-              value={orderSymbol}
-              onChange={e => setOrderSymbol(e.target.value.toUpperCase())}
-              className="w-full px-4 py-2 rounded-lg bg-black/20 border border-white/10 text-white text-sm font-mono focus:border-blue-500/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-2 font-outfit"
-            >Quantity</label>
-            <input
-              type="number"
-              value={orderQuantity}
-              onChange={e => setOrderQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-              min="1"
-              className="w-full px-4 py-2 rounded-lg bg-black/20 border border-white/10 text-white text-sm font-mono focus:border-blue-500/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-2 font-outfit"
-            >Order Type</label>
-            <select
-              value={orderType}
-              onChange={e => setOrderType(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-black/20 border border-white/10 text-white text-sm font-mono focus:border-blue-500/50 focus:outline-none"
-            >
-              <option value="MKT">MKT - Market</option>
-              <option value="LMT">LMT - Limit</option>
-              <option value="STP">STP - Stop</option>
-            </select>
-          </div>
-          <div className="flex items-end gap-2">
-            <button
-              onClick={() => runTest('ibkrOrderBuy', () => testIBKROrder('BUY'))}
-              disabled={isLoading['ibkrOrderBuy'] || isLoading['ibkrOrderSell']}
-              className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-xs font-black uppercase tracking-widest transition-all"
-            >
-              {isLoading['ibkrOrderBuy'] ? '...' : '📈 BUY'}
-            </button>
-            <button
-              onClick={() => runTest('ibkrOrderSell', () => testIBKROrder('SELL'))}
-              disabled={isLoading['ibkrOrderBuy'] || isLoading['ibkrOrderSell']}
-              className="flex-1 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-xs font-black uppercase tracking-widest transition-all"
-            >
-              {isLoading['ibkrOrderSell'] ? '...' : '📉 SELL'}
-            </button>
           </div>
         </div>
       </div>

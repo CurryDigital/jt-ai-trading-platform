@@ -84,6 +84,36 @@ const KPI = ({ l, v, sub, pos }) => (
 const PortfolioTab = ({ data }) => {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
+  const [orderSymbol, setOrderSymbol] = useState('');
+  const [orderQty, setOrderQty] = useState(1);
+  const [orderType, setOrderType] = useState('MKT');
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderMsg, setOrderMsg] = useState(null);
+
+  const placeOrder = async (action) => {
+    if (!orderSymbol) { setOrderMsg({ type: 'error', text: 'Enter a symbol' }); return; }
+    setOrderLoading(true);
+    setOrderMsg(null);
+    try {
+      const res = await fetch('/api/ib/place-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: orderSymbol.toUpperCase(), action, quantity: parseInt(orderQty) || 1, order_type: orderType })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOrderMsg({ type: 'success', text: data.message || `${action} order placed` });
+        setOrderSymbol('');
+        setOrderQty(1);
+      } else {
+        setOrderMsg({ type: 'error', text: data.detail || 'Order failed' });
+      }
+    } catch (e) {
+      setOrderMsg({ type: 'error', text: e.message || 'Network error' });
+    } finally {
+      setOrderLoading(false);
+    }
+  };
 
   const positions = useMemo(() =>
     (data.positions || []).filter(p => {
@@ -133,7 +163,6 @@ const PortfolioTab = ({ data }) => {
     ETF: { label: 'ETFs', icon: '📊', color: 'violet' },
     OPTION: { label: 'Options', icon: '⚡', color: 'rose' },
     FUTURE: { label: 'Futures', icon: '⏳', color: 'orange' },
-    CASH: { label: 'Cash', icon: '💵', color: 'emerald' },
     CASH: { label: 'Cash', icon: '💵', color: 'emerald' },
     OTHER: { label: 'Other', icon: '💼', color: 'slate' },
   };
@@ -216,6 +245,55 @@ const PortfolioTab = ({ data }) => {
         <KPI l="Positions" v={positions.length} />
         <KPI l="Asset Classes" v={activeClasses.length} />
         <KPI l="Unrealized P&L" v={fmtK(totalPnL)} pos={totalPnL >= 0} />
+      </div>
+
+      {/* Manual Order */}
+      <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs font-bold text-white">Quick Order</span>
+          {orderMsg && (
+            <span className={`text-[10px] ${orderMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{orderMsg.text}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={orderSymbol}
+            onChange={e => setOrderSymbol(e.target.value.toUpperCase())}
+            placeholder="Symbol"
+            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-24 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+          />
+          <input
+            type="number"
+            value={orderQty}
+            onChange={e => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+            min="1"
+            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-16 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+          />
+          <select
+            value={orderType}
+            onChange={e => setOrderType(e.target.value)}
+            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500/50"
+          >
+            <option value="MKT">MKT</option>
+            <option value="LMT">LMT</option>
+            <option value="STP">STP</option>
+          </select>
+          <button
+            onClick={() => placeOrder('BUY')}
+            disabled={orderLoading}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
+          >
+            {orderLoading ? '...' : '📈 BUY'}
+          </button>
+          <button
+            onClick={() => placeOrder('SELL')}
+            disabled={orderLoading}
+            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
+          >
+            {orderLoading ? '...' : '📉 SELL'}
+          </button>
+        </div>
       </div>
 
       {/* Asset Class Filter */}
