@@ -797,7 +797,7 @@ export const AgenticResearch = () => {
         />
       </div>
 
-      {/* Agent Info Card - only show when NOT in intake view */}
+      {/* Agent Info Card - HIDDEN when in intake view to prevent duplication */}
       {selectedAgent && activeView !== 'intake' && (() => {
         const agent = agents.find(a => a.agent_id === selectedAgent);
         if (!agent) return null;
