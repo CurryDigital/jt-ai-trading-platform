@@ -797,8 +797,8 @@ export const AgenticResearch = () => {
         />
       </div>
 
-      {/* Agent Info Card */}
-      {selectedAgent && (() => {
+      {/* Agent Info Card - only show when NOT in intake view */}
+      {selectedAgent && activeView !== 'intake' && (() => {
         const agent = agents.find(a => a.agent_id === selectedAgent);
         if (!agent) return null;
         const agentPending = pendingWork.by_agent?.[selectedAgent] || 0;
