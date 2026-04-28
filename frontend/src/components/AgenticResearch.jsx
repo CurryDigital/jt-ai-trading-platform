@@ -48,7 +48,7 @@ function formatTimeAgo(timestamp) {
 }
 
 // Pipeline Flow — agents in order, with pending work badge and symbols
-const PipelineFlow = ({ agents, pendingByAgent, selectedAgent, onSelectAgent, workItems }) => {
+const PipelineFlow = ({ agents, pendingByAgent, selectedAgent, onSelectAgent, onAgentClick, workItems }) => {
   // Build symbol map per agent from work items
   const agentSymbols = useMemo(() => {
     const map = {};
@@ -80,7 +80,7 @@ const PipelineFlow = ({ agents, pendingByAgent, selectedAgent, onSelectAgent, wo
                 </div>
               )}
               <button
-                onClick={() => onSelectAgent(isSelected ? null : agent.agent_id)}
+                onClick={() => onAgentClick(agent.agent_id)}
                 className={`relative flex-shrink-0 flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all ${
                   isSelected
                     ? 'bg-blue-500/20 border border-blue-500/40 ring-1 ring-blue-500/20'
@@ -344,6 +344,192 @@ const StrategyDetail = ({ strategyId, onClose }) => {
   );
 };
 
+// Intake Work View — shows pending and completed items for a specific agent
+const IntakeWorkView = ({ agentId, agentName, agentIcon, pendingItems, completedItems, loadingCompleted, dateFilter, onDateFilterChange }) => {
+  const [activeTab, setActiveTab] = useState('pending');
+  
+  // Filter completed items by date if filter is set
+  const filteredCompleted = useMemo(() => {
+    if (!dateFilter) return completedItems;
+    const today = new Date().toISOString().split('T')[0];
+    if (dateFilter === 'today') {
+      return completedItems.filter(item => item.processed_at?.startsWith(today));
+    }
+    if (dateFilter === 'week') {
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      return completedItems.filter(item => item.processed_at >= weekAgo);
+    }
+    if (dateFilter === 'month') {
+      const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      return completedItems.filter(item => item.processed_at >= monthAgo);
+    }
+    return completedItems;
+  }, [completedItems, dateFilter]);
+
+  const agentPending = pendingItems.filter(w => w.target_agent === agentId);
+  const agentCompleted = filteredCompleted.filter(c => c.processed_by === agentId);
+
+  return (
+    <div className="space-y-4">
+      {/* Agent Header */}
+      <div className="flex items-center gap-3 p-3 bg-blue-500/5 rounded-xl border border-blue-500/20">
+        <span className="text-2xl">{agentIcon}</span>
+        <div className="flex-1">
+          <div className="text-sm font-bold text-white">{agentName} <span className="text-[10px] text-slate-500 font-normal font-mono">({agentId})</span></div>
+          <p className="text-[11px] text-slate-400">Receives new strategy ideas from Telegram and other sources</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-1 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-bold">
+            {agentPending.length} pending
+          </span>
+          <span className="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-bold">
+            {agentCompleted.length} completed
+          </span>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`flex-1 px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${
+            activeTab === 'pending' ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Pending ({agentPending.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('completed')}
+          className={`flex-1 px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${
+            activeTab === 'completed' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Completed ({agentCompleted.length})
+        </button>
+      </div>
+
+      {/* Pending List */}
+      {activeTab === 'pending' && (
+        <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending Items</span>
+            <span className="text-[10px] text-slate-600">{agentPending.length} items waiting</span>
+          </div>
+          {agentPending.length > 0 ? (
+            <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto">
+              {agentPending.map(w => {
+                const syms = extractSymbols(w.strategy_id) || [];
+                return (
+                  <div key={w.event_id} className="flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-sm">
+                      {w.emitter_icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[w.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
+                          {w.event_type}
+                        </span>
+                        {w.strategy_id && (
+                          <span className="text-[9px] text-amber-400 font-mono">
+                            {w.strategy_id}
+                            {syms.length > 0 && (
+                              <span className="text-slate-500 ml-1">({syms.join(', ')})</span>
+                            )}
+                          </span>
+                        )}
+                        <span className="text-[9px] text-slate-600">from {w.emitter_name}</span>
+                      </div>
+                      <div className="text-[9px] text-slate-600">Domain: {w.domain || 'general'}</div>
+                    </div>
+                    <span className="text-[10px] text-slate-600 flex-shrink-0">{formatTimeAgo(w.created_at)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center p-8 text-slate-500">
+              <div className="text-3xl mb-3">✅</div>
+              <p className="text-sm font-medium text-slate-400">No pending items</p>
+              <p className="text-[11px] text-slate-600 mt-1">All work has been processed by {agentName}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Completed List */}
+      {activeTab === 'completed' && (
+        <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Completed History</span>
+            <div className="flex items-center gap-1">
+              <select
+                value={dateFilter}
+                onChange={(e) => onDateFilterChange(e.target.value)}
+                className="bg-slate-800/80 border border-white/10 rounded px-2 py-1 text-[10px] text-slate-300 outline-none"
+              >
+                <option value="">All time</option>
+                <option value="today">Today</option>
+                <option value="week">Last 7 days</option>
+                <option value="month">Last 30 days</option>
+              </select>
+              <span className="text-[10px] text-slate-600">{agentCompleted.length} items</span>
+            </div>
+          </div>
+          {loadingCompleted ? (
+            <div className="text-center p-8 text-slate-500">
+              <div className="w-6 h-6 border-2 border-slate-600 border-t-emerald-500 rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-xs">Loading completed items...</p>
+            </div>
+          ) : agentCompleted.length > 0 ? (
+            <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto">
+              {agentCompleted.map(c => {
+                const syms = extractSymbols(c.strategy_id) || [];
+                return (
+                  <div key={c.event_id} className="flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-sm">
+                      ✅
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[c.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
+                          {c.event_type}
+                        </span>
+                        {c.strategy_id && (
+                          <span className="text-[9px] text-amber-400 font-mono">
+                            {c.strategy_id}
+                            {syms.length > 0 && (
+                              <span className="text-slate-500 ml-1">({syms.join(', ')})</span>
+                            )}
+                          </span>
+                        )}
+                        <span className="text-[9px] text-slate-600">from {c.emitter_name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[9px] text-slate-500">
+                        <span>Processed by: <span className="text-emerald-400">{c.processor_name}</span></span>
+                        <span>Status: <span className={c.processing_status === 'success' ? 'text-emerald-400' : 'text-amber-400'}>{c.processing_status}</span></span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end flex-shrink-0">
+                      <span className="text-[10px] text-slate-600">{formatTimeAgo(c.processed_at)}</span>
+                      <span className="text-[8px] text-slate-700">{c.processed_at?.slice(0, 10)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center p-8 text-slate-500">
+              <div className="text-3xl mb-3">📭</div>
+              <p className="text-sm font-medium text-slate-400">No completed items</p>
+              <p className="text-[11px] text-slate-600 mt-1">No processed work found for the selected filter</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Pending Work View — grouped by agent, with symbols
 const PendingWorkView = ({ workItems, agents, selectedAgent }) => {
   if (!workItems || workItems.length === 0) {
@@ -429,11 +615,14 @@ export const AgenticResearch = () => {
   const [events, setEvents] = useState([]);
   const [workflows, setWorkflows] = useState([]);
   const [pendingWork, setPendingWork] = useState({ work_items: [], by_agent: {} });
+  const [completedWork, setCompletedWork] = useState({ completed_items: [], count: 0 });
   const [workflowSummary, setWorkflowSummary] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedStrategy, setSelectedStrategy] = useState(null);
-  const [activeView, setActiveView] = useState('events'); // 'events', 'workflows', 'pending'
+  const [activeView, setActiveView] = useState('events'); // 'events', 'workflows', 'pending', 'intake'
   const [loading, setLoading] = useState(true);
+  const [loadingCompleted, setLoadingCompleted] = useState(false);
+  const [dateFilter, setDateFilter] = useState('');
 
   // When an agent is selected via pipeline click with pending work, switch to pending view
   const handleSelectAgent = (agentId) => {
@@ -444,6 +633,13 @@ export const AgenticResearch = () => {
       }
     }
     setSelectedAgent(agentId);
+  };
+
+  // Handle clicking on an agent in the pipeline to show intake view
+  const handleAgentClick = (agentId) => {
+    setSelectedAgent(agentId);
+    setActiveView('intake');
+    fetchCompletedWork(agentId);
   };
 
   useEffect(() => {
@@ -494,6 +690,16 @@ export const AgenticResearch = () => {
       .catch(e => console.error('Failed to fetch pending work:', e));
   };
 
+  const fetchCompletedWork = (agentId) => {
+    setLoadingCompleted(true);
+    const params = new URLSearchParams({ limit: '100' });
+    if (agentId) params.set('agent_id', agentId);
+    fetch(`/api/agents/completed-work?${params}`)
+      .then(r => r.json())
+      .then(data => { setCompletedWork(data); setLoadingCompleted(false); })
+      .catch(e => { console.error('Failed to fetch completed work:', e); setLoadingCompleted(false); });
+  };
+
   const fetchWorkflowSummary = () => {
     fetch('/api/agents/workflow-summary')
       .then(r => r.json())
@@ -523,6 +729,7 @@ export const AgenticResearch = () => {
             { id: 'events', label: 'Events' },
             { id: 'workflows', label: 'Workflows' },
             { id: 'pending', label: `Pending (${pendingWork.count || 0})` },
+            { id: 'intake', label: 'Intake' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -570,6 +777,7 @@ export const AgenticResearch = () => {
           pendingByAgent={pendingWork.by_agent || {}}
           selectedAgent={selectedAgent}
           onSelectAgent={handleSelectAgent}
+          onAgentClick={handleAgentClick}
           workItems={pendingWork.work_items || []}
         />
       </div>
@@ -650,14 +858,29 @@ export const AgenticResearch = () => {
           </>
         )}
 
-        {activeView === 'pending' && (
-          <>
-            <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
-              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending Work by Agent</span>
-              <span className="text-[10px] text-slate-600">{pendingWork.count || 0} items</span>
-            </div>
-            <PendingWorkView workItems={pendingWork.work_items} agents={agents} selectedAgent={selectedAgent} />
-          </>
+        {activeView === 'intake' && selectedAgent && (() => {
+          const agent = agents.find(a => a.agent_id === selectedAgent);
+          if (!agent) return null;
+          return (
+            <IntakeWorkView
+              agentId={selectedAgent}
+              agentName={agent.name}
+              agentIcon={agent.icon}
+              pendingItems={pendingWork.work_items || []}
+              completedItems={completedWork.completed_items || []}
+              loadingCompleted={loadingCompleted}
+              dateFilter={dateFilter}
+              onDateFilterChange={setDateFilter}
+            />
+          );
+        })()}
+
+        {activeView === 'intake' && !selectedAgent && (
+          <div className="text-center p-12 text-slate-500">
+            <div className="text-3xl mb-3">👆</div>
+            <p className="text-sm font-medium text-slate-400">Select an agent from the pipeline above</p>
+            <p className="text-[11px] text-slate-600 mt-1">Click on any agent in the Agent Pipeline to see their pending and completed work</p>
+          </div>
         )}
       </div>
 

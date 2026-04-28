@@ -4583,6 +4583,71 @@ def get_pending_work(agent_id: str = None, db: Session = Depends(get_db)):
         return {"work_items": [], "count": 0, "by_agent": {}}
 
 
+@app.get("/api/agents/completed-work")
+def get_completed_work(
+    agent_id: str = None,
+    date_from: str = None,
+    date_to: str = None,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get completed (processed) work items with optional date filtering"""
+    try:
+        query = """
+            SELECT 
+                ep.event_id,
+                ep.agent_name as processed_by,
+                ep.processed_at,
+                ep.status as processing_status,
+                e.event_type,
+                e.strategy_id,
+                e.domain,
+                e.source_agent as emitted_by,
+                e.created_at as event_created_at
+            FROM openclaw_researcher.event_processing ep
+            JOIN openclaw_researcher.events e ON ep.event_id = e.id
+            WHERE 1=1
+        """
+        params = {}
+        if agent_id:
+            query += " AND ep.agent_name = :agent_id"
+            params["agent_id"] = agent_id
+        if date_from:
+            query += " AND ep.processed_at >= :date_from"
+            params["date_from"] = date_from
+        if date_to:
+            query += " AND ep.processed_at < :date_to"
+            params["date_to"] = date_to
+        query += " ORDER BY ep.processed_at DESC LIMIT :limit"
+        params["limit"] = limit
+
+        rows = db.execute(text(query), params).fetchall()
+        completed_items = []
+        for r in rows:
+            agent_info = AGENT_REGISTRY.get(r.processed_by, {"name": r.processed_by, "icon": "🤖"})
+            emitter_info = AGENT_REGISTRY.get(r.emitted_by, {"name": r.emitted_by, "icon": "🤖"})
+            completed_items.append({
+                "event_id": str(r.event_id),
+                "event_type": r.event_type,
+                "strategy_id": r.strategy_id,
+                "domain": r.domain,
+                "processed_by": r.processed_by,
+                "processor_name": agent_info["name"],
+                "processor_icon": agent_info["icon"],
+                "emitted_by": r.emitted_by,
+                "emitter_name": emitter_info["name"],
+                "emitter_icon": emitter_info["icon"],
+                "processing_status": r.processing_status,
+                "event_created_at": r.event_created_at.isoformat() if r.event_created_at else None,
+                "processed_at": r.processed_at.isoformat() if r.processed_at else None,
+            })
+
+        return {"completed_items": completed_items, "count": len(completed_items)}
+    except Exception as e:
+        logger.error(f"Completed work error: {e}")
+        return {"completed_items": [], "count": 0}
+
+
 @app.get("/api/agents/routing-rules")
 def get_routing_rules(db: Session = Depends(get_db)):
     """Get event routing configuration — which events get routed to which agents"""
