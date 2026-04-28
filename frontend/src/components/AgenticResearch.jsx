@@ -344,8 +344,8 @@ const StrategyDetail = ({ strategyId, onClose }) => {
   );
 };
 
-// Intake Work View — shows pending and completed items for a specific agent
-const IntakeWorkView = ({ agentId, agentName, agentIcon, pendingItems, completedItems, loadingCompleted, dateFilter, onDateFilterChange }) => {
+// Agent Work View — shows pending and completed items for ANY agent
+const AgentWorkView = ({ agentId, agentName, agentIcon, agentRole, pendingItems, completedItems, loadingCompleted, dateFilter, onDateFilterChange, onSelectStrategy }) => {
   const [activeTab, setActiveTab] = useState('pending');
   
   // Filter completed items by date if filter is set
@@ -369,6 +369,13 @@ const IntakeWorkView = ({ agentId, agentName, agentIcon, pendingItems, completed
   const agentPending = pendingItems.filter(w => w.target_agent === agentId);
   const agentCompleted = filteredCompleted.filter(c => c.processed_by === agentId);
 
+  // Auto-switch to completed tab if no pending but has completed
+  useEffect(() => {
+    if (agentPending.length === 0 && agentCompleted.length > 0 && activeTab === 'pending') {
+      setActiveTab('completed');
+    }
+  }, [agentPending.length, agentCompleted.length]);
+
   return (
     <div className="space-y-4">
       {/* Agent Header */}
@@ -376,7 +383,7 @@ const IntakeWorkView = ({ agentId, agentName, agentIcon, pendingItems, completed
         <span className="text-2xl">{agentIcon}</span>
         <div className="flex-1">
           <div className="text-sm font-bold text-white">{agentName} <span className="text-[10px] text-slate-500 font-normal font-mono">({agentId})</span></div>
-          <p className="text-[11px] text-slate-400">Receives new strategy ideas from Telegram and other sources</p>
+          <p className="text-[11px] text-slate-400">{agentRole || 'Agent in research pipeline'}</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="px-2 py-1 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-bold">
@@ -420,7 +427,11 @@ const IntakeWorkView = ({ agentId, agentName, agentIcon, pendingItems, completed
               {agentPending.map(w => {
                 const syms = extractSymbols(w.strategy_id) || [];
                 return (
-                  <div key={w.event_id} className="flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors">
+                  <div 
+                    key={w.event_id} 
+                    onClick={() => w.strategy_id && onSelectStrategy && onSelectStrategy(w.strategy_id)}
+                    className={`flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors ${w.strategy_id && onSelectStrategy ? 'cursor-pointer' : ''}`}
+                  >
                     <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-sm">
                       {w.emitter_icon}
                     </div>
@@ -485,7 +496,11 @@ const IntakeWorkView = ({ agentId, agentName, agentIcon, pendingItems, completed
               {agentCompleted.map(c => {
                 const syms = extractSymbols(c.strategy_id) || [];
                 return (
-                  <div key={c.event_id} className="flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors">
+                  <div 
+                    key={c.event_id} 
+                    onClick={() => c.strategy_id && onSelectStrategy && onSelectStrategy(c.strategy_id)}
+                    className={`flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors ${c.strategy_id && onSelectStrategy ? 'cursor-pointer' : ''}`}
+                  >
                     <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-sm">
                       ✅
                     </div>
@@ -862,15 +877,17 @@ export const AgenticResearch = () => {
           const agent = agents.find(a => a.agent_id === selectedAgent);
           if (!agent) return null;
           return (
-            <IntakeWorkView
+            <AgentWorkView
               agentId={selectedAgent}
               agentName={agent.name}
               agentIcon={agent.icon}
+              agentRole={agent.role}
               pendingItems={pendingWork.work_items || []}
               completedItems={completedWork.completed_items || []}
               loadingCompleted={loadingCompleted}
               dateFilter={dateFilter}
               onDateFilterChange={setDateFilter}
+              onSelectStrategy={setSelectedStrategy}
             />
           );
         })()}
