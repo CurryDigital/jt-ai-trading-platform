@@ -183,6 +183,65 @@ def get_db():
     finally:
         db.close()
 
+# ---------------------------------------------------------------------------
+# System Health — workspace-ribbon summary (DB latency, status, asset counts)
+# Used by the frontend top ribbon and Command Center
+# ---------------------------------------------------------------------------
+@app.get("/api/system/health")
+def system_health(db: Session = Depends(get_db)):
+    """Return a small, fast health/status summary for the workspace ribbon.
+
+    Latency-sensitive: avoid heavy joins. Each sub-query is wrapped in
+    safe_query so a missing table degrades gracefully.
+    """
+    started = time.perf_counter()
+    status = "healthy"
+
+    # Quick DB ping
+    try:
+        db.execute(text("SELECT 1")).scalar()
+    except Exception as e:
+        logger.error(f"DB ping failed: {e}")
+        status = "degraded"
+
+    # Lightweight counts (cached on the SQL side via index)
+    counts = {}
+    try:
+        rows = safe_query(db, """
+            SELECT
+                (SELECT COUNT(*) FROM gold.strategy_definitions WHERE jt_ready = TRUE) AS strategies,
+                (SELECT COUNT(*) FROM gold.paper_strategies WHERE status = 'ACTIVE') AS deployed,
+                (SELECT COUNT(*) FROM gold.asset_registry WHERE is_active = TRUE) AS assets
+        """, label="health_counts")
+        if rows:
+            r = rows[0]
+            counts = {
+                "strategies": int(r.strategies or 0),
+                "deployed":   int(r.deployed or 0),
+                "assets":     int(r.assets or 0),
+            }
+    except Exception:
+        pass
+
+    # Optional pipeline summary
+    try:
+        rs = safe_query(db, "SELECT priority, COUNT(*) c FROM gold.strategy_registry GROUP BY priority", label="health_pipeline")
+        pipeline = {row.priority.lower(): int(row.c) for row in rs} if rs else {}
+    except Exception:
+        pipeline = {}
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
+    return {
+        "status": status,
+        "latency_ms": latency_ms,
+        "ts": datetime.datetime.utcnow().isoformat() + "Z",
+        "counts": counts,
+        "pipeline": pipeline,
+        "version": "v1",
+    }
+
+
 # --- POSITION & EXECUTION TRACKING ---
 
 @app.get("/api/positions")

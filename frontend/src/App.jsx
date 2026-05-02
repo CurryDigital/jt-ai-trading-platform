@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MarketsTab } from './components/MarketsTab';
 import { SettingsTab } from './components/SettingsTab';
@@ -8,193 +8,274 @@ import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { AgenticResearch } from './components/AgenticResearch';
-import { fmt, fmtK, fmtPct, pnlCl, api } from './utils';
+import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge } from './utils';
 
-// SVG Icon Components
+// =================================================================
+// Iconography — minimal stroke icons sized for the dense UI (12px)
+// =================================================================
 const Icon = {
-  Command: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-    </svg>
-  ),
-  Lab: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-    </svg>
-  ),
-  Research: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-    </svg>
-  ),
-  Performance: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-    </svg>
-  ),
-  Portfolio: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-    </svg>
-  ),
-  Markets: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  Settings: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  ),
-  Strategies: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-    </svg>
-  ),
-  Agents: () => (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-    </svg>
-  ),
+  Command: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>),
+  Lab: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>),
+  Research: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>),
+  Performance: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>),
+  Portfolio: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>),
+  Markets: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>),
+  Settings: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>),
+  Strategies: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>),
+  Agents: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>),
 };
 
-// Compact UI Components
-const Pill = ({ c, children }) => {
-  const colors = {
-    emerald: 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20',
-    rose: 'bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/20',
-    blue: 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/20',
-    amber: 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/20',
-    slate: 'bg-slate-700/50 text-slate-400 ring-1 ring-slate-500/20',
-  };
-  return <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide ${colors[c] || colors.slate}`}>{children}</span>;
-};
+// =================================================================
+// Workspace Ribbon — sticky strip below the navbar showing live state
+// market clocks, P&L, win rate, model heartbeat, last refresh time
+// =================================================================
+const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk }) => {
+  const [clocks, setClocks] = useState(marketClock());
+  const [statuses, setStatuses] = useState(marketStatus());
 
-const KPI = ({ l, v, sub, pos }) => (
-  <div className="px-4 py-3 bg-slate-900/60 rounded-xl border border-white/[0.06] hover:border-white/10 transition-colors min-w-0">
-    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-medium truncate">{l}</div>
-    <div className="text-lg font-bold text-white font-mono leading-tight mt-1">{v}</div>
-    {sub && <div className={`text-[11px] mt-1 font-medium ${pos != null ? (pos ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-500'}`}>{sub}</div>}
-  </div>
-);
+  useEffect(() => {
+    const id = setInterval(() => {
+      setClocks(marketClock());
+      setStatuses(marketStatus());
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
-// Portfolio Component
-const PortfolioTab = ({ data }) => {
-  const [search, setSearch] = useState('');
-  const positions = useMemo(() =>
-    data.positions.filter(p => !search || p.ticker?.toLowerCase().includes(search.toLowerCase())),
-    [data.positions, search]
+  const todayPnL = dailyPnl?.[0]?.pnl ?? null;
+  const winRate = (summary?.win_rate || 0) * 100;
+  const totalTrades = summary?.total_trades || 0;
+
+  const Cell = ({ label, value, valClass = 'text-slate-200', extra }) => (
+    <div className="flex items-baseline gap-1.5 px-3 border-r border-white/[0.05] last:border-r-0">
+      <span className="qr-label">{label}</span>
+      <span className={`qr-num text-[12px] font-bold ${valClass}`}>{value}</span>
+      {extra}
+    </div>
   );
 
-  const totalValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
-  const totalPnL = positions.reduce((s, p) => s + (p.pnl || 0), 0);
-  const longVal = positions.filter(p => p.side === 'LONG').reduce((s, p) => s + (p.market_value || 0), 0);
-  const shortVal = positions.filter(p => p.side === 'SHORT').reduce((s, p) => s + (p.market_value || 0), 0);
+  const Clock = ({ city, time, open }) => (
+    <div className="flex items-center gap-1.5 px-3 border-r border-white/[0.05]">
+      <span className={`qr-dot ${open ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
+      <span className="qr-label">{city}</span>
+      <span className="qr-num text-[11px] text-slate-300 font-semibold">{time}</span>
+    </div>
+  );
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div><h2 className="text-sm font-bold text-white">Portfolio</h2><p className="text-[10px] text-slate-500">Live positions & P&L</p></div>
-        <Pill c={totalPnL >= 0 ? 'emerald' : 'rose'}>{totalPnL >= 0 ? '+' : ''}{fmtK(totalPnL)}</Pill>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <KPI l="Total Value" v={fmtK(totalValue)} />
-        <KPI l="Positions" v={positions.length} />
-        <KPI l="Long" v={fmtK(longVal)} pos={true} />
-        <KPI l="Short" v={fmtK(shortVal)} pos={false} />
-      </div>
-
-      <div className="bg-slate-900/50 rounded-xl border border-white/[0.06] overflow-hidden">
-        <div className="px-3 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
-          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Positions</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter..."
-            className="px-2.5 py-1 bg-slate-800/80 border border-white/10 rounded-lg text-[11px] text-white w-28 placeholder-slate-600 focus:outline-none focus:border-blue-500/50" />
+    <div className="border-b border-white/[0.05] bg-[#0a0d12]/80 backdrop-blur-xl">
+      <div className="flex items-center justify-between max-w-[1800px] mx-auto h-7 overflow-x-auto no-scrollbar">
+        {/* Left: market clocks + system health */}
+        <div className="flex items-center h-full">
+          <Clock city="HK"  time={clocks.hkt} open={statuses.hk}  />
+          <Clock city="LON" time={clocks.lon} open={statuses.lon} />
+          <Clock city="NYC" time={clocks.nyc} open={statuses.nyc} />
+          <div className="flex items-center gap-1.5 px-3 border-r border-white/[0.05]">
+            <span className={`qr-dot ${healthOk ? 'qr-dot-live' : 'qr-dot-down'}`} />
+            <span className="qr-label">API</span>
+            <span className="qr-num text-[11px] text-slate-400">{latencyMs != null ? `${latencyMs}ms` : '—'}</span>
+          </div>
         </div>
 
-        {/* Desktop table */}
-        <table className="w-full text-xs hidden md:table">
-          <thead className="bg-slate-900/80">
-            <tr className="text-[9px] text-slate-500 uppercase">
-              {['Ticker', 'Strategy', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
-                <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {positions.map(p => {
-              const pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
-              return (
-                <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
-                  <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
-                  <td className="py-2 px-2 text-slate-400">{p.strategy}</td>
-                  <td className="py-2 px-2 text-center">
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{p.side}</span>
-                  </td>
-                  <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(p.entry_price)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-white">${fmt(p.current_price)}</td>
-                  <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
-                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</td>
-                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
-                </tr>
-              );
-            })}
-            {!positions.length && <tr><td colSpan={9} className="py-8 text-center text-slate-600 text-sm">No positions</td></tr>}
-          </tbody>
-        </table>
-
-        {/* Mobile card view */}
-        <div className="md:hidden divide-y divide-white/5">
-          {positions.map(p => {
-            const pnlPct = p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
-            return (
-              <div key={p.id || p.ticker} className="p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-sm">{p.ticker}</span>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{p.side}</span>
-                  </div>
-                  <span className={`font-mono font-bold text-sm ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span>{p.strategy}</span>
-                  <span className="font-mono">{fmt(p.quantity, 0)} @ ${fmt(p.entry_price)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">Current: <span className="text-white font-mono">${fmt(p.current_price)}</span></span>
-                  <span className={`font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</span>
-                </div>
-              </div>
-            );
-          })}
-          {!positions.length && <div className="py-8 text-center text-slate-600 text-sm">No positions</div>}
+        {/* Right: live P&L + summary */}
+        <div className="flex items-center h-full">
+          <Cell
+            label="MODE"
+            value={mode === 'LIVE_TRADING' ? 'LIVE' : mode === 'PAPER_TRADING' ? 'PAPER' : 'SIM'}
+            valClass={mode === 'LIVE_TRADING' ? 'text-rose-400' : mode === 'PAPER_TRADING' ? 'text-amber-400' : 'text-blue-400'}
+          />
+          <Cell label="P&L D" value={todayPnL != null ? fmtK(todayPnL) : '—'} valClass={todayPnL == null ? 'text-slate-500' : todayPnL >= 0 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
+          <Cell label="WR"  value={`${winRate.toFixed(1)}%`} valClass={winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
+          <Cell label="TR"  value={totalTrades} />
+          <Cell label="UPD" value={fmtAge(lastRefresh)} valClass="text-slate-400" />
         </div>
       </div>
     </div>
   );
 };
 
-// Performance Component
+// =================================================================
+// Tiny KPI tile — denser than the previous one
+// =================================================================
+const KPI = ({ l, v, sub, pos, hint }) => (
+  <div className="px-3 py-2 qr-surface min-w-0" title={hint}>
+    <div className="qr-label truncate">{l}</div>
+    <div className="qr-num text-[15px] font-bold text-white leading-tight mt-0.5">{v}</div>
+    {sub && <div className={`qr-num text-[10px] mt-0.5 ${pos != null ? (pos ? 'qr-pnl-pos' : 'qr-pnl-neg') : 'text-slate-500'}`}>{sub}</div>}
+  </div>
+);
+
+// =================================================================
+// Sortable column header
+// =================================================================
+const SortableHeader = ({ label, sortKey, current, onSort, align = 'right' }) => {
+  const active = current?.key === sortKey;
+  const asc = active && current?.dir === 'asc';
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className={`py-1.5 px-2 cursor-pointer select-none qr-label hover:text-slate-200 ${align === 'left' ? 'text-left' : 'text-right'}`}
+    >
+      <span className={active ? 'text-blue-300' : ''}>{label}</span>
+      {active && <span className="ml-0.5 text-[8px]">{asc ? '▲' : '▼'}</span>}
+    </th>
+  );
+};
+
+const useSort = (initialKey, initialDir = 'desc') => {
+  const [sort, setSort] = useState({ key: initialKey, dir: initialDir });
+  const onSort = (key) => setSort(s => s.key === key ? { ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
+  const sorter = (a, b) => {
+    const av = a[sort.key], bv = b[sort.key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sort.dir === 'asc' ? av - bv : bv - av;
+  };
+  return { sort, onSort, sorter };
+};
+
+// =================================================================
+// Portfolio Tab — quant-dense table with sortable columns
+// =================================================================
+const PortfolioTab = ({ data }) => {
+  const [search, setSearch] = useState('');
+  const { sort, onSort, sorter } = useSort('market_value');
+
+  const positions = useMemo(() => {
+    const filtered = data.positions.filter(p => !search || p.ticker?.toLowerCase().includes(search.toLowerCase()));
+    return [...filtered].sort(sorter);
+  }, [data.positions, search, sort]);
+
+  const totalValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
+  const totalPnL = positions.reduce((s, p) => s + (p.pnl || 0), 0);
+  const longCount = positions.filter(p => p.side === 'LONG').length;
+  const shortCount = positions.filter(p => p.side === 'SHORT').length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-sm font-bold text-white tracking-tight">Portfolio</h2>
+          <p className="text-[10px] text-slate-500">Live positions · sortable · P&L tracking</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Filter ticker…"
+            className="px-2.5 py-1 bg-slate-900/60 border border-white/[0.08] rounded-md text-[11px] text-white w-36 placeholder-slate-600 focus:outline-none focus:border-blue-500/50 font-mono"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <KPI l="Total Value"   v={fmtK(totalValue)} />
+        <KPI l="Net P&L"       v={fmtK(totalPnL)} pos={totalPnL >= 0} sub={totalValue > 0 ? `${((totalPnL/totalValue)*100).toFixed(2)}%` : null} />
+        <KPI l="Positions"     v={positions.length} sub={`${longCount}L / ${shortCount}S`} />
+        <KPI l="Long Exposure" v={fmtK(positions.filter(p => p.side === 'LONG').reduce((s,p)=>s+(p.market_value||0),0))} />
+        <KPI l="Short Exposure"v={fmtK(positions.filter(p => p.side === 'SHORT').reduce((s,p)=>s+(p.market_value||0),0))} />
+      </div>
+
+      <div className="qr-surface overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full hidden md:table">
+            <thead>
+              <tr className="border-b border-white/[0.06]">
+                <SortableHeader label="Ticker"   sortKey="ticker"        current={sort} onSort={onSort} align="left" />
+                <SortableHeader label="Strategy" sortKey="strategy"      current={sort} onSort={onSort} align="left" />
+                <SortableHeader label="Side"     sortKey="side"          current={sort} onSort={onSort} />
+                <SortableHeader label="Qty"      sortKey="quantity"      current={sort} onSort={onSort} />
+                <SortableHeader label="Entry"    sortKey="entry_price"   current={sort} onSort={onSort} />
+                <SortableHeader label="Last"     sortKey="current_price" current={sort} onSort={onSort} />
+                <SortableHeader label="Value"    sortKey="market_value"  current={sort} onSort={onSort} />
+                <SortableHeader label="P&L $"    sortKey="pnl"           current={sort} onSort={onSort} />
+                <SortableHeader label="P&L %"    sortKey="pnl_pct"       current={sort} onSort={onSort} />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.04]">
+              {positions.map(p => {
+                const pnlPct = p.pnl_pct ?? (p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0);
+                return (
+                  <tr key={p.id || p.ticker} className="qr-tr-hover">
+                    <td className="py-1 px-2 text-[12px] font-bold text-white tracking-tight">{p.ticker}</td>
+                    <td className="py-1 px-2 text-[10px] text-slate-400 truncate max-w-[160px]">{p.strategy || '—'}</td>
+                    <td className="py-1 px-2 text-center">
+                      <span className={`qr-chip ${p.side === 'LONG' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{p.side}</span>
+                    </td>
+                    <td className="py-1 px-2 qr-num text-slate-200">{fmt(p.quantity, 0)}</td>
+                    <td className="py-1 px-2 qr-num text-slate-400">{fmt(p.entry_price)}</td>
+                    <td className="py-1 px-2 qr-num text-white">{fmt(p.current_price)}</td>
+                    <td className="py-1 px-2 qr-num text-slate-200">{fmtK(p.market_value)}</td>
+                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</td>
+                    <td className={`py-1 px-2 qr-num ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+                  </tr>
+                );
+              })}
+              {!positions.length && (
+                <tr><td colSpan={9} className="py-8 text-center text-slate-600 text-[11px]">No positions · {search ? 'no matches for filter' : 'deploy a strategy from the Lab tab'}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile rows */}
+        <div className="md:hidden divide-y divide-white/5">
+          {positions.map(p => {
+            const pnlPct = p.pnl_pct ?? (p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0);
+            return (
+              <div key={p.id || p.ticker} className="px-3 py-2">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-[13px]">{p.ticker}</span>
+                    <span className={`qr-chip ${p.side === 'LONG' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{p.side}</span>
+                  </div>
+                  <span className={`qr-num font-bold text-[13px] ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                  <span>{p.strategy || '—'}</span>
+                  <span className="qr-num">{fmt(p.quantity,0)} @ {fmt(p.entry_price)}</span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] mt-0.5">
+                  <span className="text-slate-500">last <span className="text-slate-200 qr-num">{fmt(p.current_price)}</span></span>
+                  <span className={`qr-num ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</span>
+                </div>
+              </div>
+            );
+          })}
+          {!positions.length && <div className="py-6 text-center text-slate-600 text-[11px]">No positions</div>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// =================================================================
+// Performance Tab — denser comparison table
+// =================================================================
 const PerformanceTab = ({ data }) => {
   const [tf, setTf] = useState('1M');
-  const [view, setView] = useState('overview'); // 'overview' or 'analytics'
-  const strategies = data.strategies || [];
+  const [view, setView] = useState('overview');
+  const { sort, onSort, sorter } = useSort('returns');
 
-  // Sort without mutating state - use spread to create a new array
-  const bestStrategy = useMemo(() => {
-    return [...strategies].sort((a, b) => (b.returns || 0) - (a.returns || 0))[0];
-  }, [strategies]);
+  const strategies = useMemo(() => [...(data.strategies || [])].sort(sorter), [data.strategies, sort]);
+  const bestStrategy = strategies[0];
+  const liveCount = strategies.filter(s => s.live_trades > 0).length;
+  const avgLiveWR = (() => {
+    const live = strategies.filter(s => s.live_win_rate != null);
+    return live.length > 0 ? live.reduce((a, s) => a + s.live_win_rate, 0) / live.length : null;
+  })();
+  const totalTrades = strategies.reduce((a, s) => a + (s.live_trades || 0), 0);
 
   if (view === 'analytics') {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div><h2 className="text-sm font-bold text-white">Deep Analytics</h2><p className="text-[10px] text-slate-500">Comprehensive strategy performance</p></div>
-          <button onClick={() => setView('overview')} className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-900/50 border border-white/[0.06] text-slate-400 hover:text-white transition-colors">
-            Back to Overview
-          </button>
+      <div className="space-y-3">
+        <div className="flex items-end justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-white">Deep Analytics</h2>
+            <p className="text-[10px] text-slate-500">Comprehensive strategy attribution & risk metrics</p>
+          </div>
+          <button onClick={() => setView('overview')} className="qr-btn-ghost">← Overview</button>
         </div>
         <StrategyPerformance />
       </div>
@@ -202,60 +283,72 @@ const PerformanceTab = ({ data }) => {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div><h2 className="text-sm font-bold text-white">Performance</h2><p className="text-[10px] text-slate-500">Backtest vs Live</p></div>
+    <div className="space-y-3">
+      <div className="flex items-end justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-sm font-bold text-white">Performance</h2>
+          <p className="text-[10px] text-slate-500">Backtest vs live attribution · sortable comparison</p>
+        </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setView('analytics')} className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors">
-            Deep Analytics
-          </button>
-          <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
+          <button onClick={() => setView('analytics')} className="qr-btn-primary">Deep Analytics →</button>
+          <div className="flex gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.06]">
             {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>
-              <button key={t} onClick={() => setTf(t)} className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${tf === t ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>{t}</button>)}
+              <button key={t} onClick={() => setTf(t)} className={`px-2 py-1 rounded text-[10px] font-bold transition-colors ${tf === t ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}>{t}</button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <KPI l="Active" v={strategies.filter(s => s.live_trades > 0).length} />
-        <KPI l="Avg Live WR" v={`${(strategies.filter(s => s.live_win_rate).reduce((a, s) => a + (s.live_win_rate || 0), 0) / Math.max(1, strategies.filter(s => s.live_win_rate).length)).toFixed(0)}%`} pos={true} />
-        <KPI l="Total Trades" v={strategies.reduce((a, s) => a + (s.live_trades || 0), 0)} />
-        <KPI l="Best" v={bestStrategy?.strategy_name?.slice(0, 10) || '\u2014'} pos={true} />
+        <KPI l="Active Strategies" v={liveCount} sub={`of ${strategies.length}`} />
+        <KPI l="Avg Live WR" v={avgLiveWR != null ? `${avgLiveWR.toFixed(1)}%` : '—'} pos={avgLiveWR != null && avgLiveWR >= 50} />
+        <KPI l="Total Trades" v={totalTrades} sub={tf} />
+        <KPI l="Best" v={bestStrategy?.strategy_name?.slice(0, 12) || '—'} sub={bestStrategy?.returns != null ? fmtPct(bestStrategy.returns) : null} pos={(bestStrategy?.returns || 0) >= 0} />
       </div>
 
-      <div className="bg-slate-900/50 rounded-xl border border-white/[0.06] overflow-hidden">
-        <div className="px-3 py-2.5 border-b border-white/[0.06]">
-          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Strategy Comparison</span>
-        </div>
+      <div className="qr-surface overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="text-[9px] text-slate-500 uppercase border-b border-white/10 bg-slate-900/30">
-              <tr>
-                {['Strategy', 'Tier', 'BT WR', 'Live WR', '\u0394 WR', 'BT PF', 'Live PF', 'Returns'].map(h =>
-                  <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-white/[0.06]">
+                <SortableHeader label="Strategy"  sortKey="strategy_name"      current={sort} onSort={onSort} align="left" />
+                <SortableHeader label="Asset"     sortKey="asset_class"        current={sort} onSort={onSort} align="left" />
+                <SortableHeader label="Tier"      sortKey="tier"               current={sort} onSort={onSort} />
+                <SortableHeader label="BT WR"     sortKey="backtest_win_rate"  current={sort} onSort={onSort} />
+                <SortableHeader label="Live WR"   sortKey="live_win_rate"      current={sort} onSort={onSort} />
+                <SortableHeader label="Δ WR"      sortKey="wr_delta"           current={sort} onSort={onSort} />
+                <SortableHeader label="BT PF"     sortKey="backtest_pf"        current={sort} onSort={onSort} />
+                <SortableHeader label="Live PF"   sortKey="live_profit_factor" current={sort} onSort={onSort} />
+                <SortableHeader label="Trades"    sortKey="live_trades"        current={sort} onSort={onSort} />
+                <SortableHeader label="Returns"   sortKey="returns"            current={sort} onSort={onSort} />
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-white/[0.04]">
               {strategies.map(s => {
                 const delta = s.backtest_win_rate != null && s.live_win_rate != null ? s.live_win_rate - s.backtest_win_rate : null;
                 return (
-                  <tr key={s.strategy_id} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-2 px-2">
-                      <div className="font-bold text-white">{s.strategy_name || s.strategy_id}</div>
-                      <div className="text-[9px] text-slate-500">{s.asset_class}</div>
+                  <tr key={s.strategy_id} className="qr-tr-hover">
+                    <td className="py-1 px-2">
+                      <div className="font-bold text-white text-[12px] truncate max-w-[200px]">{s.strategy_name || s.strategy_id}</div>
+                      {s.priority && <div className="qr-label">{s.priority}</div>}
                     </td>
-                    <td className="py-2 px-2 text-right">
-                      <span className={`text-[10px] font-bold ${s.tier?.includes('T1') ? 'text-emerald-400' : s.tier?.includes('T2') ? 'text-amber-400' : 'text-slate-400'}`}>{s.tier || 'T4'}</span>
+                    <td className="py-1 px-2 text-[10px] text-slate-400">{s.asset_class || '—'}</td>
+                    <td className="py-1 px-2 text-right">
+                      <span className={`qr-chip ${s.tier?.includes('T1') ? 'qr-chip-emerald' : s.tier?.includes('T2') ? 'qr-chip-amber' : 'qr-chip-slate'}`}>{s.tier || 'T4'}</span>
                     </td>
-                    <td className="py-2 px-2 text-right font-mono text-slate-400">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '\u2014'}</td>
-                    <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(s.live_win_rate - 50)}`}>{s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '\u2014'}</td>
-                    <td className={`py-2 px-2 text-right font-mono ${pnlCl(delta)}`}>{delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}pp` : '\u2014'}</td>
-                    <td className="py-2 px-2 text-right font-mono text-slate-400">{s.backtest_pf?.toFixed(2) || '\u2014'}</td>
-                    <td className={`py-2 px-2 text-right font-mono ${pnlCl(s.live_profit_factor - 1.5)}`}>{s.live_profit_factor?.toFixed(2) || '\u2014'}</td>
-                    <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '\u2014'}</td>
+                    <td className="py-1 px-2 qr-num text-slate-400">{s.backtest_win_rate != null ? `${s.backtest_win_rate.toFixed(0)}%` : '—'}</td>
+                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl((s.live_win_rate || 0) - 50)}`}>{s.live_win_rate != null ? `${s.live_win_rate.toFixed(0)}%` : '—'}</td>
+                    <td className={`py-1 px-2 qr-num ${pnlCl(delta)}`}>{delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}pp` : '—'}</td>
+                    <td className="py-1 px-2 qr-num text-slate-400">{s.backtest_pf?.toFixed(2) || '—'}</td>
+                    <td className={`py-1 px-2 qr-num ${pnlCl(s.live_profit_factor != null ? s.live_profit_factor - 1.5 : null)}`}>{s.live_profit_factor?.toFixed(2) || '—'}</td>
+                    <td className="py-1 px-2 qr-num text-slate-300">{s.live_trades || 0}</td>
+                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</td>
                   </tr>
                 );
               })}
+              {!strategies.length && (
+                <tr><td colSpan={10} className="py-8 text-center text-slate-600 text-[11px]">No deployed strategies · approve from the Strategies tab</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -264,23 +357,184 @@ const PerformanceTab = ({ data }) => {
   );
 };
 
+// =================================================================
+// Command Center — quant overview at-a-glance
+// =================================================================
+const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData }) => {
+  const totalPositionValue = data.positions.reduce((s, p) => s + (p.market_value || 0), 0);
+  const totalPnLOpen = data.positions.reduce((s, p) => s + (p.pnl || 0), 0);
+  const sortedStrategies = useMemo(() =>
+    [...(data.strategies || [])].sort((a, b) => (b.returns || 0) - (a.returns || 0)),
+    [data.strategies]
+  );
+  const top5 = sortedStrategies.slice(0, 5);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-sm font-bold text-white">Command Center</h1>
+          <p className="text-[10px] text-slate-500">Platform overview · {data.strategies.length} strategies · {data.positions.length} positions</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="qr-label">SHORTCUTS</span>
+          {[
+            { key: '1', tab: 'command', label: 'Cmd' },
+            { key: '2', tab: 'lab', label: 'Lab' },
+            { key: '3', tab: 'strategies', label: 'Strat' },
+            { key: '4', tab: 'agentic_research', label: 'Agents' },
+            { key: '5', tab: 'performance', label: 'Perf' },
+          ].map(s => (
+            <button key={s.key} onClick={() => navigateToTab(s.tab)} className="flex items-center gap-1 hover:opacity-80">
+              <span className="qr-kbd">{s.key}</span>
+              <span className="text-[9px] text-slate-500">{s.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Top KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+        <KPI l="Strategies"  v={data.strategies.length} sub={`${data.strategies.filter(s => s.live_trades > 0).length} live`} hint="Total researcher strategies" />
+        <KPI l="Positions"   v={data.positions.length} sub={fmtK(totalPositionValue)} hint="Open positions market value" />
+        <KPI l="Open P&L"    v={fmtK(totalPnLOpen)} pos={totalPnLOpen >= 0} sub={totalPositionValue > 0 ? `${((totalPnLOpen/totalPositionValue)*100).toFixed(2)}%` : null} />
+        <KPI l="P&L Today"   v={fmtK(data.dailyPnl[0]?.pnl)} pos={data.dailyPnl[0]?.pnl >= 0} sub={data.dailyPnl[0]?.trades ? `${data.dailyPnl[0].trades} trades` : null} />
+        <KPI l="Win Rate"    v={`${((data.summary?.win_rate || 0) * 100).toFixed(1)}%`} pos={(data.summary?.win_rate || 0) > 0.5} sub={data.summary?.total_trades ? `${data.summary.total_trades} tr` : null} />
+        <KPI l="DB Latency"  v={healthData?.latency_ms != null ? `${healthData.latency_ms}ms` : '—'} sub={healthData?.status || 'unknown'} pos={healthData?.status === 'healthy'} />
+      </div>
+
+      {/* Two-column layout: Pipeline + Top Strategies */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Pipeline */}
+        {pipelineSummary && (
+          <div className="qr-surface overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
+              <span className="qr-label">Strategy Pipeline</span>
+              <button onClick={() => navigateToTab('strategies')} className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold">Manage →</button>
+            </div>
+            <div className="p-3">
+              <div className="flex items-center gap-1.5">
+                {[
+                  { key: 'experimental', label: 'EXPERIMENTAL', cls: 'qr-chip-slate' },
+                  { key: 'near_golden',  label: 'NEAR GOLDEN',  cls: 'qr-chip-blue'  },
+                  { key: 'golden',       label: 'GOLDEN',       cls: 'qr-chip-amber' },
+                  { key: 'deployed',     label: 'DEPLOYED',     cls: 'qr-chip-emerald'},
+                ].map((stage, i) => (
+                  <React.Fragment key={stage.key}>
+                    {i > 0 && <span className="text-slate-700 text-[10px]">→</span>}
+                    <div className={`flex-1 text-center py-2 px-1 rounded-md ${stage.cls.replace('qr-chip-', 'bg-').replace('emerald', 'emerald-500/10').replace('amber', 'amber-500/10').replace('blue', 'blue-500/10').replace('slate', 'slate-700/30')}`}>
+                      <div className="qr-num text-[15px] font-bold">{pipelineSummary[stage.key] || 0}</div>
+                      <div className="text-[8px] text-slate-500 uppercase tracking-wider mt-0.5">{stage.label}</div>
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">
+                <span>Total: <span className="qr-num text-slate-300">{pipelineSummary.total || 0}</span></span>
+                <span>Last DE update: <span className="qr-num text-slate-300">{fmtAge(pipelineSummary.last_update)}</span></span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Top strategies */}
+        {top5.length > 0 && (
+          <div className="qr-surface overflow-hidden">
+            <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
+              <span className="qr-label">Top 5 Strategies</span>
+              <button onClick={() => navigateToTab('performance')} className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold">All →</button>
+            </div>
+            <table className="w-full">
+              <tbody className="divide-y divide-white/[0.04]">
+                {top5.map(s => (
+                  <tr key={s.strategy_id || s.id} className="qr-tr-hover cursor-pointer" onClick={() => navigateToTab('performance')}>
+                    <td className="py-1 px-3">
+                      <div className="font-bold text-white text-[11px] truncate max-w-[200px]">{s.strategy_name || s.name || s.strategy_id}</div>
+                      <div className="text-[9px] text-slate-500">{s.asset_class || '—'} · {s.priority || ''}</div>
+                    </td>
+                    <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—'}</td>
+                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Quick action bar - dense pill row */}
+      <div className="qr-surface px-3 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+        <span className="qr-label flex-shrink-0">QUICK</span>
+        <span className="qr-divider-v h-3" />
+        {[
+          { tab: 'lab',         label: 'Strategy Lab',     IconComponent: Icon.Lab,         color: 'blue' },
+          { tab: 'strategies',  label: 'Golden Strategies',IconComponent: Icon.Strategies,  color: 'amber' },
+          { tab: 'agentic_research', label: 'Agentic Research', IconComponent: Icon.Agents, color: 'violet' },
+          { tab: 'research',    label: 'Signals & Earnings', IconComponent: Icon.Research,  color: 'blue' },
+          { tab: 'portfolio',   label: 'Portfolio',         IconComponent: Icon.Portfolio,  color: 'emerald' },
+          { tab: 'markets',     label: 'Markets',           IconComponent: Icon.Markets,    color: 'amber' },
+        ].map(item => (
+          <button key={item.tab} onClick={() => navigateToTab(item.tab)} className="qr-btn-ghost flex-shrink-0">
+            <item.IconComponent />
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// =================================================================
 // Main App
+// =================================================================
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [data, setData] = useState({ strategies: [], positions: [], paperStrategies: [], dailyPnl: [], trades: [], summary: {}, mode: 'SIMULATION' });
   const [loading, setLoading] = useState(true);
-  const [detail, setDetail] = useState(null);
   const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [ibkrConnected, setIbkrConnected] = useState(false);
   const [pipelineSummary, setPipelineSummary] = useState(null);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [latencyMs, setLatencyMs] = useState(null);
+  const [healthData, setHealthData] = useState(null);
+  const [navOpen, setNavOpen] = useState(false);
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const currentMode = pathParts[0] || 'sim';
   const currentTab = pathParts[1] || 'command';
 
-  // Fetch execution mode and IBKR status
+  const navItems = useMemo(() => [
+    { id: 'command',          label: 'Command',  short: 'Cmd',     IconComponent: Icon.Command,     key: '1' },
+    { id: 'lab',              label: 'Lab',      short: 'Lab',     IconComponent: Icon.Lab,         key: '2' },
+    { id: 'strategies',       label: 'Strategies', short: 'Strat', IconComponent: Icon.Strategies,  key: '3' },
+    { id: 'agentic_research', label: 'Agents',   short: 'Agt',     IconComponent: Icon.Agents,      key: '4' },
+    { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance, key: '5' },
+    { id: 'research',         label: 'Research', short: 'Res',     IconComponent: Icon.Research,    key: '6' },
+    { id: 'portfolio',        label: 'Portfolio', short: 'Port',   IconComponent: Icon.Portfolio,   key: '7' },
+    { id: 'markets',          label: 'Markets',  short: 'Mkt',     IconComponent: Icon.Markets,     key: '8' },
+    { id: 'settings',         label: 'Settings', short: 'Set',     IconComponent: Icon.Settings,    key: '9' },
+  ], []);
+
+  const navigateToTab = (tab) => navigate(`/${currentMode}/${tab}`);
+
+  // Keyboard shortcut: 1-9 to switch tabs
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const item = navItems.find(n => n.key === e.key);
+      if (item) {
+        e.preventDefault();
+        navigateToTab(item.id);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navItems, currentMode]);
+
+  // Mode + IBKR status
   useEffect(() => {
     const fetchMode = async () => {
       const modeData = await api.get('/api/execution/global-mode');
@@ -290,22 +544,36 @@ export default function App() {
       }
     };
     fetchMode();
-    const interval = setInterval(fetchMode, 30000);
-    return () => clearInterval(interval);
+    const id = setInterval(fetchMode, 30000);
+    return () => clearInterval(id);
   }, []);
 
-  // Fetch pipeline summary
+  // Pipeline summary
   useEffect(() => {
-    const fetchPipeline = async () => {
+    const fetch = async () => {
       const ps = await api.get('/api/strategies/pipeline-summary');
       if (ps) setPipelineSummary(ps);
     };
-    fetchPipeline();
-    const interval = setInterval(fetchPipeline, 60000);
-    return () => clearInterval(interval);
+    fetch();
+    const id = setInterval(fetch, 60000);
+    return () => clearInterval(id);
   }, []);
 
-  // Fetch data
+  // System health
+  useEffect(() => {
+    const fetch = async () => {
+      const t0 = performance.now();
+      const h = await api.get('/api/system/health');
+      const t1 = performance.now();
+      setLatencyMs(Math.round(t1 - t0));
+      if (h) setHealthData(h);
+    };
+    fetch();
+    const id = setInterval(fetch, 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Main data fetch
   useEffect(() => {
     const fetchAll = async () => {
       const [strategies, positions, performance, paper] = await Promise.all([
@@ -325,35 +593,22 @@ export default function App() {
         summary: performance?.summary || {},
         mode: executionMode,
       });
+      setLastRefresh(new Date().toISOString());
       setLoading(false);
     };
 
     fetchAll();
-    const interval = setInterval(fetchAll, 60000);
-    return () => clearInterval(interval);
+    const id = setInterval(fetchAll, 60000);
+    return () => clearInterval(id);
   }, [executionMode]);
-
-  const navItems = [
-    { id: 'command', label: 'Command', IconComponent: Icon.Command },
-    { id: 'lab', label: 'Lab', IconComponent: Icon.Lab },
-    { id: 'strategies', label: 'Strategies', IconComponent: Icon.Strategies },
-    { id: 'agentic_research', label: 'Agentic Research', IconComponent: Icon.Agents },
-    { id: 'research', label: 'Research', IconComponent: Icon.Research },
-    { id: 'performance', label: 'Performance', IconComponent: Icon.Performance },
-    { id: 'portfolio', label: 'Portfolio', IconComponent: Icon.Portfolio },
-    { id: 'markets', label: 'Markets', IconComponent: Icon.Markets },
-    { id: 'settings', label: 'Settings', IconComponent: Icon.Settings },
-  ];
-
-  const navigateToTab = (tab) => navigate(`/${currentMode}/${tab}`);
 
   if (loading) return (
     <div className="min-h-screen bg-[#05070a] flex items-center justify-center">
       <div className="text-slate-500 flex flex-col items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-black text-white animate-pulse">JT</div>
+        <div className="w-8 h-8 rounded-md bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[10px] font-black text-white animate-pulse">JT</div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
-          <span className="text-xs text-slate-500">Loading platform...</span>
+          <div className="w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+          <span className="text-[11px] text-slate-500">Loading workspace…</span>
         </div>
       </div>
     </div>
@@ -361,166 +616,103 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#05070a] text-white font-sans">
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 border-b border-white/[0.06] bg-[#05070a]/80 backdrop-blur-xl">
-        <div className="flex items-center justify-between px-4 py-2.5 max-w-[1800px] mx-auto">
-          <div className="flex items-center gap-4">
+      {/* Top bar — compact, dense */}
+      <header className="fixed top-0 left-0 right-0 z-40 border-b border-white/[0.05] bg-[#05070a]/85 backdrop-blur-xl">
+        <div className="flex items-center justify-between px-3 h-10 max-w-[1800px] mx-auto">
+          <div className="flex items-center gap-3">
             {/* Logo */}
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-black shadow-lg shadow-blue-500/20">JT</div>
-              <div className="hidden md:block">
-                <span className="text-sm font-bold text-white tracking-tight">JTCML</span>
-                <span className="text-[10px] text-slate-500 block -mt-0.5">Trading Platform</span>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[10px] font-black shadow-md shadow-blue-500/20">JT</div>
+              <div className="hidden md:block leading-none">
+                <span className="text-[12px] font-bold text-white tracking-tight">JTCML</span>
+                <span className="text-[9px] text-slate-500 block">Quant Workspace</span>
               </div>
             </div>
 
-            {/* Desktop Nav */}
-            <nav className="hidden md:flex gap-0.5 p-1 rounded-xl bg-slate-900/40 border border-white/[0.04]">
+            {/* Desktop Nav — dense pill row with kbd hints */}
+            <nav className="hidden md:flex gap-px p-0.5 rounded-md bg-slate-900/50 border border-white/[0.05]">
               {navItems.map(n => (
-                <button key={n.id} onClick={() => navigateToTab(n.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
+                <button
+                  key={n.id}
+                  onClick={() => navigateToTab(n.id)}
+                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-semibold transition-all relative ${
                     currentTab === n.id
-                      ? 'bg-white/10 text-white shadow-sm'
+                      ? 'bg-white/[0.08] text-white'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
                   }`}
+                  title={`${n.label} (${n.key})`}
                 >
                   <n.IconComponent />
                   <span>{n.label}</span>
+                  <span className="hidden lg:inline qr-kbd ml-0.5">{n.key}</span>
                 </button>
               ))}
             </nav>
+
+            {/* Mobile hamburger */}
+            <button onClick={() => setNavOpen(o => !o)} className="md:hidden qr-btn-ghost">≡</button>
           </div>
 
-          {/* Right side status */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <GlobalExecutionToggle />
-            <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md">
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${ibkrConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
-              <span className="text-[10px] text-slate-500">IBKR</span>
+            <div className="hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded">
+              <span className={`qr-dot ${ibkrConnected ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
+              <span className="text-[9px] text-slate-500 uppercase tracking-wider">IBKR</span>
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="pt-16 md:pt-14 pb-20 md:pb-6 px-3 md:px-6 max-w-[1600px] mx-auto">
-        {currentTab === 'portfolio' && <PortfolioTab data={data} />}
-        {currentTab === 'performance' && <PerformanceTab data={data} />}
-        {currentTab === 'markets' && <MarketsTab onTickerClick={t => setDetail(t)} />}
-        {currentTab === 'settings' && <SettingsTab />}
-        {currentTab === 'lab' && <StrategyLab />}
-        {currentTab === 'strategies' && <GoldenStrategies />}
-        {currentTab === 'agentic_research' && <AgenticResearch />}
-        {currentTab === 'research' && <ResearchTab onTickerClick={t => setDetail(t)} />}
-        {currentTab === 'command' && (
-          <div className="space-y-6">
-            {/* Welcome header */}
-            <div>
-              <h1 className="text-lg font-bold text-white">Command Center</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Platform overview and key metrics</p>
-            </div>
-
-            {/* Top KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KPI l="Strategies" v={data.strategies.length} sub={`${data.strategies.filter(s => s.live_trades > 0).length} active`} />
-              <KPI l="Positions" v={data.positions.length} sub={data.positions.length > 0 ? `${fmtK(data.positions.reduce((s, p) => s + (p.market_value || 0), 0))} value` : 'No open positions'} />
-              <KPI l="P&L Today" v={fmtK(data.dailyPnl[0]?.pnl)} pos={data.dailyPnl[0]?.pnl >= 0} sub={data.dailyPnl[0]?.pnl != null ? (data.dailyPnl[0].pnl >= 0 ? 'Profitable' : 'Loss') : 'No data'} />
-              <KPI l="Win Rate" v={`${((data.summary?.win_rate || 0) * 100).toFixed(1)}%`} pos={(data.summary?.win_rate || 0) > 0.5} sub={data.summary?.total_trades ? `${data.summary.total_trades} trades` : 'No trades'} />
-            </div>
-
-            {/* Quick actions */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {[
-                { tab: 'strategies', label: 'Golden Strategies', desc: 'Review & deploy AI strategies', IconComponent: Icon.Strategies, color: 'amber' },
-                { tab: 'lab', label: 'Strategy Lab', desc: 'Screen & deploy strategies', IconComponent: Icon.Lab, color: 'blue' },
-                { tab: 'research', label: 'Research', desc: 'Signals & analyst ratings', IconComponent: Icon.Research, color: 'violet' },
-                { tab: 'portfolio', label: 'Portfolio', desc: 'Active positions & P&L', IconComponent: Icon.Portfolio, color: 'emerald' },
-                { tab: 'markets', label: 'Markets', desc: 'Market intelligence', IconComponent: Icon.Markets, color: 'amber' },
-              ].map(item => (
-                <button
-                  key={item.tab}
-                  onClick={() => navigateToTab(item.tab)}
-                  className="p-4 rounded-xl bg-slate-900/40 border border-white/[0.06] hover:border-white/10 text-left transition-all group"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="text-slate-400 group-hover:text-white transition-colors">
-                      <item.IconComponent />
-                    </div>
-                    <span className="text-sm font-bold text-white">{item.label}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">{item.desc}</p>
-                </button>
-              ))}
-            </div>
-
-            {/* Strategy Pipeline Card */}
-            {pipelineSummary && (
-              <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
-                <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">Strategy Pipeline</span>
-                  <button onClick={() => navigateToTab('strategies')} className="text-[10px] text-blue-400 hover:text-blue-300 font-medium">Manage</button>
-                </div>
-                <div className="p-4">
-                  <div className="flex items-center gap-2">
-                    {[
-                      { key: 'experimental', label: 'Experimental', bg: 'bg-slate-700/50', text: 'text-slate-300' },
-                      { key: 'near_golden', label: 'Near Golden', bg: 'bg-blue-500/15', text: 'text-blue-400' },
-                      { key: 'golden', label: 'Golden', bg: 'bg-amber-500/15', text: 'text-amber-400' },
-                      { key: 'deployed', label: 'Deployed', bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
-                    ].map((stage, i) => (
-                      <React.Fragment key={stage.key}>
-                        {i > 0 && <span className="text-slate-700 text-[10px]">&rarr;</span>}
-                        <div className={`flex-1 text-center py-2 px-1 rounded-lg ${stage.bg}`}>
-                          <div className={`text-sm font-bold ${stage.text}`}>{pipelineSummary[stage.key] || 0}</div>
-                          <div className="text-[8px] text-slate-500 uppercase tracking-wider">{stage.label}</div>
-                        </div>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Strategy overview */}
-            {data.strategies.length > 0 && (
-              <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
-                <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">Top Strategies</span>
-                  <button onClick={() => navigateToTab('lab')} className="text-[10px] text-blue-400 hover:text-blue-300 font-medium">View all</button>
-                </div>
-                <div className="divide-y divide-white/5">
-                  {[...data.strategies].sort((a, b) => (b.returns || 0) - (a.returns || 0)).slice(0, 5).map(s => (
-                    <div key={s.strategy_id || s.id} className="px-4 py-2.5 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
-                      <div>
-                        <span className="text-xs font-bold text-white">{s.strategy_name || s.name || s.strategy_id || s.id}</span>
-                        <span className="text-[10px] text-slate-500 ml-2">{s.asset_class}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {s.win_rate != null && <span className="text-[10px] text-slate-400 font-mono">WR {(s.win_rate * 100).toFixed(0)}%</span>}
-                        <span className={`text-xs font-bold font-mono ${pnlCl(s.returns)}`}>
-                          {s.returns != null ? fmtPct(s.returns) : '\u2014'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+        {/* Mobile expanded menu */}
+        {navOpen && (
+          <div className="md:hidden border-t border-white/[0.05] bg-[#0a0d12] px-2 py-2 grid grid-cols-3 gap-1">
+            {navItems.map(n => (
+              <button
+                key={n.id}
+                onClick={() => { navigateToTab(n.id); setNavOpen(false); }}
+                className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] font-semibold ${currentTab === n.id ? 'bg-white/[0.08] text-white' : 'text-slate-400'}`}
+              >
+                <n.IconComponent />
+                <span>{n.label}</span>
+              </button>
+            ))}
           </div>
         )}
+
+        {/* Workspace ribbon */}
+        <WorkspaceRibbon
+          summary={data.summary}
+          dailyPnl={data.dailyPnl}
+          lastRefresh={lastRefresh}
+          latencyMs={latencyMs}
+          mode={executionMode}
+          healthOk={healthData?.status === 'healthy'}
+        />
+      </header>
+
+      {/* Main */}
+      <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
+        {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} />}
+        {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
+        {currentTab === 'performance'      && <PerformanceTab data={data} />}
+        {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
+        {currentTab === 'settings'         && <SettingsTab />}
+        {currentTab === 'lab'              && <StrategyLab />}
+        {currentTab === 'strategies'       && <GoldenStrategies />}
+        {currentTab === 'agentic_research' && <AgenticResearch />}
+        {currentTab === 'research'         && <ResearchTab onTickerClick={() => {}} />}
       </main>
 
-      {/* Mobile Bottom Nav */}
+      {/* Mobile bottom nav */}
       <nav className="bottom-nav md:hidden">
         <div className="flex items-center justify-around px-1 py-1">
-          {navItems.map(n => (
+          {navItems.slice(0, 5).map(n => (
             <button key={n.id} onClick={() => navigateToTab(n.id)}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg min-w-0 transition-colors ${
+              className={`flex flex-col items-center gap-0.5 px-1.5 py-1 rounded min-w-0 transition-colors ${
                 currentTab === n.id ? 'text-blue-400' : 'text-slate-500'
               }`}
             >
               <n.IconComponent />
-              <span className="text-[8px] font-medium truncate">{n.label}</span>
+              <span className="text-[8px] font-medium truncate">{n.short}</span>
             </button>
           ))}
         </div>
