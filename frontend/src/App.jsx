@@ -9,6 +9,7 @@ import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { AgenticResearch } from './components/AgenticResearch';
 import { StrategyDetail } from './components/StrategyDetail';
+import { StrategyCompare } from './components/StrategyCompare';
 import { LoginPage } from './components/LoginPage';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
@@ -353,10 +354,19 @@ const PortfolioTab = ({ data }) => {
 // =================================================================
 // Performance Tab — denser comparison table
 // =================================================================
-const PerformanceTab = ({ data, onSelectStrategy }) => {
+const PerformanceTab = ({ data, onSelectStrategy, onCompare }) => {
   const [tf, setTf] = useState('1M');
   const [view, setView] = useState('overview');
+  const [selected, setSelected] = useState(new Set());
   const { sort, onSort, sorter } = useSort('returns');
+
+  const toggleSel = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else if (next.size < 6) next.add(id);
+    return next;
+  });
+  const clearSel = () => setSelected(new Set());
 
   const strategies = useMemo(() => [...(data.strategies || [])].sort(sorter), [data.strategies, sort]);
   const bestStrategy = strategies[0];
@@ -390,6 +400,17 @@ const PerformanceTab = ({ data, onSelectStrategy }) => {
           <p className="text-[10px] text-slate-500">Backtest vs live attribution · sortable comparison</p>
         </div>
         <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <>
+              <span className="text-[10px] text-slate-500">{selected.size} selected</span>
+              <button onClick={clearSel} className="qr-btn-ghost">Clear</button>
+              <button
+                onClick={() => onCompare?.(Array.from(selected))}
+                disabled={selected.size < 2}
+                className={`qr-btn-primary ${selected.size < 2 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >Compare ({selected.size}) →</button>
+            </>
+          )}
           <button onClick={() => setView('analytics')} className="qr-btn-primary">Deep Analytics →</button>
           <div className="flex gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.06]">
             {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>
@@ -411,6 +432,7 @@ const PerformanceTab = ({ data, onSelectStrategy }) => {
           <table className="w-full">
             <thead>
               <tr className="border-b border-white/[0.06]">
+                <th className="qr-label py-1.5 px-2 w-6"></th>
                 <SortableHeader label="Strategy"  sortKey="strategy_name"      current={sort} onSort={onSort} align="left" />
                 <SortableHeader label="Asset"     sortKey="asset_class"        current={sort} onSort={onSort} align="left" />
                 <SortableHeader label="Tier"      sortKey="tier"               current={sort} onSort={onSort} />
@@ -426,9 +448,19 @@ const PerformanceTab = ({ data, onSelectStrategy }) => {
             <tbody className="divide-y divide-white/[0.04]">
               {strategies.map(s => {
                 const delta = s.backtest_win_rate != null && s.live_win_rate != null ? s.live_win_rate - s.backtest_win_rate : null;
+                const isSel = selected.has(s.strategy_id);
                 return (
-                  <tr key={s.strategy_id} className="qr-tr-hover cursor-pointer" onClick={() => onSelectStrategy?.(s.strategy_id)}>
-                    <td className="py-1 px-2">
+                  <tr key={s.strategy_id} className="qr-tr-hover">
+                    <td className="py-1 px-2 text-center" onClick={(e) => { e.stopPropagation(); toggleSel(s.strategy_id); }}>
+                      <input
+                        type="checkbox"
+                        checked={isSel}
+                        onChange={() => {}}
+                        disabled={!isSel && selected.size >= 6}
+                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                      />
+                    </td>
+                    <td className="py-1 px-2 cursor-pointer" onClick={() => onSelectStrategy?.(s.strategy_id)}>
                       <div className="font-bold text-white text-[12px] truncate max-w-[200px] hover:text-blue-300">{s.strategy_name || s.strategy_id}</div>
                       {s.priority && <div className="qr-label">{s.priority}</div>}
                     </td>
@@ -447,7 +479,7 @@ const PerformanceTab = ({ data, onSelectStrategy }) => {
                 );
               })}
               {!strategies.length && (
-                <tr><td colSpan={10} className="py-8 text-center text-slate-600 text-[11px]">No deployed strategies · approve from the Strategies tab</td></tr>
+                <tr><td colSpan={11} className="py-8 text-center text-slate-600 text-[11px]">No deployed strategies · approve from the Strategies tab</td></tr>
               )}
             </tbody>
           </table>
@@ -601,6 +633,7 @@ export default function App() {
   const [healthData, setHealthData] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
+  const [compareIds, setCompareIds] = useState([]);
 
   // Auth state — if backend has JTCML_AUTH=1, /api/auth/me returns auth_enabled=true
   const [authEnabled, setAuthEnabled] = useState(false);
@@ -670,6 +703,16 @@ export default function App() {
   };
   const closeStrategyDetail = () => {
     setSelectedStrategyId(null);
+    navigate(`/${currentMode}/performance`);
+  };
+
+  const openCompare = (ids) => {
+    if (!ids?.length) return;
+    setCompareIds(ids);
+    navigate(`/${currentMode}/compare`);
+  };
+  const closeCompare = () => {
+    setCompareIds([]);
     navigate(`/${currentMode}/performance`);
   };
 
@@ -881,7 +924,7 @@ export default function App() {
       <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
         {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
-        {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} />}
+        {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} />}
         {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
         {currentTab === 'settings'         && <SettingsTab />}
         {currentTab === 'lab'              && <StrategyLab />}
@@ -892,6 +935,11 @@ export default function App() {
           selectedStrategyId
             ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
             : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button></div>
+        )}
+        {currentTab === 'compare'          && (
+          compareIds.length >= 2
+            ? <StrategyCompare strategyIds={compareIds} onClose={closeCompare} onSelectStrategy={openStrategyDetail} />
+            : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategies selected · pick 2–6 from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button> and click Compare</div>
         )}
       </main>
 

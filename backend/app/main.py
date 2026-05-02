@@ -5110,6 +5110,114 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
     return {"strategies": strategies, "count": len(strategies)}
 
 
+@app.get("/api/strategies/compare")
+def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
+    """Compare two or more strategies side-by-side.
+
+    Returns a slim payload (no per-trade rows) suitable for the comparator
+    UI: header metadata, BT + live metric snapshots, equity curve, monthly
+    returns. `ids` is a comma-separated list, max 6 strategies.
+    """
+    strategy_ids = [s.strip() for s in ids.split(",") if s.strip()]
+    if not strategy_ids:
+        raise HTTPException(status_code=400, detail="ids query param required (comma-separated)")
+    if len(strategy_ids) > 6:
+        raise HTTPException(status_code=400, detail="Compare up to 6 strategies at a time")
+
+    results = []
+    for sid in strategy_ids:
+        registry = safe_query_one(db, """
+            SELECT strategy_id, strategy_name, version, status, priority
+            FROM gold.strategy_registry WHERE strategy_id = :sid
+        """, {"sid": sid}, label="cmp_registry")
+        definitions = safe_query_one(db, """
+            SELECT strategy_id, name, asset_class, direction, execution_mode
+            FROM gold.strategy_definitions WHERE strategy_id = :sid
+        """, {"sid": sid}, label="cmp_definitions")
+
+        if not registry and not definitions:
+            results.append({"strategy_id": sid, "found": False})
+            continue
+
+        bt = safe_query_one(db, """
+            SELECT AVG(win_rate) AS win_rate,
+                   AVG(profit_factor) AS profit_factor,
+                   AVG(sharpe_ratio) AS sharpe,
+                   AVG(max_drawdown_pct) AS max_drawdown,
+                   SUM(total_trades) AS total_trades,
+                   AVG(total_return_pct) AS total_return
+            FROM consumption.Strategies_Backtest_Results
+            WHERE strategy_id = :sid
+        """, {"sid": sid}, label="cmp_bt")
+
+        live = safe_query_one(db, """
+            SELECT COUNT(*) AS total_trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS winners,
+                   SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END) AS gross_win,
+                   SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END) AS gross_loss,
+                   COALESCE(SUM(pnl), 0) AS total_pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+        """, {"sid": sid}, label="cmp_live")
+
+        equity_rows = safe_query(db, """
+            SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND executed_at > NOW() - (:days || ' days')::INTERVAL
+            GROUP BY DATE(executed_at) ORDER BY d ASC
+        """, {"sid": sid, "days": str(days)}, label="cmp_equity")
+
+        cum = 0.0
+        equity_curve = []
+        for r in equity_rows:
+            cum += float(r.day_pnl or 0)
+            equity_curve.append({"date": r.d.isoformat(), "cum_pnl": round(cum, 2)})
+
+        monthly = safe_query(db, """
+            SELECT year, month, return_pct
+            FROM consumption.Performance_Monthly_Returns
+            WHERE strategy_id = :sid
+            ORDER BY year DESC, month DESC LIMIT 12
+        """, {"sid": sid}, label="cmp_monthly")
+
+        live_total = int(live.total_trades) if live and live.total_trades else 0
+        live_pf = (float(live.gross_win) / float(live.gross_loss)) if (live and live.gross_loss and live.gross_loss > 0) else None
+        live_wr = (float(live.winners) / live_total) if live_total else None
+
+        results.append({
+            "strategy_id": sid,
+            "found": True,
+            "name": (registry.strategy_name if registry else None) or (definitions.name if definitions else sid),
+            "priority": registry.priority if registry else None,
+            "status": (registry.status if registry else None) or (definitions.status if definitions else None),
+            "execution_mode": definitions.execution_mode if definitions else None,
+            "asset_class": definitions.asset_class if definitions else None,
+            "direction": definitions.direction if definitions else None,
+            "metrics": {
+                "backtest": {
+                    "win_rate":      float(bt.win_rate) if bt and bt.win_rate is not None else None,
+                    "profit_factor": float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
+                    "sharpe":        float(bt.sharpe) if bt and bt.sharpe is not None else None,
+                    "max_drawdown":  float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
+                    "total_trades":  int(bt.total_trades) if bt and bt.total_trades is not None else None,
+                    "total_return":  float(bt.total_return) if bt and bt.total_return is not None else None,
+                },
+                "live": {
+                    "total_trades":  live_total,
+                    "win_rate":      round(live_wr, 4) if live_wr is not None else None,
+                    "profit_factor": round(live_pf, 3) if live_pf is not None else None,
+                    "total_pnl":     float(live.total_pnl or 0) if live else 0.0,
+                },
+            },
+            "equity_curve": equity_curve,
+            "monthly_returns": [{"year": int(r.year), "month": int(r.month),
+                                 "return": float(r.return_pct or 0)} for r in monthly],
+        })
+
+    return {"strategies": results, "count": len(results), "window_days": days}
+
+
 # NOTE: this route must be declared BEFORE the catch-all
 # `/api/strategies/{strategy_id:path}` so that `/evaluation` is matched first.
 @app.get("/api/strategies/{strategy_id}/evaluation")
