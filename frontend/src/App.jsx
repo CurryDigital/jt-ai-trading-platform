@@ -9,9 +9,10 @@ import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { AgenticResearch } from './components/AgenticResearch';
 import { StrategyDetail } from './components/StrategyDetail';
+import { LoginPage } from './components/LoginPage';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
-import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge } from './utils';
+import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
 
 // =================================================================
 // Iconography — minimal stroke icons sized for the dense UI (12px)
@@ -601,6 +602,33 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
 
+  // Auth state — if backend has JTCML_AUTH=1, /api/auth/me returns auth_enabled=true
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authed, setAuthed] = useState(!!getToken());
+
+  useEffect(() => {
+    onUnauthorized(() => { clearToken(); setAuthed(false); });
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+        });
+        const data = await res.json().catch(() => ({}));
+        setAuthEnabled(!!data.auth_enabled);
+        setAuthed(!data.auth_enabled || !!data.authenticated);
+      } catch {
+        setAuthEnabled(false);
+        setAuthed(true);
+      } finally {
+        setAuthChecked(true);
+      }
+    })();
+  }, []);
+
+  const handleLogin = (token) => { setToken(token); setAuthed(true); };
+  const handleLogout = () => { clearToken(); setAuthed(false); };
+
   // Toast notifications + WebSocket event stream
   const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
 
@@ -742,6 +770,14 @@ export default function App() {
     return () => clearInterval(id);
   }, [executionMode]);
 
+  // Block UI behind auth gate when enabled
+  if (!authChecked) return (
+    <div className="min-h-screen bg-[#05070a] flex items-center justify-center">
+      <div className="w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
+  if (authEnabled && !authed) return <LoginPage onLogin={handleLogin} />;
+
   if (loading) return (
     <div className="min-h-screen bg-[#05070a] flex items-center justify-center">
       <div className="text-slate-500 flex flex-col items-center gap-3">
@@ -799,6 +835,15 @@ export default function App() {
               <span className={`qr-dot ${ibkrConnected ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
               <span className="text-[9px] text-slate-500 uppercase tracking-wider">IBKR</span>
             </div>
+            {authEnabled && (
+              <button
+                onClick={handleLogout}
+                className="hidden sm:inline-flex qr-btn-ghost"
+                title="Logout"
+              >
+                ⏻
+              </button>
+            )}
           </div>
         </div>
 

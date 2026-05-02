@@ -50,6 +50,10 @@ from app.services.ib_web_service import ib_web_service
 from app.services.strategy_manager import strategy_manager
 from app.services.jt_strategy_executor import get_executor
 from app.services.event_bus import event_bus
+from app.auth import (
+    AUTH_ENABLED, JTCML_USER, JTCML_PASSWORD,
+    create_token, verify_token, is_public_path, TOKEN_TTL,
+)
 
 # JT Strategy Executor - initialized lazily
 jt_strategy_executor = None
@@ -124,6 +128,52 @@ async def websocket_events(ws: WebSocket):
         logger.debug(f"WS client error: {e}")
     finally:
         logger.info(f"WS client disconnected ({event_bus.subscriber_count} remaining)")
+
+# ---------------------------------------------------------------------------
+# Auth — opt-in via JTCML_AUTH=1 env var
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Verify bearer token on API routes when auth is enabled."""
+    if AUTH_ENABLED and not is_public_path(request.url.path):
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer ") or not verify_token(auth[7:]):
+            return JSONResponse(status_code=401, content={"error": "unauthorized", "message": "Valid token required"})
+    return await call_next(request)
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict):
+    username = (payload or {}).get("username", "")
+    password = (payload or {}).get("password", "")
+    if username != JTCML_USER or password != JTCML_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_token(sub=username)
+    return {"token": token, "token_type": "bearer", "expires_in": TOKEN_TTL}
+
+
+@app.post("/api/auth/refresh")
+def auth_refresh(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No token")
+    old = verify_token(auth[7:])
+    if not old:
+        raise HTTPException(status_code=401, detail="Token expired or invalid — re-login required")
+    token = create_token(sub=old["sub"])
+    return {"token": token, "token_type": "bearer", "expires_in": TOKEN_TTL}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return {"authenticated": False, "auth_enabled": AUTH_ENABLED}
+    payload = verify_token(auth[7:])
+    if not payload:
+        return {"authenticated": False, "auth_enabled": AUTH_ENABLED}
+    return {"authenticated": True, "auth_enabled": AUTH_ENABLED, "user": payload.get("sub")}
+
 
 @app.middleware("http")
 async def ibkr_session_middleware(request: Request, call_next):
@@ -205,6 +255,40 @@ def get_db():
 # System Health — workspace-ribbon summary (DB latency, status, asset counts)
 # Used by the frontend top ribbon and Command Center
 # ---------------------------------------------------------------------------
+@app.get("/api/audit/events")
+def get_audit_events(limit: int = 100, event_type: str = None, strategy_id: str = None, db: Session = Depends(get_db)):
+    """Query the audit trail. Returns newest-first."""
+    sql = "SELECT id, event_type, strategy_id, actor, payload, created_at FROM gold.audit_events WHERE 1=1"
+    params = {}
+    if event_type:
+        sql += " AND event_type = :et"
+        params["et"] = event_type
+    if strategy_id:
+        sql += " AND strategy_id = :sid"
+        params["sid"] = strategy_id
+    sql += " ORDER BY created_at DESC LIMIT :lim"
+    params["lim"] = min(limit, 500)
+
+    rows = safe_query(db, sql, params, label="audit_events")
+    events = []
+    for r in rows:
+        payload = r.payload
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                pass
+        events.append({
+            "id": r.id,
+            "event_type": r.event_type,
+            "strategy_id": r.strategy_id,
+            "actor": r.actor,
+            "payload": payload,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return {"events": events, "count": len(events)}
+
+
 @app.get("/api/system/health")
 def system_health(db: Session = Depends(get_db)):
     """Return a small, fast health/status summary for the workspace ribbon.

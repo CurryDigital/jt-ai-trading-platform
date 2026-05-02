@@ -61,11 +61,27 @@ export const compact = (n) => {
   return n.toFixed(n % 1 === 0 ? 0 : 2);
 };
 
+// Auth token helpers (stored in localStorage; backend reads Authorization header)
+const TOKEN_KEY = 'jtcml.token';
+export const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+export const setToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} };
+export const clearToken = () => setToken(null);
+
+// Internal: bubble 401s up so the App can show the login page
+const _onUnauthorized = { fn: () => {} };
+export const onUnauthorized = (fn) => { _onUnauthorized.fn = fn; };
+
+const _authHeaders = () => {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+
 // API helpers with error handling
 export const api = {
   get: async (url) => {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: _authHeaders() });
+      if (res.status === 401) { _onUnauthorized.fn(); return null; }
       return res.ok ? await res.json() : null;
     } catch {
       return null;
@@ -75,9 +91,10 @@ export const api = {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
         body: JSON.stringify(body)
       });
+      if (res.status === 401) { _onUnauthorized.fn(); return null; }
       return res.ok ? await res.json() : null;
     } catch {
       return null;

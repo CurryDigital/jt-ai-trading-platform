@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { getToken } from '../utils';
 
 const WS_RECONNECT_BASE_MS = 2000;
 const WS_RECONNECT_MAX_MS = 30000;
@@ -12,7 +13,9 @@ export function useEventStream(onEvent) {
 
   const connect = useCallback(() => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${window.location.host}/ws/events`;
+    const t = getToken();
+    const qs = t ? `?token=${encodeURIComponent(t)}` : '';
+    const url = `${proto}://${window.location.host}/ws/events${qs}`;
 
     try {
       const ws = new WebSocket(url);
