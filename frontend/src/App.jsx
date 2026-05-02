@@ -8,6 +8,7 @@ import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { AgenticResearch } from './components/AgenticResearch';
+import { StrategyDetail } from './components/StrategyDetail';
 import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge } from './utils';
 
 // =================================================================
@@ -253,7 +254,7 @@ const PortfolioTab = ({ data }) => {
 // =================================================================
 // Performance Tab — denser comparison table
 // =================================================================
-const PerformanceTab = ({ data }) => {
+const PerformanceTab = ({ data, onSelectStrategy }) => {
   const [tf, setTf] = useState('1M');
   const [view, setView] = useState('overview');
   const { sort, onSort, sorter } = useSort('returns');
@@ -327,9 +328,9 @@ const PerformanceTab = ({ data }) => {
               {strategies.map(s => {
                 const delta = s.backtest_win_rate != null && s.live_win_rate != null ? s.live_win_rate - s.backtest_win_rate : null;
                 return (
-                  <tr key={s.strategy_id} className="qr-tr-hover">
+                  <tr key={s.strategy_id} className="qr-tr-hover cursor-pointer" onClick={() => onSelectStrategy?.(s.strategy_id)}>
                     <td className="py-1 px-2">
-                      <div className="font-bold text-white text-[12px] truncate max-w-[200px]">{s.strategy_name || s.strategy_id}</div>
+                      <div className="font-bold text-white text-[12px] truncate max-w-[200px] hover:text-blue-300">{s.strategy_name || s.strategy_id}</div>
                       {s.priority && <div className="qr-label">{s.priority}</div>}
                     </td>
                     <td className="py-1 px-2 text-[10px] text-slate-400">{s.asset_class || '—'}</td>
@@ -360,7 +361,7 @@ const PerformanceTab = ({ data }) => {
 // =================================================================
 // Command Center — quant overview at-a-glance
 // =================================================================
-const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData }) => {
+const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData, onSelectStrategy }) => {
   const totalPositionValue = data.positions.reduce((s, p) => s + (p.market_value || 0), 0);
   const totalPnLOpen = data.positions.reduce((s, p) => s + (p.pnl || 0), 0);
   const sortedStrategies = useMemo(() =>
@@ -447,9 +448,9 @@ const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData }) => 
             <table className="w-full">
               <tbody className="divide-y divide-white/[0.04]">
                 {top5.map(s => (
-                  <tr key={s.strategy_id || s.id} className="qr-tr-hover cursor-pointer" onClick={() => navigateToTab('performance')}>
+                  <tr key={s.strategy_id || s.id} className="qr-tr-hover cursor-pointer" onClick={() => onSelectStrategy?.(s.strategy_id || s.id)}>
                     <td className="py-1 px-3">
-                      <div className="font-bold text-white text-[11px] truncate max-w-[200px]">{s.strategy_name || s.name || s.strategy_id}</div>
+                      <div className="font-bold text-white text-[11px] truncate max-w-[200px] hover:text-blue-300">{s.strategy_name || s.name || s.strategy_id}</div>
                       <div className="text-[9px] text-slate-500">{s.asset_class || '—'} · {s.priority || ''}</div>
                     </td>
                     <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—'}</td>
@@ -500,10 +501,21 @@ export default function App() {
   const [latencyMs, setLatencyMs] = useState(null);
   const [healthData, setHealthData] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
+  const [selectedStrategyId, setSelectedStrategyId] = useState(null);
 
   const pathParts = location.pathname.split('/').filter(Boolean);
   const currentMode = pathParts[0] || 'sim';
   const currentTab = pathParts[1] || 'command';
+
+  const openStrategyDetail = (id) => {
+    if (!id) return;
+    setSelectedStrategyId(id);
+    if (currentTab !== 'strategy_detail') navigate(`/${currentMode}/strategy_detail`);
+  };
+  const closeStrategyDetail = () => {
+    setSelectedStrategyId(null);
+    navigate(`/${currentMode}/performance`);
+  };
 
   const navItems = useMemo(() => [
     { id: 'command',          label: 'Command',  short: 'Cmd',     IconComponent: Icon.Command,     key: '1' },
@@ -691,15 +703,20 @@ export default function App() {
 
       {/* Main */}
       <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
-        {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} />}
+        {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
-        {currentTab === 'performance'      && <PerformanceTab data={data} />}
+        {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
         {currentTab === 'settings'         && <SettingsTab />}
         {currentTab === 'lab'              && <StrategyLab />}
-        {currentTab === 'strategies'       && <GoldenStrategies />}
+        {currentTab === 'strategies'       && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'agentic_research' && <AgenticResearch />}
         {currentTab === 'research'         && <ResearchTab onTickerClick={() => {}} />}
+        {currentTab === 'strategy_detail'  && (
+          selectedStrategyId
+            ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
+            : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button></div>
+        )}
       </main>
 
       {/* Mobile bottom nav */}

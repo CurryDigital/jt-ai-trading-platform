@@ -4948,6 +4948,217 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
     return {"strategies": strategies, "count": len(strategies)}
 
 
+# NOTE: this route must be declared BEFORE the catch-all
+# `/api/strategies/{strategy_id:path}` so that `/evaluation` is matched first.
+@app.get("/api/strategies/{strategy_id}/evaluation")
+def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depends(get_db)):
+    """One-shot evaluation payload powering the Strategy Detail page.
+
+    Aggregates: header metadata, backtest metrics, live metrics, monthly returns,
+    equity curve (cumulative live PnL), recent trades, recent signals, and a
+    backtest-vs-live divergence verdict. Resilient to missing consumption views.
+    """
+    # ---- Header / metadata -------------------------------------------------
+    registry = safe_query_one(db, """
+        SELECT strategy_id, strategy_name, version, status, priority,
+               win_rate, entry_logic, exit_logic, target_assets
+        FROM gold.strategy_registry
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_registry")
+
+    definitions = safe_query_one(db, """
+        SELECT strategy_id, name, description, asset_class, direction, time_horizon,
+               sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct,
+               venue, status, signal_logic, exit_logic, execution_mode
+        FROM gold.strategy_definitions
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_definitions")
+
+    if not registry and not definitions:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    name = (registry.strategy_name if registry else None) or (definitions.name if definitions else strategy_id)
+    asset_class = definitions.asset_class if definitions else "STOCK"
+    direction = definitions.direction if definitions else "LONG"
+    universe = []
+    if registry and registry.target_assets:
+        universe = [t.strip() for t in registry.target_assets.split(',') if t.strip()]
+    elif definitions and definitions.universe_tickers:
+        universe = [t.strip() for t in definitions.universe_tickers.split(',') if t.strip()]
+
+    # ---- Backtest metrics --------------------------------------------------
+    bt = safe_query_one(db, """
+        SELECT AVG(win_rate) AS win_rate,
+               AVG(profit_factor) AS profit_factor,
+               AVG(sharpe_ratio) AS sharpe,
+               AVG(max_drawdown_pct) AS max_drawdown,
+               SUM(total_trades) AS total_trades,
+               AVG(total_return_pct) AS total_return
+        FROM consumption.Strategies_Backtest_Results
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_backtest")
+
+    backtest_metrics = {
+        "win_rate": float(bt.win_rate) if bt and bt.win_rate is not None else None,
+        "profit_factor": float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
+        "sharpe": float(bt.sharpe) if bt and bt.sharpe is not None else None,
+        "max_drawdown": float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
+        "total_trades": int(bt.total_trades) if bt and bt.total_trades is not None else None,
+        "total_return": float(bt.total_return) if bt and bt.total_return is not None else None,
+    }
+
+    # Fallback to definitions if no backtest results view
+    if backtest_metrics["win_rate"] is None and definitions and definitions.win_rate is not None:
+        backtest_metrics["win_rate"] = float(definitions.win_rate) / 100
+    if backtest_metrics["sharpe"] is None and definitions and definitions.sharpe_ratio is not None:
+        backtest_metrics["sharpe"] = float(definitions.sharpe_ratio)
+    if backtest_metrics["max_drawdown"] is None and definitions and definitions.max_drawdown is not None:
+        backtest_metrics["max_drawdown"] = float(definitions.max_drawdown)
+
+    # ---- Live metrics (from gold.trade_executions) -------------------------
+    live = safe_query_one(db, """
+        SELECT COUNT(*)                                                AS total_trades,
+               SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
+               SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
+               SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
+               COALESCE(SUM(pnl), 0)                                   AS total_pnl,
+               MAX(executed_at)                                        AS last_trade_at,
+               MIN(executed_at)                                        AS first_trade_at
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+    """, {"sid": strategy_id}, label="eval_live_summary")
+
+    live_metrics = {"total_trades": 0, "win_rate": None, "profit_factor": None,
+                    "total_pnl": 0.0, "last_trade_at": None, "first_trade_at": None}
+    if live and live.total_trades and live.total_trades > 0:
+        wr = (live.winners or 0) / live.total_trades
+        pf = float(live.gross_win) / float(live.gross_loss) if live.gross_loss and live.gross_loss > 0 else None
+        live_metrics = {
+            "total_trades": int(live.total_trades),
+            "win_rate": round(wr, 4),
+            "profit_factor": round(pf, 3) if pf is not None else None,
+            "total_pnl": float(live.total_pnl or 0),
+            "last_trade_at": live.last_trade_at.isoformat() if live.last_trade_at else None,
+            "first_trade_at": live.first_trade_at.isoformat() if live.first_trade_at else None,
+        }
+
+    # ---- Equity curve (cumulative live pnl per day, last `days` days) ------
+    equity_rows = safe_query(db, """
+        SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid
+          AND pnl IS NOT NULL
+          AND executed_at > NOW() - (:days || ' days')::INTERVAL
+        GROUP BY DATE(executed_at)
+        ORDER BY d ASC
+    """, {"sid": strategy_id, "days": str(days)}, label="eval_equity")
+
+    equity_curve = []
+    cum = 0.0
+    for r in equity_rows:
+        cum += float(r.day_pnl or 0)
+        equity_curve.append({"date": r.d.isoformat(), "pnl": float(r.day_pnl or 0), "cum_pnl": round(cum, 2)})
+
+    # ---- Monthly returns ---------------------------------------------------
+    monthly = safe_query(db, """
+        SELECT year, month, return_pct
+        FROM consumption.Performance_Monthly_Returns
+        WHERE strategy_id = :sid
+        ORDER BY year DESC, month DESC LIMIT 24
+    """, {"sid": strategy_id}, label="eval_monthly")
+
+    monthly_returns = [{"year": int(r.year), "month": int(r.month),
+                        "return": float(r.return_pct or 0)} for r in monthly]
+
+    # ---- Recent trades (last 50) ------------------------------------------
+    trades = safe_query(db, """
+        SELECT executed_at, ticker, side, quantity, price, pnl, mode
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid
+        ORDER BY executed_at DESC
+        LIMIT 50
+    """, {"sid": strategy_id}, label="eval_trades")
+
+    recent_trades = [{
+        "ts": t.executed_at.isoformat() if t.executed_at else None,
+        "ticker": t.ticker,
+        "side": t.side,
+        "quantity": float(t.quantity) if t.quantity is not None else None,
+        "price": float(t.price) if t.price is not None else None,
+        "pnl": float(t.pnl) if t.pnl is not None else None,
+        "mode": getattr(t, "mode", None),
+    } for t in trades]
+
+    # ---- Recent signals ----------------------------------------------------
+    signals = safe_query(db, """
+        SELECT ticker, signal, signal_strength, confidence_score, current_price, generated_at
+        FROM consumption.Strategies_Signals_Current
+        WHERE strategy_id = :sid
+        ORDER BY confidence_score DESC NULLS LAST
+        LIMIT 25
+    """, {"sid": strategy_id}, label="eval_signals")
+
+    recent_signals = [{
+        "ticker": s.ticker,
+        "signal": s.signal,
+        "strength": float(s.signal_strength) if s.signal_strength is not None else None,
+        "confidence": float(s.confidence_score) if s.confidence_score is not None else None,
+        "price": float(s.current_price) if s.current_price is not None else None,
+        "ts": s.generated_at.isoformat() if getattr(s, "generated_at", None) else None,
+    } for s in signals]
+
+    # ---- Divergence verdict ------------------------------------------------
+    bt_wr = backtest_metrics["win_rate"]
+    lv_wr = live_metrics["win_rate"]
+    bt_pf = backtest_metrics["profit_factor"]
+    lv_pf = live_metrics["profit_factor"]
+    wr_delta_pp = round((lv_wr - bt_wr) * 100, 2) if (bt_wr is not None and lv_wr is not None) else None
+    pf_delta = round(lv_pf - bt_pf, 3) if (bt_pf is not None and lv_pf is not None) else None
+
+    if live_metrics["total_trades"] < 10:
+        verdict = "insufficient_live_data"
+    elif wr_delta_pp is None:
+        verdict = "no_backtest_baseline"
+    elif wr_delta_pp >= 2 and (pf_delta is None or pf_delta >= 0):
+        verdict = "outperforming"
+    elif wr_delta_pp <= -5 or (pf_delta is not None and pf_delta <= -0.3):
+        verdict = "underperforming"
+    else:
+        verdict = "in_line"
+
+    return {
+        "strategy_id": strategy_id,
+        "name": name,
+        "version": registry.version if registry else None,
+        "status": (registry.status if registry else None) or (definitions.status if definitions else None),
+        "priority": registry.priority if registry else None,
+        "asset_class": asset_class,
+        "direction": direction,
+        "time_horizon": definitions.time_horizon if definitions else None,
+        "execution_mode": definitions.execution_mode if definitions else None,
+        "venue": definitions.venue if definitions else "IBKR",
+        "universe": universe,
+        "universe_count": len(universe),
+        "entry_logic": (registry.entry_logic if registry else None) or (definitions.signal_logic if definitions else None),
+        "exit_logic": (registry.exit_logic if registry else None) or (definitions.exit_logic if definitions else None),
+        "description": definitions.description if definitions else None,
+        "metrics": {
+            "backtest": backtest_metrics,
+            "live": live_metrics,
+        },
+        "divergence": {
+            "win_rate_delta_pp": wr_delta_pp,
+            "profit_factor_delta": pf_delta,
+            "verdict": verdict,
+        },
+        "equity_curve": equity_curve,
+        "monthly_returns": monthly_returns,
+        "recent_trades": recent_trades,
+        "recent_signals": recent_signals,
+        "window_days": days,
+    }
+
+
 @app.get("/api/strategies/{strategy_id:path}")
 def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
     """Get strategy details including signal logic and entry/exit conditions"""

@@ -676,7 +676,7 @@ const CapitalAllocationSlider = ({ value, onChange, strategyName }) => {
   );
 };
 
-export const GoldenStrategies = ({ onDeployStrategy }) => {
+export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
   const [strategies, setStrategies] = useState([]);
   const [paperStrategies, setPaperStrategies] = useState([]);
   const [strategyStats, setStrategyStats] = useState({});
@@ -1370,12 +1370,23 @@ export const GoldenStrategies = ({ onDeployStrategy }) => {
                         </div>
                       </div>
                       
-                      <button 
-                        onClick={() => setExpandedStrategy(isExpanded ? null : strategy.id)}
-                        className="text-slate-400 hover:text-white"
-                      >
-                        {isExpanded ? '▼' : '▶'}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {onSelectStrategy && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onSelectStrategy(strategy.id); }}
+                            className="text-[10px] px-2 py-1 rounded bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/25 hover:bg-blue-500/25 font-semibold"
+                            title="Open detail"
+                          >
+                            Detail →
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setExpandedStrategy(isExpanded ? null : strategy.id)}
+                          className="text-slate-400 hover:text-white px-1"
+                        >
+                          {isExpanded ? '▼' : '▶'}
+                        </button>
+                      </div>
                     </div>
                     
                     {/* Custom Capital Allocation when Selected */}
