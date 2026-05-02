@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmt, fmtK, fmtPct, fmtAge, pnlCl } from '../utils';
 import { PromotionPanel } from './PromotionPanel';
+import { CapitalAllocationPanel } from './CapitalAllocationPanel';
 
 // Tiny inline SVG sparkline / equity curve --------------------------------
 const EquityCurve = ({ points, height = 80 }) => {
@@ -246,6 +247,12 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
         strategyId={data.strategy_id}
         currentMode={data.execution_mode || 'SIMULATION'}
         onPromoted={() => load()}
+      />
+
+      {/* Capital allocation panel */}
+      <CapitalAllocationPanel
+        strategyId={data.strategy_id}
+        executionMode={data.execution_mode || 'SIMULATION'}
       />
 
       {/* Chart + Heatmap */}
