@@ -30,9 +30,14 @@ const Icon = {
 // Workspace Ribbon — sticky strip below the navbar showing live state
 // market clocks, P&L, win rate, model heartbeat, last refresh time
 // =================================================================
-const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk }) => {
+const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk, onModeChange, onHalt }) => {
   const [clocks, setClocks] = useState(marketClock());
   const [statuses, setStatuses] = useState(marketStatus());
+  const [modeOpen, setModeOpen] = useState(false);
+  const [haltConfirm, setHaltConfirm] = useState(false);
+  const [haltPhrase, setHaltPhrase] = useState('');
+  const [haltBusy, setHaltBusy] = useState(false);
+  const [haltResult, setHaltResult] = useState(null);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -46,11 +51,14 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
   const winRate = (summary?.win_rate || 0) * 100;
   const totalTrades = summary?.total_trades || 0;
 
-  const Cell = ({ label, value, valClass = 'text-slate-200', extra }) => (
+  const modeLabel = mode === 'LIVE_TRADING' ? 'LIVE' : mode === 'PAPER_TRADING' ? 'PAPER' : 'SIM';
+  const modeColor = mode === 'LIVE_TRADING' ? 'text-rose-400' : mode === 'PAPER_TRADING' ? 'text-amber-400' : 'text-blue-400';
+  const isLive = mode === 'LIVE_TRADING';
+
+  const Cell = ({ label, value, valClass = 'text-slate-200' }) => (
     <div className="flex items-baseline gap-1.5 px-3 border-r border-white/[0.05] last:border-r-0">
       <span className="qr-label">{label}</span>
       <span className={`qr-num text-[12px] font-bold ${valClass}`}>{value}</span>
-      {extra}
     </div>
   );
 
@@ -61,6 +69,26 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
       <span className="qr-num text-[11px] text-slate-300 font-semibold">{time}</span>
     </div>
   );
+
+  const doHalt = async () => {
+    setHaltBusy(true);
+    const res = await api.post('/api/execution/halt', { confirmation_phrase: haltPhrase });
+    setHaltBusy(false);
+    if (res?.success) {
+      setHaltResult({ ok: true, msg: res.message });
+      setHaltPhrase('');
+      onHalt?.();
+      setTimeout(() => { setHaltConfirm(false); setHaltResult(null); }, 3000);
+    } else {
+      setHaltResult({ ok: false, msg: 'Failed — check phrase or server' });
+    }
+  };
+
+  const doModeChange = async (newMode) => {
+    setModeOpen(false);
+    const res = await api.post('/api/execution/global-mode', { execution_mode: newMode });
+    if (res) onModeChange?.(res.execution_mode || newMode);
+  };
 
   return (
     <div className="border-b border-white/[0.05] bg-[#0a0d12]/80 backdrop-blur-xl">
@@ -77,19 +105,83 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
           </div>
         </div>
 
-        {/* Right: live P&L + summary */}
+        {/* Right: mode badge (dropdown) + kill switch + P&L */}
         <div className="flex items-center h-full">
-          <Cell
-            label="MODE"
-            value={mode === 'LIVE_TRADING' ? 'LIVE' : mode === 'PAPER_TRADING' ? 'PAPER' : 'SIM'}
-            valClass={mode === 'LIVE_TRADING' ? 'text-rose-400' : mode === 'PAPER_TRADING' ? 'text-amber-400' : 'text-blue-400'}
-          />
+          {/* Mode badge — dropdown */}
+          <div className="relative px-3 border-r border-white/[0.05]">
+            <button onClick={() => setModeOpen(o => !o)} className="flex items-baseline gap-1.5 group">
+              <span className="qr-label">MODE</span>
+              <span className={`qr-num text-[12px] font-bold ${modeColor}`}>{modeLabel}</span>
+              <span className="text-[8px] text-slate-600 group-hover:text-slate-400 transition-colors">▾</span>
+            </button>
+            {modeOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setModeOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-[#0e111a] border border-white/[0.08] rounded-lg shadow-xl py-1">
+                  {['SIMULATION', 'PAPER_TRADING', 'LIVE_TRADING'].map(m => (
+                    <button
+                      key={m}
+                      disabled={m === mode}
+                      onClick={() => doModeChange(m)}
+                      className={`w-full text-left px-3 py-1.5 text-[11px] font-semibold transition-colors flex items-center justify-between ${
+                        m === mode ? 'text-slate-600 cursor-default' : 'text-slate-300 hover:bg-white/[0.05] hover:text-white'
+                      }`}
+                    >
+                      <span>{m === 'LIVE_TRADING' ? 'LIVE' : m === 'PAPER_TRADING' ? 'PAPER' : 'SIM'}</span>
+                      {m === mode && <span className="text-[8px] text-slate-600">current</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Kill switch — only visible in LIVE mode */}
+          {isLive && !haltConfirm && (
+            <div className="px-2 border-r border-white/[0.05]">
+              <button
+                onClick={() => setHaltConfirm(true)}
+                className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40 text-[10px] font-bold hover:bg-rose-500/30 animate-pulse-soft"
+              >
+                HALT
+              </button>
+            </div>
+          )}
+
           <Cell label="P&L D" value={todayPnL != null ? fmtK(todayPnL) : '—'} valClass={todayPnL == null ? 'text-slate-500' : todayPnL >= 0 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
           <Cell label="WR"  value={`${winRate.toFixed(1)}%`} valClass={winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
           <Cell label="TR"  value={totalTrades} />
           <Cell label="UPD" value={fmtAge(lastRefresh)} valClass="text-slate-400" />
         </div>
       </div>
+
+      {/* Kill-switch confirmation strip — drops down when active */}
+      {haltConfirm && (
+        <div className="bg-rose-950/80 border-t border-rose-500/30 px-3 py-1.5">
+          <div className="flex items-center gap-3 max-w-[1800px] mx-auto">
+            <span className="text-[11px] text-rose-200 font-semibold flex-shrink-0">Kill Switch — type <span className="font-mono text-rose-100 bg-rose-500/20 px-1 rounded">HALT LIVE</span> to confirm</span>
+            <input
+              autoFocus
+              value={haltPhrase}
+              onChange={(e) => setHaltPhrase(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && haltPhrase === 'HALT LIVE') doHalt(); if (e.key === 'Escape') { setHaltConfirm(false); setHaltPhrase(''); setHaltResult(null); } }}
+              placeholder="HALT LIVE"
+              className="px-2 py-1 bg-rose-950/60 border border-rose-500/30 rounded text-[11px] text-white w-32 placeholder-rose-800 focus:outline-none focus:border-rose-400 font-mono"
+            />
+            <button
+              onClick={doHalt}
+              disabled={haltPhrase !== 'HALT LIVE' || haltBusy}
+              className={`px-3 py-1 rounded text-[10px] font-bold ${haltPhrase === 'HALT LIVE' && !haltBusy ? 'bg-rose-500 text-white hover:bg-rose-400' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+            >
+              {haltBusy ? 'Halting…' : 'Confirm Halt'}
+            </button>
+            <button onClick={() => { setHaltConfirm(false); setHaltPhrase(''); setHaltResult(null); }} className="text-[10px] text-slate-400 hover:text-white">Cancel</button>
+            {haltResult && (
+              <span className={`text-[10px] font-semibold ${haltResult.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{haltResult.msg}</span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -698,6 +790,8 @@ export default function App() {
           latencyMs={latencyMs}
           mode={executionMode}
           healthOk={healthData?.status === 'healthy'}
+          onModeChange={(m) => setExecutionMode(m)}
+          onHalt={() => setExecutionMode('PAPER_TRADING')}
         />
       </header>
 

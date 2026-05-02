@@ -3638,6 +3638,58 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
     return get_global_execution_mode(db)
 
 
+@app.post("/api/execution/halt")
+def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
+    """Emergency kill switch — demote ALL live strategies to PAPER and set
+    global mode to PAPER_TRADING.  Keeps PAPER/SIM strategies running so the
+    quant can still observe signals, but no real-money orders fire.
+
+    Requires confirmation_phrase = "HALT LIVE" in the payload.
+    """
+    phrase = (payload or {}).get("confirmation_phrase", "")
+    if phrase != "HALT LIVE":
+        raise HTTPException(status_code=400,
+            detail="Kill switch requires confirmation_phrase = 'HALT LIVE'")
+
+    # 1. Count and demote LIVE strategies
+    affected = db.execute(text("""
+        UPDATE gold.strategy_definitions
+        SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
+        WHERE execution_mode = 'LIVE_TRADING'
+        RETURNING strategy_id
+    """)).fetchall()
+
+    affected_ids = [r.strategy_id for r in affected]
+
+    # 2. Set global mode to PAPER
+    db.execute(text("""
+        INSERT INTO gold.platform_settings (key, value, updated_at)
+        VALUES ('global_execution_mode', 'PAPER_TRADING', NOW())
+        ON CONFLICT (key) DO UPDATE SET
+            value = 'PAPER_TRADING',
+            updated_at = NOW()
+    """))
+    db.commit()
+
+    # 3. Audit
+    _audit(db, "kill_switch.fire", None, {
+        "affected_strategies": affected_ids,
+        "count": len(affected_ids),
+        "previous_global_mode": "LIVE_TRADING",
+        "new_global_mode": "PAPER_TRADING",
+    })
+
+    logger.warning(f"KILL SWITCH activated — {len(affected_ids)} strategies demoted to PAPER")
+
+    return {
+        "success": True,
+        "halted": len(affected_ids),
+        "strategy_ids": affected_ids,
+        "global_mode": "PAPER_TRADING",
+        "message": f"Kill switch activated. {len(affected_ids)} LIVE strategies demoted to PAPER_TRADING.",
+    }
+
+
 @app.post("/api/ib/place-order")
 def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     """
