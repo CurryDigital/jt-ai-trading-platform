@@ -296,6 +296,81 @@ def get_audit_events(limit: int = 100, event_type: str = None, strategy_id: str 
     return {"events": events, "count": len(events)}
 
 
+@app.get("/api/operations/live")
+def get_live_operations(db: Session = Depends(get_db)):
+    """Live ops snapshot for the Command Center: active orders, today's fills,
+    active signals. Single round-trip; safe_query everywhere."""
+
+    # 1. Active / working orders (non-terminal status in trade_executions)
+    active_orders = safe_query(db, """
+        SELECT id, strategy_id, ticker, side, quantity, price, status, order_type,
+               execution_mode, executed_at, ibkr_order_id
+        FROM gold.trade_executions
+        WHERE status IN ('PENDING', 'WORKING', 'SUBMITTED', 'PARTIAL')
+        ORDER BY executed_at DESC
+        LIMIT 50
+    """, label="ops_active_orders")
+
+    # 2. Today's fills (UTC day; FE renders local time)
+    todays_fills = safe_query(db, """
+        SELECT id, strategy_id, ticker, side, quantity, price, pnl, execution_mode, executed_at
+        FROM gold.trade_executions
+        WHERE status NOT IN ('PENDING', 'WORKING', 'SUBMITTED', 'PARTIAL')
+          AND executed_at >= CURRENT_DATE
+        ORDER BY executed_at DESC
+        LIMIT 100
+    """, label="ops_todays_fills")
+
+    # 3. Active signals (BUY/SELL only)
+    signals = safe_query(db, """
+        SELECT strategy_id, ticker, signal, signal_strength, confidence_score,
+               current_price, generated_at
+        FROM consumption.Strategies_Signals_Current
+        WHERE signal IN ('BUY', 'SELL')
+        ORDER BY confidence_score DESC NULLS LAST
+        LIMIT 30
+    """, label="ops_signals")
+
+    # 4. Aggregate today's P&L from fills
+    today_pnl = sum(float(f.pnl or 0) for f in todays_fills if getattr(f, "pnl", None) is not None)
+    today_winners = sum(1 for f in todays_fills if (f.pnl or 0) > 0)
+    today_losers  = sum(1 for f in todays_fills if (f.pnl or 0) < 0)
+
+    return {
+        "active_orders": [{
+            "id": r.id, "strategy_id": r.strategy_id, "ticker": r.ticker,
+            "side": r.side, "quantity": float(r.quantity) if r.quantity is not None else None,
+            "price": float(r.price) if r.price is not None else None,
+            "status": r.status, "order_type": r.order_type,
+            "execution_mode": r.execution_mode, "ibkr_order_id": r.ibkr_order_id,
+            "submitted_at": r.executed_at.isoformat() if r.executed_at else None,
+        } for r in active_orders],
+        "todays_fills": [{
+            "id": r.id, "strategy_id": r.strategy_id, "ticker": r.ticker,
+            "side": r.side, "quantity": float(r.quantity) if r.quantity is not None else None,
+            "price": float(r.price) if r.price is not None else None,
+            "pnl": float(r.pnl) if r.pnl is not None else None,
+            "execution_mode": r.execution_mode,
+            "filled_at": r.executed_at.isoformat() if r.executed_at else None,
+        } for r in todays_fills],
+        "signals": [{
+            "strategy_id": s.strategy_id, "ticker": s.ticker, "signal": s.signal,
+            "strength": float(s.signal_strength) if s.signal_strength is not None else None,
+            "confidence": float(s.confidence_score) if s.confidence_score is not None else None,
+            "price": float(s.current_price) if s.current_price is not None else None,
+            "ts": s.generated_at.isoformat() if getattr(s, "generated_at", None) else None,
+        } for s in signals],
+        "summary": {
+            "active_order_count": len(active_orders),
+            "todays_fill_count": len(todays_fills),
+            "active_signal_count": len(signals),
+            "today_pnl": round(today_pnl, 2),
+            "today_winners": today_winners,
+            "today_losers": today_losers,
+        },
+    }
+
+
 @app.get("/api/system/health")
 def system_health(db: Session = Depends(get_db)):
     """Return a small, fast health/status summary for the workspace ribbon.
@@ -6091,6 +6166,11 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
     })
 
     db.commit()
+
+    event_bus.publish_sync("order_placed", {
+        "strategy_id": strategy_id, "ticker": ticker, "side": side,
+        "quantity": quantity, "execution_mode": execution_mode,
+    })
 
     if execution_mode == "SIMULATION":
         # Simulation mode - just update database

@@ -10,6 +10,7 @@ import { StrategyPerformance } from './components/StrategyPerformance';
 import { AgenticResearch } from './components/AgenticResearch';
 import { StrategyDetail } from './components/StrategyDetail';
 import { StrategyCompare } from './components/StrategyCompare';
+import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
@@ -594,6 +595,9 @@ const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData, onSel
         )}
       </div>
 
+      {/* Live operations: active orders / today's fills / active signals */}
+      <LiveOpsPanel onSelectStrategy={onSelectStrategy} />
+
       {/* Quick action bar - dense pill row */}
       <div className="qr-surface px-3 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
         <span className="qr-label flex-shrink-0">QUICK</span>
@@ -684,6 +688,9 @@ export default function App() {
         break;
       case 'fill':
         pushToast(`Fill: ${d.side} ${d.quantity} ${d.ticker} @ ${d.price}`, d.side === 'BUY' ? 'success' : 'warning');
+        break;
+      case 'order_placed':
+        pushToast(`Order: ${d.side} ${d.quantity} ${d.ticker} (${(d.execution_mode || '').replace('_TRADING','').replace('SIMULATION','SIM')})`, 'info', 4000);
         break;
       case 'signal':
         pushToast(`Signal: ${d.signal} ${d.ticker} (${d.strategy_id})`, 'info');
