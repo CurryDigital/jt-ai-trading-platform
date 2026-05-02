@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MarketsTab } from './components/MarketsTab';
 import { SettingsTab } from './components/SettingsTab';
@@ -9,6 +9,8 @@ import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { AgenticResearch } from './components/AgenticResearch';
 import { StrategyDetail } from './components/StrategyDetail';
+import { useEventStream } from './hooks/useEventStream';
+import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge } from './utils';
 
 // =================================================================
@@ -30,7 +32,7 @@ const Icon = {
 // Workspace Ribbon — sticky strip below the navbar showing live state
 // market clocks, P&L, win rate, model heartbeat, last refresh time
 // =================================================================
-const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk, onModeChange, onHalt }) => {
+const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk, onModeChange, onHalt, wsConnected }) => {
   const [clocks, setClocks] = useState(marketClock());
   const [statuses, setStatuses] = useState(marketStatus());
   const [modeOpen, setModeOpen] = useState(false);
@@ -102,6 +104,10 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
             <span className={`qr-dot ${healthOk ? 'qr-dot-live' : 'qr-dot-down'}`} />
             <span className="qr-label">API</span>
             <span className="qr-num text-[11px] text-slate-400">{latencyMs != null ? `${latencyMs}ms` : '—'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 border-r border-white/[0.05]">
+            <span className={`qr-dot ${wsConnected ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
+            <span className="qr-label">WS</span>
           </div>
         </div>
 
@@ -595,6 +601,36 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
 
+  // Toast notifications + WebSocket event stream
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToasts();
+
+  const handleWsEvent = useCallback((event) => {
+    const d = event.data || {};
+    switch (event.type) {
+      case 'kill_switch':
+        pushToast(`Kill switch fired — ${d.halted || 0} strategies halted`, 'error', 10000);
+        setExecutionMode('PAPER_TRADING');
+        break;
+      case 'mode_change':
+        pushToast(`${d.name || d.strategy_id} → ${(d.to || '').replace('_TRADING', '')}`, d.is_promotion ? 'warning' : 'info');
+        break;
+      case 'global_mode_change':
+        pushToast(`Global mode → ${(d.mode || '').replace('_TRADING', '').replace('SIMULATION', 'SIM')}`, 'info');
+        setExecutionMode(d.mode);
+        break;
+      case 'fill':
+        pushToast(`Fill: ${d.side} ${d.quantity} ${d.ticker} @ ${d.price}`, d.side === 'BUY' ? 'success' : 'warning');
+        break;
+      case 'signal':
+        pushToast(`Signal: ${d.signal} ${d.ticker} (${d.strategy_id})`, 'info');
+        break;
+      default:
+        break;
+    }
+  }, [pushToast]);
+
+  const { connected: wsConnected } = useEventStream(handleWsEvent);
+
   const pathParts = location.pathname.split('/').filter(Boolean);
   const currentMode = pathParts[0] || 'sim';
   const currentTab = pathParts[1] || 'command';
@@ -792,6 +828,7 @@ export default function App() {
           healthOk={healthData?.status === 'healthy'}
           onModeChange={(m) => setExecutionMode(m)}
           onHalt={() => setExecutionMode('PAPER_TRADING')}
+          wsConnected={wsConnected}
         />
       </header>
 
@@ -828,6 +865,9 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      {/* Toast notifications — floating bottom-right */}
+      <ToastContainer toasts={toasts} dismiss={dismissToast} />
     </div>
   );
 }

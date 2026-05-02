@@ -7,7 +7,7 @@ Data ingestion/refresh is handled by the DE agent.
 import datetime
 import json
 import time
-from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException
+from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -49,6 +49,7 @@ from app.services.ib_service import ib_quant_service
 from app.services.ib_web_service import ib_web_service
 from app.services.strategy_manager import strategy_manager
 from app.services.jt_strategy_executor import get_executor
+from app.services.event_bus import event_bus
 
 # JT Strategy Executor - initialized lazily
 jt_strategy_executor = None
@@ -106,6 +107,23 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # REMOVED: scheduler_loop() - Platform is READ-ONLY
 # Data refresh schedules are managed by DE agent, not Platform
 # See shared/references/inter-agent-protocol.md for data contract workflow
+
+# ---------------------------------------------------------------------------
+# WebSocket — real-time event stream
+# ---------------------------------------------------------------------------
+@app.websocket("/ws/events")
+async def websocket_events(ws: WebSocket):
+    await ws.accept()
+    logger.info(f"WS client connected ({event_bus.subscriber_count + 1} total)")
+    try:
+        async for event in event_bus.subscribe():
+            await ws.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug(f"WS client error: {e}")
+    finally:
+        logger.info(f"WS client disconnected ({event_bus.subscriber_count} remaining)")
 
 @app.middleware("http")
 async def ibkr_session_middleware(request: Request, call_next):
@@ -3634,6 +3652,8 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
 
     db.commit()
 
+    event_bus.publish_sync("global_mode_change", {"mode": mode})
+
     # Get updated state
     return get_global_execution_mode(db)
 
@@ -3680,6 +3700,12 @@ def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
     })
 
     logger.warning(f"KILL SWITCH activated — {len(affected_ids)} strategies demoted to PAPER")
+
+    event_bus.publish_sync("kill_switch", {
+        "halted": len(affected_ids),
+        "strategy_ids": affected_ids,
+        "global_mode": "PAPER_TRADING",
+    })
 
     return {
         "success": True,
@@ -5552,6 +5578,14 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
         "gates_passed": eval_result["passed"],
         "override_gates": override,
         "metrics": metrics,
+    })
+
+    event_bus.publish_sync("mode_change", {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "from": current_mode,
+        "to": target,
+        "is_promotion": is_promotion,
     })
 
     return {
