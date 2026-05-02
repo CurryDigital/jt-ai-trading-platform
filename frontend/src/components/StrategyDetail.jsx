@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmt, fmtK, fmtPct, fmtAge, pnlCl } from '../utils';
 import { PromotionPanel } from './PromotionPanel';
 import { CapitalAllocationPanel } from './CapitalAllocationPanel';
+import { RiskWatchPanel } from './RiskWatchPanel';
 
 // Tiny inline SVG sparkline / equity curve --------------------------------
 const EquityCurve = ({ points, height = 80 }) => {
@@ -253,6 +254,13 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
       <CapitalAllocationPanel
         strategyId={data.strategy_id}
         executionMode={data.execution_mode || 'SIMULATION'}
+      />
+
+      {/* Risk watch — auto-demote rules */}
+      <RiskWatchPanel
+        strategyId={data.strategy_id}
+        executionMode={data.execution_mode || 'SIMULATION'}
+        onDemoted={() => load()}
       />
 
       {/* Chart + Heatmap */}

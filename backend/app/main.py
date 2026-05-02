@@ -6,6 +6,7 @@ Data ingestion/refresh is handled by the DE agent.
 """
 import datetime
 import json
+import os
 import time
 from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -194,6 +195,12 @@ async def startup_event():
     # DISABLED: Scheduler initialization - Platform is READ-ONLY
     # Data schedules are managed by DE agent
     print("✅ Backend started - READ-ONLY mode (consumption views only)")
+
+    # Auto-demote risk scanner — runs every JTCML_DEMOTE_SCAN_S seconds (default 300)
+    # Disable with JTCML_DEMOTE_SCAN_S=0
+    if DEMOTE_SCAN_INTERVAL_S > 0:
+        asyncio.create_task(_demote_scanner_loop())
+        print(f"✅ Auto-demote scanner started (interval: {DEMOTE_SCAN_INTERVAL_S}s)")
 
 async def run_deep_sell_analysis(db: Session):
     """
@@ -5792,6 +5799,225 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
         "gates": eval_result["gates"],
         "message": f"Strategy {strategy_id} → {target}",
     }
+
+
+# ---------------------------------------------------------------------------
+# Auto-demote risk rules — LIVE strategies that breach risk limits get
+# automatically demoted to PAPER. Pairs with the kill switch as the
+# safety counterpart of the promotion gates.
+# ---------------------------------------------------------------------------
+
+DEMOTE_RULES = {
+    "max_drawdown_pct":          -10.0,   # 10% rolling drawdown from peak P&L
+    "max_daily_loss_pct":        -5.0,    # 5% loss in a single trading day
+    "max_consecutive_losses":    5,
+    "min_live_pf":               0.70,    # PF below 0.7 over last 20 trades
+    "min_live_trades_for_pf":    10,      # need at least 10 trades to evaluate PF
+}
+
+
+def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
+    """Evaluate risk rules against live trade history. Returns rule status list."""
+    # Pull recent live trades (limit 50 to stay fast)
+    recent = safe_query(db, """
+        SELECT executed_at, pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+        ORDER BY executed_at DESC
+        LIMIT 50
+    """, {"sid": strategy_id}, label="demote_recent")
+
+    # Pull all-time live cumulative pnl for drawdown calc
+    daily = safe_query(db, """
+        SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+        GROUP BY DATE(executed_at)
+        ORDER BY d ASC
+    """, {"sid": strategy_id}, label="demote_daily")
+
+    # Pool size to compute pct losses
+    pool = safe_query_one(db, """
+        SELECT assigned_capital
+        FROM gold.strategy_definitions
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="demote_pool")
+    pool_size = float(pool.assigned_capital) if pool and pool.assigned_capital else 100_000.0
+
+    rules = []
+
+    # Rule 1: rolling max drawdown from peak cumulative P&L
+    cum = 0.0
+    peak = 0.0
+    max_dd_pct = 0.0
+    for r in daily:
+        cum += float(r.day_pnl or 0)
+        peak = max(peak, cum)
+        if peak > 0:
+            dd_pct = ((cum - peak) / pool_size) * 100
+            max_dd_pct = min(max_dd_pct, dd_pct)
+    rules.append({
+        "id": "max_drawdown",
+        "label": f"Max DD ≥ {DEMOTE_RULES['max_drawdown_pct']:.1f}%",
+        "actual": round(max_dd_pct, 2),
+        "threshold": DEMOTE_RULES["max_drawdown_pct"],
+        "breach": max_dd_pct < DEMOTE_RULES["max_drawdown_pct"],
+        "reason": "Live drawdown exceeds risk limit",
+    })
+
+    # Rule 2: worst daily loss (% of pool)
+    worst_daily_pct = 0.0
+    if daily:
+        worst_day = min((float(r.day_pnl or 0) for r in daily), default=0)
+        worst_daily_pct = (worst_day / pool_size) * 100
+    rules.append({
+        "id": "max_daily_loss",
+        "label": f"Daily loss ≥ {DEMOTE_RULES['max_daily_loss_pct']:.1f}%",
+        "actual": round(worst_daily_pct, 2),
+        "threshold": DEMOTE_RULES["max_daily_loss_pct"],
+        "breach": worst_daily_pct < DEMOTE_RULES["max_daily_loss_pct"],
+        "reason": "Single-day loss exceeds risk limit",
+    })
+
+    # Rule 3: consecutive losses (most recent streak)
+    streak = 0
+    for r in recent:  # already DESC
+        if (r.pnl or 0) < 0:
+            streak += 1
+        else:
+            break
+    rules.append({
+        "id": "consecutive_losses",
+        "label": f"Consecutive losses ≤ {DEMOTE_RULES['max_consecutive_losses']}",
+        "actual": streak,
+        "threshold": DEMOTE_RULES["max_consecutive_losses"],
+        "breach": streak >= DEMOTE_RULES["max_consecutive_losses"],
+        "reason": f"{streak} losing trades in a row",
+    })
+
+    # Rule 4: live PF over last 20 trades
+    last_n = recent[:20]
+    gross_win = sum(float(r.pnl) for r in last_n if (r.pnl or 0) > 0)
+    gross_loss = sum(-float(r.pnl) for r in last_n if (r.pnl or 0) < 0)
+    pf = (gross_win / gross_loss) if gross_loss > 0 else None
+    eligible = len(last_n) >= DEMOTE_RULES["min_live_trades_for_pf"]
+    rules.append({
+        "id": "min_live_pf",
+        "label": f"Rolling PF ≥ {DEMOTE_RULES['min_live_pf']:.2f} (last 20 trades)",
+        "actual": round(pf, 3) if pf is not None else None,
+        "threshold": DEMOTE_RULES["min_live_pf"],
+        "breach": eligible and pf is not None and pf < DEMOTE_RULES["min_live_pf"],
+        "reason": "Profit factor degraded below threshold",
+    })
+
+    breaches = [r for r in rules if r["breach"]]
+    return {
+        "strategy_id": strategy_id,
+        "rules": rules,
+        "breaches": breaches,
+        "should_demote": len(breaches) > 0,
+        "trades_analyzed": len(recent),
+    }
+
+
+@app.get("/api/strategies/{strategy_id}/risk-status")
+def get_risk_status(strategy_id: str, db: Session = Depends(get_db)):
+    """Return the demote-rule status for a strategy without taking action."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    status = _evaluate_demote_rules(db, strategy_id)
+    return {
+        **status,
+        "name": strat.name,
+        "execution_mode": strat.execution_mode,
+    }
+
+
+def _demote_strategy(db: Session, strategy_id: str, breaches: list, source: str = "auto"):
+    """Demote a LIVE strategy to PAPER. Audits + emits WS event."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat or strat.execution_mode != "LIVE_TRADING":
+        return False
+
+    db.execute(text("""
+        UPDATE gold.strategy_definitions
+        SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
+        WHERE strategy_id = :sid
+    """), {"sid": strategy_id})
+    db.commit()
+
+    _audit(db, "strategy.auto_demote", strategy_id, {
+        "from": "LIVE_TRADING",
+        "to": "PAPER_TRADING",
+        "source": source,
+        "breaches": [{"id": b["id"], "actual": b["actual"], "threshold": b["threshold"]} for b in breaches],
+    })
+
+    event_bus.publish_sync("auto_demote", {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "from": "LIVE_TRADING",
+        "to": "PAPER_TRADING",
+        "breaches": [b["id"] for b in breaches],
+    })
+    logger.warning(f"AUTO-DEMOTE {strategy_id} ({strat.name}) — breaches: {[b['id'] for b in breaches]}")
+    return True
+
+
+# Background scanner — checks every LIVE strategy and demotes breached ones.
+DEMOTE_SCAN_INTERVAL_S = int(os.environ.get("JTCML_DEMOTE_SCAN_S", "300"))
+
+async def _demote_scanner_loop():
+    while True:
+        try:
+            await asyncio.sleep(DEMOTE_SCAN_INTERVAL_S)
+            db = SessionLocal()
+            try:
+                live = db.execute(text("""
+                    SELECT strategy_id FROM gold.strategy_definitions
+                    WHERE execution_mode = 'LIVE_TRADING'
+                """)).fetchall()
+                for row in live:
+                    sid = row.strategy_id
+                    try:
+                        status = _evaluate_demote_rules(db, sid)
+                        if status["should_demote"]:
+                            _demote_strategy(db, sid, status["breaches"], source="auto_scanner")
+                    except Exception as e:
+                        logger.error(f"Demote check failed for {sid}: {e}")
+                        db.rollback()
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Demote scanner loop error: {e}")
+
+
+@app.post("/api/strategies/{strategy_id}/auto-demote-check")
+def force_demote_check(strategy_id: str, db: Session = Depends(get_db)):
+    """Manually trigger an auto-demote check for one strategy (for testing/UI)."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    status = _evaluate_demote_rules(db, strategy_id)
+    demoted = False
+    if status["should_demote"] and strat.execution_mode == "LIVE_TRADING":
+        demoted = _demote_strategy(db, strategy_id, status["breaches"], source="manual_check")
+
+    return {**status, "demoted": demoted, "execution_mode": strat.execution_mode}
 
 
 @app.post("/api/strategies/{strategy_id:path}/mode")

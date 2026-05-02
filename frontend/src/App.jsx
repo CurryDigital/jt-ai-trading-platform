@@ -675,6 +675,9 @@ export default function App() {
       case 'mode_change':
         pushToast(`${d.name || d.strategy_id} → ${(d.to || '').replace('_TRADING', '')}`, d.is_promotion ? 'warning' : 'info');
         break;
+      case 'auto_demote':
+        pushToast(`Auto-demote: ${d.name || d.strategy_id} → PAPER (${(d.breaches || []).join(', ')})`, 'error', 12000);
+        break;
       case 'global_mode_change':
         pushToast(`Global mode → ${(d.mode || '').replace('_TRADING', '').replace('SIMULATION', 'SIM')}`, 'info');
         setExecutionMode(d.mode);
