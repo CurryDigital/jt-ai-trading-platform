@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmt, fmtK, fmtPct, fmtAge, pnlCl } from '../utils';
+import { PromotionPanel } from './PromotionPanel';
 
 // Tiny inline SVG sparkline / equity curve --------------------------------
 const EquityCurve = ({ points, height = 80 }) => {
@@ -239,6 +240,13 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           sub={lv.last_trade_at ? `last ${fmtAge(lv.last_trade_at)}` : null}
           valClass={pnlCl(lv.total_pnl)} />
       </div>
+
+      {/* Promotion gate panel */}
+      <PromotionPanel
+        strategyId={data.strategy_id}
+        currentMode={data.execution_mode || 'SIMULATION'}
+        onPromoted={() => load()}
+      />
 
       {/* Chart + Heatmap */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">

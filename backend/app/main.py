@@ -5222,6 +5222,300 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
 
 # --- STRATEGY SCREENER APIs ---
 
+# ---------------------------------------------------------------------------
+# Promotion gates — SIM → PAPER → LIVE
+# ---------------------------------------------------------------------------
+
+PROMOTION_GATES = {
+    # SIM → PAPER: gates must pass against backtest data
+    "SIMULATION->PAPER_TRADING": {
+        "min_backtest_trades":   100,
+        "min_backtest_win_rate": 0.45,
+        "min_backtest_pf":       1.30,
+        "min_backtest_sharpe":   1.00,
+        "max_drawdown_pct":      -25.0,    # not worse than -25%
+    },
+    # PAPER → LIVE: gates must pass against live (paper) data + recency
+    "PAPER_TRADING->LIVE_TRADING": {
+        "min_live_trades":          30,
+        "min_live_days":            14,
+        "min_live_pf":              1.20,
+        "min_live_vs_bt_wr_ratio":  0.85,  # live WR ≥ 85% of BT WR
+        "max_drawdown_pct":         -15.0,
+    },
+    # LIVE → PAPER (demote, always allowed but logged)
+    "LIVE_TRADING->PAPER_TRADING": {},
+    # PAPER → SIM (demote)
+    "PAPER_TRADING->SIMULATION":   {},
+    # LIVE → SIM (full halt)
+    "LIVE_TRADING->SIMULATION":    {},
+}
+
+VALID_MODES = {"SIMULATION", "PAPER_TRADING", "LIVE_TRADING"}
+
+
+def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
+    """Gather backtest + live metrics needed by promotion gates."""
+    bt = safe_query_one(db, """
+        SELECT AVG(win_rate)            AS win_rate,
+               AVG(profit_factor)       AS profit_factor,
+               AVG(sharpe_ratio)        AS sharpe,
+               AVG(max_drawdown_pct)    AS max_drawdown,
+               SUM(total_trades)        AS total_trades
+        FROM consumption.Strategies_Backtest_Results
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="promote_bt")
+
+    live = safe_query_one(db, """
+        SELECT COUNT(*)                                                AS total_trades,
+               SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
+               SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
+               SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
+               COALESCE(MIN(executed_at), NULL)                        AS first_trade_at,
+               COALESCE(MAX(executed_at), NULL)                        AS last_trade_at,
+               COALESCE(SUM(pnl), 0)                                   AS total_pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+    """, {"sid": strategy_id}, label="promote_live")
+
+    bt_metrics = {
+        "win_rate":     float(bt.win_rate) if bt and bt.win_rate is not None else None,
+        "profit_factor":float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
+        "sharpe":       float(bt.sharpe) if bt and bt.sharpe is not None else None,
+        "max_drawdown": float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
+        "total_trades": int(bt.total_trades) if bt and bt.total_trades is not None else 0,
+    }
+    live_total = int(live.total_trades) if live and live.total_trades else 0
+    live_pf = (float(live.gross_win) / float(live.gross_loss)) if (live and live.gross_loss and live.gross_loss > 0) else None
+    live_wr = (float(live.winners) / live_total) if live_total else None
+    live_days = 0
+    if live and live.first_trade_at and live.last_trade_at:
+        live_days = max(0, (live.last_trade_at.date() - live.first_trade_at.date()).days)
+    live_metrics = {
+        "total_trades":  live_total,
+        "win_rate":      live_wr,
+        "profit_factor": live_pf,
+        "days_active":   live_days,
+        "first_trade_at": live.first_trade_at.isoformat() if live and live.first_trade_at else None,
+        "last_trade_at":  live.last_trade_at.isoformat() if live and live.last_trade_at else None,
+    }
+    return {"backtest": bt_metrics, "live": live_metrics}
+
+
+def _evaluate_gates(transition: str, metrics: dict, current_mode: str) -> dict:
+    """Returns {gates: [{id, label, required, pass, actual, threshold, reason}], passed, blocked}.
+    `passed` means every required gate passes. `blocked` is True when no rules exist
+    for the requested transition (i.e. the transition is invalid/unsupported)."""
+    rules = PROMOTION_GATES.get(transition)
+    if rules is None:
+        return {"gates": [], "passed": False, "blocked": True,
+                "reason": f"Transition {transition} is not supported"}
+
+    bt = metrics["backtest"]; lv = metrics["live"]
+    gates = []
+
+    def add(gid, label, ok, actual, threshold, required=True, hint=None):
+        gates.append({
+            "id": gid, "label": label, "required": required,
+            "pass": bool(ok), "actual": actual, "threshold": threshold,
+            "reason": hint if not ok else None,
+        })
+
+    # current mode must match the source of the transition
+    src = transition.split("->")[0]
+    add("current_mode", f"Currently in {src}", current_mode == src,
+        current_mode, src,
+        hint=f"Strategy is in {current_mode}, expected {src}")
+
+    if transition == "SIMULATION->PAPER_TRADING":
+        add("bt_trades", f"Backtest trades ≥ {rules['min_backtest_trades']}",
+            (bt["total_trades"] or 0) >= rules["min_backtest_trades"],
+            bt["total_trades"], rules["min_backtest_trades"],
+            hint="Need more backtest trades for statistical confidence")
+        add("bt_win_rate", f"Backtest WR ≥ {rules['min_backtest_win_rate']*100:.0f}%",
+            (bt["win_rate"] or 0) >= rules["min_backtest_win_rate"],
+            round((bt["win_rate"] or 0) * 100, 1), rules["min_backtest_win_rate"] * 100,
+            hint="Backtest win rate below threshold")
+        add("bt_pf", f"Backtest PF ≥ {rules['min_backtest_pf']:.2f}",
+            (bt["profit_factor"] or 0) >= rules["min_backtest_pf"],
+            bt["profit_factor"], rules["min_backtest_pf"],
+            hint="Profit factor below threshold")
+        add("bt_sharpe", f"Backtest Sharpe ≥ {rules['min_backtest_sharpe']:.2f}",
+            (bt["sharpe"] or 0) >= rules["min_backtest_sharpe"],
+            bt["sharpe"], rules["min_backtest_sharpe"],
+            hint="Sharpe below threshold")
+        add("bt_dd", f"Max DD ≥ {rules['max_drawdown_pct']:.0f}%",
+            (bt["max_drawdown"] if bt["max_drawdown"] is not None else 0) >= rules["max_drawdown_pct"],
+            bt["max_drawdown"], rules["max_drawdown_pct"],
+            hint="Drawdown exceeds limit")
+
+    elif transition == "PAPER_TRADING->LIVE_TRADING":
+        add("live_trades", f"Live trades ≥ {rules['min_live_trades']}",
+            lv["total_trades"] >= rules["min_live_trades"],
+            lv["total_trades"], rules["min_live_trades"],
+            hint="Insufficient paper trades; let it run longer")
+        add("live_days", f"Live days ≥ {rules['min_live_days']}",
+            lv["days_active"] >= rules["min_live_days"],
+            lv["days_active"], rules["min_live_days"],
+            hint="Strategy needs more paper-trading runtime")
+        add("live_pf", f"Live PF ≥ {rules['min_live_pf']:.2f}",
+            (lv["profit_factor"] or 0) >= rules["min_live_pf"],
+            lv["profit_factor"], rules["min_live_pf"],
+            hint="Live profit factor below threshold")
+        # live WR vs backtest WR ratio
+        if bt["win_rate"] and lv["win_rate"] is not None:
+            ratio = lv["win_rate"] / bt["win_rate"] if bt["win_rate"] > 0 else 0
+            add("live_vs_bt_wr",
+                f"Live WR ≥ {rules['min_live_vs_bt_wr_ratio']*100:.0f}% of BT WR",
+                ratio >= rules["min_live_vs_bt_wr_ratio"],
+                round(ratio, 3), rules["min_live_vs_bt_wr_ratio"],
+                hint="Live performance diverging from backtest")
+        else:
+            add("live_vs_bt_wr",
+                f"Live WR ≥ {rules['min_live_vs_bt_wr_ratio']*100:.0f}% of BT WR",
+                False, None, rules["min_live_vs_bt_wr_ratio"],
+                hint="Missing backtest or live win rate")
+
+    # Demotion paths: no extra gates beyond current_mode check
+    required = [g for g in gates if g["required"]]
+    passed = all(g["pass"] for g in required)
+    return {"gates": gates, "passed": passed, "blocked": False, "reason": None}
+
+
+def _audit(db: Session, event_type: str, strategy_id: str, payload: dict):
+    """Best-effort write to gold.audit_events. If table is missing, log only."""
+    try:
+        db.execute(text("""
+            INSERT INTO gold.audit_events (event_type, strategy_id, payload, created_at)
+            VALUES (:t, :sid, CAST(:p AS jsonb), NOW())
+        """), {"t": event_type, "sid": strategy_id, "p": json.dumps(payload)})
+        db.commit()
+    except (ProgrammingError, OperationalError) as e:
+        db.rollback()
+        logger.info(f"[AUDIT-FALLBACK] {event_type} {strategy_id}: {payload} ({e.orig})")
+    except Exception as e:
+        db.rollback()
+        logger.info(f"[AUDIT-FALLBACK] {event_type} {strategy_id}: {payload} ({e})")
+
+
+@app.post("/api/strategies/{strategy_id}/promote/check")
+def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Evaluate promotion gates for a target mode without making changes."""
+    target = (payload or {}).get("target_mode")
+    if target not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"target_mode must be one of {sorted(VALID_MODES)}")
+
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    current_mode = strat.execution_mode or "SIMULATION"
+    if current_mode == target:
+        return {"strategy_id": strategy_id, "current_mode": current_mode, "target_mode": target,
+                "passed": True, "blocked": False, "gates": [],
+                "reason": "Already in target mode"}
+
+    transition = f"{current_mode}->{target}"
+    metrics = _gather_promotion_metrics(db, strategy_id)
+    eval_result = _evaluate_gates(transition, metrics, current_mode)
+    is_promotion = (current_mode == "SIMULATION" and target in ("PAPER_TRADING", "LIVE_TRADING")) \
+                or (current_mode == "PAPER_TRADING" and target == "LIVE_TRADING")
+    requires_phrase = (target == "LIVE_TRADING" and is_promotion)
+
+    return {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "current_mode": current_mode,
+        "target_mode": target,
+        "transition": transition,
+        "is_promotion": is_promotion,
+        "requires_confirmation_phrase": requires_phrase,
+        "confirmation_phrase": "PROMOTE TO LIVE" if requires_phrase else None,
+        "metrics": metrics,
+        **eval_result,
+    }
+
+
+@app.post("/api/strategies/{strategy_id}/promote")
+def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Run gate checks then promote/demote a strategy. LIVE requires confirmation phrase."""
+    target = (payload or {}).get("target_mode")
+    if target not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"target_mode must be one of {sorted(VALID_MODES)}")
+
+    override = bool((payload or {}).get("override_gates", False))
+    confirm  = (payload or {}).get("confirmation_phrase", "")
+
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    current_mode = strat.execution_mode or "SIMULATION"
+    if current_mode == target:
+        return {"success": True, "no_op": True, "current_mode": current_mode,
+                "message": f"Strategy already in {target}"}
+
+    transition = f"{current_mode}->{target}"
+    is_promotion = (current_mode == "SIMULATION" and target in ("PAPER_TRADING", "LIVE_TRADING")) \
+                or (current_mode == "PAPER_TRADING" and target == "LIVE_TRADING")
+
+    # LIVE requires a typed confirmation phrase regardless of override
+    if target == "LIVE_TRADING" and is_promotion and confirm != "PROMOTE TO LIVE":
+        raise HTTPException(status_code=400,
+            detail="LIVE promotion requires confirmation_phrase = 'PROMOTE TO LIVE'")
+
+    metrics = _gather_promotion_metrics(db, strategy_id)
+    eval_result = _evaluate_gates(transition, metrics, current_mode)
+
+    if eval_result["blocked"]:
+        raise HTTPException(status_code=400, detail=eval_result["reason"] or "Invalid transition")
+
+    if is_promotion and not eval_result["passed"] and not override:
+        return {
+            "success": False,
+            "current_mode": current_mode,
+            "target_mode": target,
+            "passed": False,
+            "gates": eval_result["gates"],
+            "message": "Promotion blocked by gates. Pass override_gates=true to force (audited).",
+        }
+
+    # Apply mode change
+    db.execute(text("""
+        UPDATE gold.strategy_definitions
+        SET execution_mode = :mode, updated_at = NOW()
+        WHERE strategy_id = :sid
+    """), {"sid": strategy_id, "mode": target})
+    db.commit()
+
+    _audit(db, "strategy.mode_change", strategy_id, {
+        "from": current_mode, "to": target,
+        "is_promotion": is_promotion,
+        "gates_passed": eval_result["passed"],
+        "override_gates": override,
+        "metrics": metrics,
+    })
+
+    return {
+        "success": True,
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "previous_mode": current_mode,
+        "current_mode": target,
+        "is_promotion": is_promotion,
+        "gates_passed": eval_result["passed"],
+        "override_gates": override,
+        "gates": eval_result["gates"],
+        "message": f"Strategy {strategy_id} → {target}",
+    }
+
+
 @app.post("/api/strategies/{strategy_id:path}/mode")
 def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     """Set execution mode: SIMULATION, PAPER_TRADING, or LIVE_TRADING"""

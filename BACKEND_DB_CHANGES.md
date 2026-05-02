@@ -380,6 +380,46 @@ The DE agent should also:
 
 ---
 
+## 6.1. `gold.audit_events` 🟡
+
+**Used by:** `POST /api/strategies/{id}/promote` and any future write endpoint that mutates platform state (mode changes, capital allocation edits, kill-switch invocations, override-gate overrides).
+
+**Status:** **MISSING** — platform writes to it on mode promotion/demotion. If the table doesn't exist, the platform falls back to a Python `logger.info` line so the operation still succeeds, but the audit history is lost across restarts.
+
+**DDL:**
+
+```sql
+CREATE TABLE IF NOT EXISTS gold.audit_events (
+    id           BIGSERIAL PRIMARY KEY,
+    event_type   VARCHAR(64) NOT NULL,    -- e.g. 'strategy.mode_change', 'kill_switch.fire'
+    strategy_id  VARCHAR(32),             -- nullable for global events
+    actor        VARCHAR(64),             -- user/agent (NULL for system)
+    payload      JSONB NOT NULL,          -- structured event details
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS audit_events_strategy_idx  ON gold.audit_events (strategy_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_events_type_idx      ON gold.audit_events (event_type, created_at DESC);
+ALTER TABLE gold.audit_events OWNER TO openclaw_user;
+```
+
+**Sample payload from `strategy.mode_change`:**
+
+```json
+{
+  "from": "PAPER_TRADING",
+  "to": "LIVE_TRADING",
+  "is_promotion": true,
+  "gates_passed": true,
+  "override_gates": false,
+  "metrics": { "backtest": {...}, "live": {...} }
+}
+```
+
+**Retention:** No platform-side cleanup. Recommend DE keep ≥ 365 days for compliance/post-mortems, archive older to cold storage.
+
+---
+
 ## 7. Verification checklist
 
 After DE applies the changes, run these from `psql`:
