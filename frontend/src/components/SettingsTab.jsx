@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
+import { AuditLog } from './AuditLog';
 
 // Enhanced Settings Tab with Configuration Management
 export const SettingsTab = () => {
@@ -112,6 +113,7 @@ export const SettingsTab = () => {
     { id: 'trading', label: '💰 Trading Config', icon: '💰' },
     { id: 'sync', label: '🔄 Data Sync', icon: '🔄' },
     { id: 'data', label: '📊 Data Sources', icon: '📊' },
+    { id: 'audit', label: '🛡️ Audit Log', icon: '🛡️' },
     { id: 'display', label: '🎨 Display', icon: '🎨' },
   ];
 
@@ -555,6 +557,13 @@ export const SettingsTab = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* AUDIT LOG */}
+      {activeSection === 'audit' && (
+        <div className="space-y-4">
+          <AuditLog />
         </div>
       )}
 

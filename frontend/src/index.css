@@ -1,14 +1,40 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
+  /* Brand */
   --primary: #3b82f6;
   --primary-glow: rgba(59, 130, 246, 0.3);
   --secondary: #10b981;
   --accent: #f59e0b;
+
+  /* Surfaces */
   --bg-dark: #05070a;
+  --bg-surface-1: #0a0d12;
+  --bg-surface-2: rgba(13, 17, 28, 0.65);
   --bg-card: rgba(13, 17, 28, 0.5);
   --border-glass: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.10);
+
+  /* Quant signal colors */
+  --signal-buy: #10b981;
+  --signal-sell: #f43f5e;
+  --signal-hold: #64748b;
+  --signal-warning: #f59e0b;
+
+  /* Density tokens (quant researcher mode) */
+  --qr-row-h: 28px;
+  --qr-row-h-compact: 22px;
+  --qr-pad-x: 12px;
+  --qr-pad-x-compact: 8px;
+
+  /* Typography scale (smaller defaults, dense) */
+  --fs-micro: 9px;
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-base: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
 }
 
 * {
@@ -27,6 +53,8 @@ body {
   min-height: 100%;
   -webkit-font-smoothing: antialiased;
   font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 13px;
+  font-feature-settings: "tnum" 1, "ss01" 1;
   overflow-x: hidden;
   /* Fix for mobile viewport with dynamic toolbars */
   height: 100vh;
@@ -38,7 +66,129 @@ body {
 }
 
 .font-outfit { font-family: 'Outfit', sans-serif; }
-.font-mono { font-family: 'JetBrains Mono', monospace; }
+.font-mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: "tnum" 1, "zero" 1; }
+
+/* ===== Quant-researcher density utilities ===== */
+@layer utilities {
+  /* Numeric column - aligned right, monospace, tabular */
+  .qr-num {
+    @apply font-mono text-right tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Label - tiny uppercase, faded */
+  .qr-label {
+    @apply text-[9px] uppercase tracking-[0.08em] text-slate-500 font-semibold;
+  }
+
+  /* Value text */
+  .qr-val { @apply text-[12px] text-slate-200 font-semibold; }
+  .qr-val-strong { @apply text-[13px] text-white font-bold; }
+
+  /* Dense table row */
+  .qr-row {
+    height: var(--qr-row-h);
+    @apply text-[11px];
+  }
+  .qr-row-compact {
+    height: var(--qr-row-h-compact);
+    @apply text-[10px];
+  }
+
+  /* Surface */
+  .qr-surface {
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-glass);
+    @apply rounded-lg;
+  }
+  .qr-surface-strong {
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-strong);
+    @apply rounded-lg;
+  }
+
+  /* Divider */
+  .qr-divider { @apply border-t border-white/[0.06]; }
+  .qr-divider-v { @apply border-l border-white/[0.06]; }
+
+  /* Status dots */
+  .qr-dot {
+    @apply inline-block w-1.5 h-1.5 rounded-full;
+  }
+  .qr-dot-live   { background: var(--signal-buy);    box-shadow: 0 0 6px var(--signal-buy); }
+  .qr-dot-stale  { background: var(--signal-warning);}
+  .qr-dot-down   { background: var(--signal-sell);   }
+  .qr-dot-idle   { background: var(--signal-hold);   }
+
+  /* P&L semantic colors */
+  .qr-pnl-pos { color: #34d399; }
+  .qr-pnl-neg { color: #fb7185; }
+  .qr-pnl-nul { color: #64748b; }
+
+  /* Hover row (table) */
+  .qr-tr-hover { @apply transition-colors hover:bg-white/[0.025]; }
+
+  /* Sticky table header */
+  .qr-th-sticky {
+    @apply sticky top-0 z-10 bg-[#0a0d12] backdrop-blur;
+  }
+
+  /* Quant pill: chips for badges */
+  .qr-chip {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider;
+    line-height: 1.2;
+  }
+  .qr-chip-emerald {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25;
+    line-height: 1.2;
+  }
+  .qr-chip-rose {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/25;
+    line-height: 1.2;
+  }
+  .qr-chip-blue {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/25;
+    line-height: 1.2;
+  }
+  .qr-chip-amber {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/25;
+    line-height: 1.2;
+  }
+  .qr-chip-violet {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/25;
+    line-height: 1.2;
+  }
+  .qr-chip-slate {
+    @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-slate-700/35 text-slate-300 ring-1 ring-slate-500/20;
+    line-height: 1.2;
+  }
+
+  /* Compact button */
+  .qr-btn {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-colors;
+  }
+  .qr-btn-primary  {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-colors bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/25 hover:bg-blue-500/25;
+  }
+  .qr-btn-ghost    {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-colors text-slate-400 hover:text-white hover:bg-white/[0.05];
+  }
+  .qr-btn-danger   {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-colors bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/25 hover:bg-rose-500/25;
+  }
+
+  /* Keyboard shortcut chip */
+  .qr-kbd {
+    @apply inline-flex items-center justify-center px-1.5 py-px rounded font-mono text-[9px] text-slate-400 bg-slate-800/80 border border-white/5;
+    line-height: 1.4;
+  }
+
+  /* Sparkline container */
+  .qr-spark {
+    @apply inline-flex items-end h-3 gap-px;
+  }
+}
 
 .glass {
   background: var(--bg-card);
@@ -81,8 +231,25 @@ body {
   50% { opacity: 0.7; transform: scale(0.98); }
 }
 
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 .animate-pulse-soft {
   animation: pulse-soft 4s infinite ease-in-out;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s infinite ease-in-out;
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -103,13 +270,13 @@ body {
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
   .safe-left { padding-left: env(safe-area-inset-left); }
   .safe-right { padding-right: env(safe-area-inset-right); }
-  
+
   /* Touch-friendly tap targets */
   .touch-target {
     min-height: 44px;
     min-width: 44px;
   }
-  
+
   /* Mobile card layout for tables */
   .mobile-card {
     @apply block w-full;

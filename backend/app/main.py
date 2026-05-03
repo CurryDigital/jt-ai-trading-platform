@@ -6,8 +6,9 @@ Data ingestion/refresh is handled by the DE agent.
 """
 import datetime
 import json
+import os
 import time
-from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException
+from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -49,6 +50,11 @@ from app.services.ib_service import ib_quant_service
 from app.services.ib_web_service import ib_web_service
 from app.services.strategy_manager import strategy_manager
 from app.services.jt_strategy_executor import get_executor
+from app.services.event_bus import event_bus
+from app.auth import (
+    AUTH_ENABLED, JTCML_USER, JTCML_PASSWORD,
+    create_token, verify_token, is_public_path, TOKEN_TTL,
+)
 
 # JT Strategy Executor - initialized lazily
 jt_strategy_executor = None
@@ -121,6 +127,69 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Data refresh schedules are managed by DE agent, not Platform
 # See shared/references/inter-agent-protocol.md for data contract workflow
 
+# ---------------------------------------------------------------------------
+# WebSocket — real-time event stream
+# ---------------------------------------------------------------------------
+@app.websocket("/ws/events")
+async def websocket_events(ws: WebSocket):
+    await ws.accept()
+    logger.info(f"WS client connected ({event_bus.subscriber_count + 1} total)")
+    try:
+        async for event in event_bus.subscribe():
+            await ws.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug(f"WS client error: {e}")
+    finally:
+        logger.info(f"WS client disconnected ({event_bus.subscriber_count} remaining)")
+
+# ---------------------------------------------------------------------------
+# Auth — opt-in via JTCML_AUTH=1 env var
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Verify bearer token on API routes when auth is enabled."""
+    if AUTH_ENABLED and not is_public_path(request.url.path):
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer ") or not verify_token(auth[7:]):
+            return JSONResponse(status_code=401, content={"error": "unauthorized", "message": "Valid token required"})
+    return await call_next(request)
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict):
+    username = (payload or {}).get("username", "")
+    password = (payload or {}).get("password", "")
+    if username != JTCML_USER or password != JTCML_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_token(sub=username)
+    return {"token": token, "token_type": "bearer", "expires_in": TOKEN_TTL}
+
+
+@app.post("/api/auth/refresh")
+def auth_refresh(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No token")
+    old = verify_token(auth[7:])
+    if not old:
+        raise HTTPException(status_code=401, detail="Token expired or invalid — re-login required")
+    token = create_token(sub=old["sub"])
+    return {"token": token, "token_type": "bearer", "expires_in": TOKEN_TTL}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return {"authenticated": False, "auth_enabled": AUTH_ENABLED}
+    payload = verify_token(auth[7:])
+    if not payload:
+        return {"authenticated": False, "auth_enabled": AUTH_ENABLED}
+    return {"authenticated": True, "auth_enabled": AUTH_ENABLED, "user": payload.get("sub")}
+
+
 @app.middleware("http")
 async def ibkr_session_middleware(request: Request, call_next):
     """
@@ -140,6 +209,12 @@ async def startup_event():
     # DISABLED: Scheduler initialization - Platform is READ-ONLY
     # Data schedules are managed by DE agent
     print("✅ Backend started - READ-ONLY mode (consumption views only)")
+
+    # Auto-demote risk scanner — runs every JTCML_DEMOTE_SCAN_S seconds (default 300)
+    # Disable with JTCML_DEMOTE_SCAN_S=0
+    if DEMOTE_SCAN_INTERVAL_S > 0:
+        asyncio.create_task(_demote_scanner_loop())
+        print(f"✅ Auto-demote scanner started (interval: {DEMOTE_SCAN_INTERVAL_S}s)")
 
 async def run_deep_sell_analysis(db: Session):
     """
@@ -196,6 +271,174 @@ def get_db():
         raise
     finally:
         db.close()
+
+# ---------------------------------------------------------------------------
+# System Health — workspace-ribbon summary (DB latency, status, asset counts)
+# Used by the frontend top ribbon and Command Center
+# ---------------------------------------------------------------------------
+@app.get("/api/audit/events")
+def get_audit_events(limit: int = 100, event_type: str = None, strategy_id: str = None, db: Session = Depends(get_db)):
+    """Query the audit trail. Returns newest-first."""
+    sql = "SELECT id, event_type, strategy_id, actor, payload, created_at FROM gold.audit_events WHERE 1=1"
+    params = {}
+    if event_type:
+        sql += " AND event_type = :et"
+        params["et"] = event_type
+    if strategy_id:
+        sql += " AND strategy_id = :sid"
+        params["sid"] = strategy_id
+    sql += " ORDER BY created_at DESC LIMIT :lim"
+    params["lim"] = min(limit, 500)
+
+    rows = safe_query(db, sql, params, label="audit_events")
+    events = []
+    for r in rows:
+        payload = r.payload
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                pass
+        events.append({
+            "id": r.id,
+            "event_type": r.event_type,
+            "strategy_id": r.strategy_id,
+            "actor": r.actor,
+            "payload": payload,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return {"events": events, "count": len(events)}
+
+
+@app.get("/api/operations/live")
+def get_live_operations(db: Session = Depends(get_db)):
+    """Live ops snapshot for the Command Center: active orders, today's fills,
+    active signals. Single round-trip; safe_query everywhere."""
+
+    # 1. Active / working orders (non-terminal status in trade_executions)
+    active_orders = safe_query(db, """
+        SELECT id, strategy_id, ticker, side, quantity, price, status, order_type,
+               execution_mode, executed_at, ibkr_order_id
+        FROM gold.trade_executions
+        WHERE status IN ('PENDING', 'WORKING', 'SUBMITTED', 'PARTIAL')
+        ORDER BY executed_at DESC
+        LIMIT 50
+    """, label="ops_active_orders")
+
+    # 2. Today's fills (UTC day; FE renders local time)
+    todays_fills = safe_query(db, """
+        SELECT id, strategy_id, ticker, side, quantity, price, pnl, execution_mode, executed_at
+        FROM gold.trade_executions
+        WHERE status NOT IN ('PENDING', 'WORKING', 'SUBMITTED', 'PARTIAL')
+          AND executed_at >= CURRENT_DATE
+        ORDER BY executed_at DESC
+        LIMIT 100
+    """, label="ops_todays_fills")
+
+    # 3. Active signals (BUY/SELL only)
+    signals = safe_query(db, """
+        SELECT strategy_id, ticker, signal, signal_strength, confidence_score,
+               current_price, generated_at
+        FROM consumption.Strategies_Signals_Current
+        WHERE signal IN ('BUY', 'SELL')
+        ORDER BY confidence_score DESC NULLS LAST
+        LIMIT 30
+    """, label="ops_signals")
+
+    # 4. Aggregate today's P&L from fills
+    today_pnl = sum(float(f.pnl or 0) for f in todays_fills if getattr(f, "pnl", None) is not None)
+    today_winners = sum(1 for f in todays_fills if (f.pnl or 0) > 0)
+    today_losers  = sum(1 for f in todays_fills if (f.pnl or 0) < 0)
+
+    return {
+        "active_orders": [{
+            "id": r.id, "strategy_id": r.strategy_id, "ticker": r.ticker,
+            "side": r.side, "quantity": float(r.quantity) if r.quantity is not None else None,
+            "price": float(r.price) if r.price is not None else None,
+            "status": r.status, "order_type": r.order_type,
+            "execution_mode": r.execution_mode, "ibkr_order_id": r.ibkr_order_id,
+            "submitted_at": r.executed_at.isoformat() if r.executed_at else None,
+        } for r in active_orders],
+        "todays_fills": [{
+            "id": r.id, "strategy_id": r.strategy_id, "ticker": r.ticker,
+            "side": r.side, "quantity": float(r.quantity) if r.quantity is not None else None,
+            "price": float(r.price) if r.price is not None else None,
+            "pnl": float(r.pnl) if r.pnl is not None else None,
+            "execution_mode": r.execution_mode,
+            "filled_at": r.executed_at.isoformat() if r.executed_at else None,
+        } for r in todays_fills],
+        "signals": [{
+            "strategy_id": s.strategy_id, "ticker": s.ticker, "signal": s.signal,
+            "strength": float(s.signal_strength) if s.signal_strength is not None else None,
+            "confidence": float(s.confidence_score) if s.confidence_score is not None else None,
+            "price": float(s.current_price) if s.current_price is not None else None,
+            "ts": s.generated_at.isoformat() if getattr(s, "generated_at", None) else None,
+        } for s in signals],
+        "summary": {
+            "active_order_count": len(active_orders),
+            "todays_fill_count": len(todays_fills),
+            "active_signal_count": len(signals),
+            "today_pnl": round(today_pnl, 2),
+            "today_winners": today_winners,
+            "today_losers": today_losers,
+        },
+    }
+
+
+@app.get("/api/system/health")
+def system_health(db: Session = Depends(get_db)):
+    """Return a small, fast health/status summary for the workspace ribbon.
+
+    Latency-sensitive: avoid heavy joins. Each sub-query is wrapped in
+    safe_query so a missing table degrades gracefully.
+    """
+    started = time.perf_counter()
+    status = "healthy"
+
+    # Quick DB ping
+    try:
+        db.execute(text("SELECT 1")).scalar()
+    except Exception as e:
+        logger.error(f"DB ping failed: {e}")
+        status = "degraded"
+
+    # Lightweight counts (cached on the SQL side via index)
+    counts = {}
+    try:
+        rows = safe_query(db, """
+            SELECT
+                (SELECT COUNT(*) FROM gold.strategy_definitions WHERE jt_ready = TRUE) AS strategies,
+                (SELECT COUNT(*) FROM gold.paper_strategies WHERE status = 'ACTIVE') AS deployed,
+                (SELECT COUNT(*) FROM gold.asset_registry WHERE is_active = TRUE) AS assets
+        """, label="health_counts")
+        if rows:
+            r = rows[0]
+            counts = {
+                "strategies": int(r.strategies or 0),
+                "deployed":   int(r.deployed or 0),
+                "assets":     int(r.assets or 0),
+            }
+    except Exception:
+        pass
+
+    # Optional pipeline summary
+    try:
+        rs = safe_query(db, "SELECT priority, COUNT(*) c FROM gold.strategy_registry GROUP BY priority", label="health_pipeline")
+        pipeline = {row.priority.lower(): int(row.c) for row in rs} if rs else {}
+    except Exception:
+        pipeline = {}
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
+    return {
+        "status": status,
+        "latency_ms": latency_ms,
+        "ts": datetime.datetime.utcnow().isoformat() + "Z",
+        "counts": counts,
+        "pipeline": pipeline,
+        "version": "v1",
+    }
+
 
 # --- POSITION & EXECUTION TRACKING ---
 
@@ -3588,8 +3831,68 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
 
     db.commit()
 
+    event_bus.publish_sync("global_mode_change", {"mode": mode})
+
     # Get updated state
     return get_global_execution_mode(db)
+
+
+@app.post("/api/execution/halt")
+def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
+    """Emergency kill switch — demote ALL live strategies to PAPER and set
+    global mode to PAPER_TRADING.  Keeps PAPER/SIM strategies running so the
+    quant can still observe signals, but no real-money orders fire.
+
+    Requires confirmation_phrase = "HALT LIVE" in the payload.
+    """
+    phrase = (payload or {}).get("confirmation_phrase", "")
+    if phrase != "HALT LIVE":
+        raise HTTPException(status_code=400,
+            detail="Kill switch requires confirmation_phrase = 'HALT LIVE'")
+
+    # 1. Count and demote LIVE strategies
+    affected = db.execute(text("""
+        UPDATE gold.strategy_definitions
+        SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
+        WHERE execution_mode = 'LIVE_TRADING'
+        RETURNING strategy_id
+    """)).fetchall()
+
+    affected_ids = [r.strategy_id for r in affected]
+
+    # 2. Set global mode to PAPER
+    db.execute(text("""
+        INSERT INTO gold.platform_settings (key, value, updated_at)
+        VALUES ('global_execution_mode', 'PAPER_TRADING', NOW())
+        ON CONFLICT (key) DO UPDATE SET
+            value = 'PAPER_TRADING',
+            updated_at = NOW()
+    """))
+    db.commit()
+
+    # 3. Audit
+    _audit(db, "kill_switch.fire", None, {
+        "affected_strategies": affected_ids,
+        "count": len(affected_ids),
+        "previous_global_mode": "LIVE_TRADING",
+        "new_global_mode": "PAPER_TRADING",
+    })
+
+    logger.warning(f"KILL SWITCH activated — {len(affected_ids)} strategies demoted to PAPER")
+
+    event_bus.publish_sync("kill_switch", {
+        "halted": len(affected_ids),
+        "strategy_ids": affected_ids,
+        "global_mode": "PAPER_TRADING",
+    })
+
+    return {
+        "success": True,
+        "halted": len(affected_ids),
+        "strategy_ids": affected_ids,
+        "global_mode": "PAPER_TRADING",
+        "message": f"Kill switch activated. {len(affected_ids)} LIVE strategies demoted to PAPER_TRADING.",
+    }
 
 
 @app.post("/api/ib/place-order")
@@ -4967,6 +5270,325 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
     return {"strategies": strategies, "count": len(strategies)}
 
 
+@app.get("/api/strategies/compare")
+def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
+    """Compare two or more strategies side-by-side.
+
+    Returns a slim payload (no per-trade rows) suitable for the comparator
+    UI: header metadata, BT + live metric snapshots, equity curve, monthly
+    returns. `ids` is a comma-separated list, max 6 strategies.
+    """
+    strategy_ids = [s.strip() for s in ids.split(",") if s.strip()]
+    if not strategy_ids:
+        raise HTTPException(status_code=400, detail="ids query param required (comma-separated)")
+    if len(strategy_ids) > 6:
+        raise HTTPException(status_code=400, detail="Compare up to 6 strategies at a time")
+
+    results = []
+    for sid in strategy_ids:
+        registry = safe_query_one(db, """
+            SELECT strategy_id, strategy_name, version, status, priority
+            FROM gold.strategy_registry WHERE strategy_id = :sid
+        """, {"sid": sid}, label="cmp_registry")
+        definitions = safe_query_one(db, """
+            SELECT strategy_id, name, asset_class, direction, execution_mode
+            FROM gold.strategy_definitions WHERE strategy_id = :sid
+        """, {"sid": sid}, label="cmp_definitions")
+
+        if not registry and not definitions:
+            results.append({"strategy_id": sid, "found": False})
+            continue
+
+        bt = safe_query_one(db, """
+            SELECT AVG(win_rate) AS win_rate,
+                   AVG(profit_factor) AS profit_factor,
+                   AVG(sharpe_ratio) AS sharpe,
+                   AVG(max_drawdown_pct) AS max_drawdown,
+                   SUM(total_trades) AS total_trades,
+                   AVG(total_return_pct) AS total_return
+            FROM consumption.Strategies_Backtest_Results
+            WHERE strategy_id = :sid
+        """, {"sid": sid}, label="cmp_bt")
+
+        live = safe_query_one(db, """
+            SELECT COUNT(*) AS total_trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS winners,
+                   SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END) AS gross_win,
+                   SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END) AS gross_loss,
+                   COALESCE(SUM(pnl), 0) AS total_pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+        """, {"sid": sid}, label="cmp_live")
+
+        equity_rows = safe_query(db, """
+            SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND executed_at > NOW() - (:days || ' days')::INTERVAL
+            GROUP BY DATE(executed_at) ORDER BY d ASC
+        """, {"sid": sid, "days": str(days)}, label="cmp_equity")
+
+        cum = 0.0
+        equity_curve = []
+        for r in equity_rows:
+            cum += float(r.day_pnl or 0)
+            equity_curve.append({"date": r.d.isoformat(), "cum_pnl": round(cum, 2)})
+
+        monthly = safe_query(db, """
+            SELECT year, month, return_pct
+            FROM consumption.Performance_Monthly_Returns
+            WHERE strategy_id = :sid
+            ORDER BY year DESC, month DESC LIMIT 12
+        """, {"sid": sid}, label="cmp_monthly")
+
+        live_total = int(live.total_trades) if live and live.total_trades else 0
+        live_pf = (float(live.gross_win) / float(live.gross_loss)) if (live and live.gross_loss and live.gross_loss > 0) else None
+        live_wr = (float(live.winners) / live_total) if live_total else None
+
+        results.append({
+            "strategy_id": sid,
+            "found": True,
+            "name": (registry.strategy_name if registry else None) or (definitions.name if definitions else sid),
+            "priority": registry.priority if registry else None,
+            "status": (registry.status if registry else None) or (definitions.status if definitions else None),
+            "execution_mode": definitions.execution_mode if definitions else None,
+            "asset_class": definitions.asset_class if definitions else None,
+            "direction": definitions.direction if definitions else None,
+            "metrics": {
+                "backtest": {
+                    "win_rate":      float(bt.win_rate) if bt and bt.win_rate is not None else None,
+                    "profit_factor": float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
+                    "sharpe":        float(bt.sharpe) if bt and bt.sharpe is not None else None,
+                    "max_drawdown":  float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
+                    "total_trades":  int(bt.total_trades) if bt and bt.total_trades is not None else None,
+                    "total_return":  float(bt.total_return) if bt and bt.total_return is not None else None,
+                },
+                "live": {
+                    "total_trades":  live_total,
+                    "win_rate":      round(live_wr, 4) if live_wr is not None else None,
+                    "profit_factor": round(live_pf, 3) if live_pf is not None else None,
+                    "total_pnl":     float(live.total_pnl or 0) if live else 0.0,
+                },
+            },
+            "equity_curve": equity_curve,
+            "monthly_returns": [{"year": int(r.year), "month": int(r.month),
+                                 "return": float(r.return_pct or 0)} for r in monthly],
+        })
+
+    return {"strategies": results, "count": len(results), "window_days": days}
+
+
+# NOTE: this route must be declared BEFORE the catch-all
+# `/api/strategies/{strategy_id:path}` so that `/evaluation` is matched first.
+@app.get("/api/strategies/{strategy_id}/evaluation")
+def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depends(get_db)):
+    """One-shot evaluation payload powering the Strategy Detail page.
+
+    Aggregates: header metadata, backtest metrics, live metrics, monthly returns,
+    equity curve (cumulative live PnL), recent trades, recent signals, and a
+    backtest-vs-live divergence verdict. Resilient to missing consumption views.
+    """
+    # ---- Header / metadata -------------------------------------------------
+    registry = safe_query_one(db, """
+        SELECT strategy_id, strategy_name, version, status, priority,
+               win_rate, entry_logic, exit_logic, target_assets
+        FROM gold.strategy_registry
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_registry")
+
+    definitions = safe_query_one(db, """
+        SELECT strategy_id, name, description, asset_class, direction, time_horizon,
+               sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct,
+               venue, status, signal_logic, exit_logic, execution_mode
+        FROM gold.strategy_definitions
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_definitions")
+
+    if not registry and not definitions:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    name = (registry.strategy_name if registry else None) or (definitions.name if definitions else strategy_id)
+    asset_class = definitions.asset_class if definitions else "STOCK"
+    direction = definitions.direction if definitions else "LONG"
+    universe = []
+    if registry and registry.target_assets:
+        universe = [t.strip() for t in registry.target_assets.split(',') if t.strip()]
+    elif definitions and definitions.universe_tickers:
+        universe = [t.strip() for t in definitions.universe_tickers.split(',') if t.strip()]
+
+    # ---- Backtest metrics --------------------------------------------------
+    bt = safe_query_one(db, """
+        SELECT AVG(win_rate) AS win_rate,
+               AVG(profit_factor) AS profit_factor,
+               AVG(sharpe_ratio) AS sharpe,
+               AVG(max_drawdown_pct) AS max_drawdown,
+               SUM(total_trades) AS total_trades,
+               AVG(total_return_pct) AS total_return
+        FROM consumption.Strategies_Backtest_Results
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_backtest")
+
+    backtest_metrics = {
+        "win_rate": float(bt.win_rate) if bt and bt.win_rate is not None else None,
+        "profit_factor": float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
+        "sharpe": float(bt.sharpe) if bt and bt.sharpe is not None else None,
+        "max_drawdown": float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
+        "total_trades": int(bt.total_trades) if bt and bt.total_trades is not None else None,
+        "total_return": float(bt.total_return) if bt and bt.total_return is not None else None,
+    }
+
+    # Fallback to definitions if no backtest results view
+    if backtest_metrics["win_rate"] is None and definitions and definitions.win_rate is not None:
+        backtest_metrics["win_rate"] = float(definitions.win_rate) / 100
+    if backtest_metrics["sharpe"] is None and definitions and definitions.sharpe_ratio is not None:
+        backtest_metrics["sharpe"] = float(definitions.sharpe_ratio)
+    if backtest_metrics["max_drawdown"] is None and definitions and definitions.max_drawdown is not None:
+        backtest_metrics["max_drawdown"] = float(definitions.max_drawdown)
+
+    # ---- Live metrics (from gold.trade_executions) -------------------------
+    live = safe_query_one(db, """
+        SELECT COUNT(*)                                                AS total_trades,
+               SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
+               SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
+               SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
+               COALESCE(SUM(pnl), 0)                                   AS total_pnl,
+               MAX(executed_at)                                        AS last_trade_at,
+               MIN(executed_at)                                        AS first_trade_at
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+    """, {"sid": strategy_id}, label="eval_live_summary")
+
+    live_metrics = {"total_trades": 0, "win_rate": None, "profit_factor": None,
+                    "total_pnl": 0.0, "last_trade_at": None, "first_trade_at": None}
+    if live and live.total_trades and live.total_trades > 0:
+        wr = (live.winners or 0) / live.total_trades
+        pf = float(live.gross_win) / float(live.gross_loss) if live.gross_loss and live.gross_loss > 0 else None
+        live_metrics = {
+            "total_trades": int(live.total_trades),
+            "win_rate": round(wr, 4),
+            "profit_factor": round(pf, 3) if pf is not None else None,
+            "total_pnl": float(live.total_pnl or 0),
+            "last_trade_at": live.last_trade_at.isoformat() if live.last_trade_at else None,
+            "first_trade_at": live.first_trade_at.isoformat() if live.first_trade_at else None,
+        }
+
+    # ---- Equity curve (cumulative live pnl per day, last `days` days) ------
+    equity_rows = safe_query(db, """
+        SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid
+          AND pnl IS NOT NULL
+          AND executed_at > NOW() - (:days || ' days')::INTERVAL
+        GROUP BY DATE(executed_at)
+        ORDER BY d ASC
+    """, {"sid": strategy_id, "days": str(days)}, label="eval_equity")
+
+    equity_curve = []
+    cum = 0.0
+    for r in equity_rows:
+        cum += float(r.day_pnl or 0)
+        equity_curve.append({"date": r.d.isoformat(), "pnl": float(r.day_pnl or 0), "cum_pnl": round(cum, 2)})
+
+    # ---- Monthly returns ---------------------------------------------------
+    monthly = safe_query(db, """
+        SELECT year, month, return_pct
+        FROM consumption.Performance_Monthly_Returns
+        WHERE strategy_id = :sid
+        ORDER BY year DESC, month DESC LIMIT 24
+    """, {"sid": strategy_id}, label="eval_monthly")
+
+    monthly_returns = [{"year": int(r.year), "month": int(r.month),
+                        "return": float(r.return_pct or 0)} for r in monthly]
+
+    # ---- Recent trades (last 50) ------------------------------------------
+    trades = safe_query(db, """
+        SELECT executed_at, ticker, side, quantity, price, pnl, mode
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid
+        ORDER BY executed_at DESC
+        LIMIT 50
+    """, {"sid": strategy_id}, label="eval_trades")
+
+    recent_trades = [{
+        "ts": t.executed_at.isoformat() if t.executed_at else None,
+        "ticker": t.ticker,
+        "side": t.side,
+        "quantity": float(t.quantity) if t.quantity is not None else None,
+        "price": float(t.price) if t.price is not None else None,
+        "pnl": float(t.pnl) if t.pnl is not None else None,
+        "mode": getattr(t, "mode", None),
+    } for t in trades]
+
+    # ---- Recent signals ----------------------------------------------------
+    signals = safe_query(db, """
+        SELECT ticker, signal, signal_strength, confidence_score, current_price, generated_at
+        FROM consumption.Strategies_Signals_Current
+        WHERE strategy_id = :sid
+        ORDER BY confidence_score DESC NULLS LAST
+        LIMIT 25
+    """, {"sid": strategy_id}, label="eval_signals")
+
+    recent_signals = [{
+        "ticker": s.ticker,
+        "signal": s.signal,
+        "strength": float(s.signal_strength) if s.signal_strength is not None else None,
+        "confidence": float(s.confidence_score) if s.confidence_score is not None else None,
+        "price": float(s.current_price) if s.current_price is not None else None,
+        "ts": s.generated_at.isoformat() if getattr(s, "generated_at", None) else None,
+    } for s in signals]
+
+    # ---- Divergence verdict ------------------------------------------------
+    bt_wr = backtest_metrics["win_rate"]
+    lv_wr = live_metrics["win_rate"]
+    bt_pf = backtest_metrics["profit_factor"]
+    lv_pf = live_metrics["profit_factor"]
+    wr_delta_pp = round((lv_wr - bt_wr) * 100, 2) if (bt_wr is not None and lv_wr is not None) else None
+    pf_delta = round(lv_pf - bt_pf, 3) if (bt_pf is not None and lv_pf is not None) else None
+
+    if live_metrics["total_trades"] < 10:
+        verdict = "insufficient_live_data"
+    elif wr_delta_pp is None:
+        verdict = "no_backtest_baseline"
+    elif wr_delta_pp >= 2 and (pf_delta is None or pf_delta >= 0):
+        verdict = "outperforming"
+    elif wr_delta_pp <= -5 or (pf_delta is not None and pf_delta <= -0.3):
+        verdict = "underperforming"
+    else:
+        verdict = "in_line"
+
+    return {
+        "strategy_id": strategy_id,
+        "name": name,
+        "version": registry.version if registry else None,
+        "status": (registry.status if registry else None) or (definitions.status if definitions else None),
+        "priority": registry.priority if registry else None,
+        "asset_class": asset_class,
+        "direction": direction,
+        "time_horizon": definitions.time_horizon if definitions else None,
+        "execution_mode": definitions.execution_mode if definitions else None,
+        "venue": definitions.venue if definitions else "IBKR",
+        "universe": universe,
+        "universe_count": len(universe),
+        "entry_logic": (registry.entry_logic if registry else None) or (definitions.signal_logic if definitions else None),
+        "exit_logic": (registry.exit_logic if registry else None) or (definitions.exit_logic if definitions else None),
+        "description": definitions.description if definitions else None,
+        "metrics": {
+            "backtest": backtest_metrics,
+            "live": live_metrics,
+        },
+        "divergence": {
+            "win_rate_delta_pp": wr_delta_pp,
+            "profit_factor_delta": pf_delta,
+            "verdict": verdict,
+        },
+        "equity_curve": equity_curve,
+        "monthly_returns": monthly_returns,
+        "recent_trades": recent_trades,
+        "recent_signals": recent_signals,
+        "window_days": days,
+    }
+
+
 @app.get("/api/strategies/{strategy_id:path}")
 def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
     """Get strategy details including signal logic and entry/exit conditions"""
@@ -5029,6 +5651,527 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
 
 
 # --- STRATEGY SCREENER APIs ---
+
+# ---------------------------------------------------------------------------
+# Promotion gates — SIM → PAPER → LIVE
+# ---------------------------------------------------------------------------
+
+PROMOTION_GATES = {
+    # SIM → PAPER: gates must pass against backtest data
+    "SIMULATION->PAPER_TRADING": {
+        "min_backtest_trades":   100,
+        "min_backtest_win_rate": 0.45,
+        "min_backtest_pf":       1.30,
+        "min_backtest_sharpe":   1.00,
+        "max_drawdown_pct":      -25.0,    # not worse than -25%
+    },
+    # PAPER → LIVE: gates must pass against live (paper) data + recency
+    "PAPER_TRADING->LIVE_TRADING": {
+        "min_live_trades":          30,
+        "min_live_days":            14,
+        "min_live_pf":              1.20,
+        "min_live_vs_bt_wr_ratio":  0.85,  # live WR ≥ 85% of BT WR
+        "max_drawdown_pct":         -15.0,
+    },
+    # LIVE → PAPER (demote, always allowed but logged)
+    "LIVE_TRADING->PAPER_TRADING": {},
+    # PAPER → SIM (demote)
+    "PAPER_TRADING->SIMULATION":   {},
+    # LIVE → SIM (full halt)
+    "LIVE_TRADING->SIMULATION":    {},
+}
+
+VALID_MODES = {"SIMULATION", "PAPER_TRADING", "LIVE_TRADING"}
+
+
+def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
+    """Gather backtest + live metrics needed by promotion gates."""
+    bt = safe_query_one(db, """
+        SELECT AVG(win_rate)            AS win_rate,
+               AVG(profit_factor)       AS profit_factor,
+               AVG(sharpe_ratio)        AS sharpe,
+               AVG(max_drawdown_pct)    AS max_drawdown,
+               SUM(total_trades)        AS total_trades
+        FROM consumption.Strategies_Backtest_Results
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="promote_bt")
+
+    live = safe_query_one(db, """
+        SELECT COUNT(*)                                                AS total_trades,
+               SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
+               SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
+               SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
+               COALESCE(MIN(executed_at), NULL)                        AS first_trade_at,
+               COALESCE(MAX(executed_at), NULL)                        AS last_trade_at,
+               COALESCE(SUM(pnl), 0)                                   AS total_pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+    """, {"sid": strategy_id}, label="promote_live")
+
+    bt_metrics = {
+        "win_rate":     float(bt.win_rate) if bt and bt.win_rate is not None else None,
+        "profit_factor":float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
+        "sharpe":       float(bt.sharpe) if bt and bt.sharpe is not None else None,
+        "max_drawdown": float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
+        "total_trades": int(bt.total_trades) if bt and bt.total_trades is not None else 0,
+    }
+    live_total = int(live.total_trades) if live and live.total_trades else 0
+    live_pf = (float(live.gross_win) / float(live.gross_loss)) if (live and live.gross_loss and live.gross_loss > 0) else None
+    live_wr = (float(live.winners) / live_total) if live_total else None
+    live_days = 0
+    if live and live.first_trade_at and live.last_trade_at:
+        live_days = max(0, (live.last_trade_at.date() - live.first_trade_at.date()).days)
+    live_metrics = {
+        "total_trades":  live_total,
+        "win_rate":      live_wr,
+        "profit_factor": live_pf,
+        "days_active":   live_days,
+        "first_trade_at": live.first_trade_at.isoformat() if live and live.first_trade_at else None,
+        "last_trade_at":  live.last_trade_at.isoformat() if live and live.last_trade_at else None,
+    }
+    return {"backtest": bt_metrics, "live": live_metrics}
+
+
+def _evaluate_gates(transition: str, metrics: dict, current_mode: str) -> dict:
+    """Returns {gates: [{id, label, required, pass, actual, threshold, reason}], passed, blocked}.
+    `passed` means every required gate passes. `blocked` is True when no rules exist
+    for the requested transition (i.e. the transition is invalid/unsupported)."""
+    rules = PROMOTION_GATES.get(transition)
+    if rules is None:
+        return {"gates": [], "passed": False, "blocked": True,
+                "reason": f"Transition {transition} is not supported"}
+
+    bt = metrics["backtest"]; lv = metrics["live"]
+    gates = []
+
+    def add(gid, label, ok, actual, threshold, required=True, hint=None):
+        gates.append({
+            "id": gid, "label": label, "required": required,
+            "pass": bool(ok), "actual": actual, "threshold": threshold,
+            "reason": hint if not ok else None,
+        })
+
+    # current mode must match the source of the transition
+    src = transition.split("->")[0]
+    add("current_mode", f"Currently in {src}", current_mode == src,
+        current_mode, src,
+        hint=f"Strategy is in {current_mode}, expected {src}")
+
+    if transition == "SIMULATION->PAPER_TRADING":
+        add("bt_trades", f"Backtest trades ≥ {rules['min_backtest_trades']}",
+            (bt["total_trades"] or 0) >= rules["min_backtest_trades"],
+            bt["total_trades"], rules["min_backtest_trades"],
+            hint="Need more backtest trades for statistical confidence")
+        add("bt_win_rate", f"Backtest WR ≥ {rules['min_backtest_win_rate']*100:.0f}%",
+            (bt["win_rate"] or 0) >= rules["min_backtest_win_rate"],
+            round((bt["win_rate"] or 0) * 100, 1), rules["min_backtest_win_rate"] * 100,
+            hint="Backtest win rate below threshold")
+        add("bt_pf", f"Backtest PF ≥ {rules['min_backtest_pf']:.2f}",
+            (bt["profit_factor"] or 0) >= rules["min_backtest_pf"],
+            bt["profit_factor"], rules["min_backtest_pf"],
+            hint="Profit factor below threshold")
+        add("bt_sharpe", f"Backtest Sharpe ≥ {rules['min_backtest_sharpe']:.2f}",
+            (bt["sharpe"] or 0) >= rules["min_backtest_sharpe"],
+            bt["sharpe"], rules["min_backtest_sharpe"],
+            hint="Sharpe below threshold")
+        add("bt_dd", f"Max DD ≥ {rules['max_drawdown_pct']:.0f}%",
+            (bt["max_drawdown"] if bt["max_drawdown"] is not None else 0) >= rules["max_drawdown_pct"],
+            bt["max_drawdown"], rules["max_drawdown_pct"],
+            hint="Drawdown exceeds limit")
+
+    elif transition == "PAPER_TRADING->LIVE_TRADING":
+        add("live_trades", f"Live trades ≥ {rules['min_live_trades']}",
+            lv["total_trades"] >= rules["min_live_trades"],
+            lv["total_trades"], rules["min_live_trades"],
+            hint="Insufficient paper trades; let it run longer")
+        add("live_days", f"Live days ≥ {rules['min_live_days']}",
+            lv["days_active"] >= rules["min_live_days"],
+            lv["days_active"], rules["min_live_days"],
+            hint="Strategy needs more paper-trading runtime")
+        add("live_pf", f"Live PF ≥ {rules['min_live_pf']:.2f}",
+            (lv["profit_factor"] or 0) >= rules["min_live_pf"],
+            lv["profit_factor"], rules["min_live_pf"],
+            hint="Live profit factor below threshold")
+        # live WR vs backtest WR ratio
+        if bt["win_rate"] and lv["win_rate"] is not None:
+            ratio = lv["win_rate"] / bt["win_rate"] if bt["win_rate"] > 0 else 0
+            add("live_vs_bt_wr",
+                f"Live WR ≥ {rules['min_live_vs_bt_wr_ratio']*100:.0f}% of BT WR",
+                ratio >= rules["min_live_vs_bt_wr_ratio"],
+                round(ratio, 3), rules["min_live_vs_bt_wr_ratio"],
+                hint="Live performance diverging from backtest")
+        else:
+            add("live_vs_bt_wr",
+                f"Live WR ≥ {rules['min_live_vs_bt_wr_ratio']*100:.0f}% of BT WR",
+                False, None, rules["min_live_vs_bt_wr_ratio"],
+                hint="Missing backtest or live win rate")
+
+    # Demotion paths: no extra gates beyond current_mode check
+    required = [g for g in gates if g["required"]]
+    passed = all(g["pass"] for g in required)
+    return {"gates": gates, "passed": passed, "blocked": False, "reason": None}
+
+
+def _audit(db: Session, event_type: str, strategy_id: str, payload: dict):
+    """Best-effort write to gold.audit_events. If table is missing, log only."""
+    try:
+        db.execute(text("""
+            INSERT INTO gold.audit_events (event_type, strategy_id, payload, created_at)
+            VALUES (:t, :sid, CAST(:p AS jsonb), NOW())
+        """), {"t": event_type, "sid": strategy_id, "p": json.dumps(payload)})
+        db.commit()
+    except (ProgrammingError, OperationalError) as e:
+        db.rollback()
+        logger.info(f"[AUDIT-FALLBACK] {event_type} {strategy_id}: {payload} ({e.orig})")
+    except Exception as e:
+        db.rollback()
+        logger.info(f"[AUDIT-FALLBACK] {event_type} {strategy_id}: {payload} ({e})")
+
+
+@app.post("/api/strategies/{strategy_id}/promote/check")
+def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Evaluate promotion gates for a target mode without making changes."""
+    target = (payload or {}).get("target_mode")
+    if target not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"target_mode must be one of {sorted(VALID_MODES)}")
+
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    current_mode = strat.execution_mode or "SIMULATION"
+    if current_mode == target:
+        return {"strategy_id": strategy_id, "current_mode": current_mode, "target_mode": target,
+                "passed": True, "blocked": False, "gates": [],
+                "reason": "Already in target mode"}
+
+    transition = f"{current_mode}->{target}"
+    metrics = _gather_promotion_metrics(db, strategy_id)
+    eval_result = _evaluate_gates(transition, metrics, current_mode)
+    is_promotion = (current_mode == "SIMULATION" and target in ("PAPER_TRADING", "LIVE_TRADING")) \
+                or (current_mode == "PAPER_TRADING" and target == "LIVE_TRADING")
+    requires_phrase = (target == "LIVE_TRADING" and is_promotion)
+
+    return {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "current_mode": current_mode,
+        "target_mode": target,
+        "transition": transition,
+        "is_promotion": is_promotion,
+        "requires_confirmation_phrase": requires_phrase,
+        "confirmation_phrase": "PROMOTE TO LIVE" if requires_phrase else None,
+        "metrics": metrics,
+        **eval_result,
+    }
+
+
+@app.post("/api/strategies/{strategy_id}/promote")
+def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
+    """Run gate checks then promote/demote a strategy. LIVE requires confirmation phrase."""
+    target = (payload or {}).get("target_mode")
+    if target not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"target_mode must be one of {sorted(VALID_MODES)}")
+
+    override = bool((payload or {}).get("override_gates", False))
+    confirm  = (payload or {}).get("confirmation_phrase", "")
+
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    current_mode = strat.execution_mode or "SIMULATION"
+    if current_mode == target:
+        return {"success": True, "no_op": True, "current_mode": current_mode,
+                "message": f"Strategy already in {target}"}
+
+    transition = f"{current_mode}->{target}"
+    is_promotion = (current_mode == "SIMULATION" and target in ("PAPER_TRADING", "LIVE_TRADING")) \
+                or (current_mode == "PAPER_TRADING" and target == "LIVE_TRADING")
+
+    # LIVE requires a typed confirmation phrase regardless of override
+    if target == "LIVE_TRADING" and is_promotion and confirm != "PROMOTE TO LIVE":
+        raise HTTPException(status_code=400,
+            detail="LIVE promotion requires confirmation_phrase = 'PROMOTE TO LIVE'")
+
+    metrics = _gather_promotion_metrics(db, strategy_id)
+    eval_result = _evaluate_gates(transition, metrics, current_mode)
+
+    if eval_result["blocked"]:
+        raise HTTPException(status_code=400, detail=eval_result["reason"] or "Invalid transition")
+
+    if is_promotion and not eval_result["passed"] and not override:
+        return {
+            "success": False,
+            "current_mode": current_mode,
+            "target_mode": target,
+            "passed": False,
+            "gates": eval_result["gates"],
+            "message": "Promotion blocked by gates. Pass override_gates=true to force (audited).",
+        }
+
+    # Apply mode change
+    db.execute(text("""
+        UPDATE gold.strategy_definitions
+        SET execution_mode = :mode, updated_at = NOW()
+        WHERE strategy_id = :sid
+    """), {"sid": strategy_id, "mode": target})
+    db.commit()
+
+    _audit(db, "strategy.mode_change", strategy_id, {
+        "from": current_mode, "to": target,
+        "is_promotion": is_promotion,
+        "gates_passed": eval_result["passed"],
+        "override_gates": override,
+        "metrics": metrics,
+    })
+
+    event_bus.publish_sync("mode_change", {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "from": current_mode,
+        "to": target,
+        "is_promotion": is_promotion,
+    })
+
+    return {
+        "success": True,
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "previous_mode": current_mode,
+        "current_mode": target,
+        "is_promotion": is_promotion,
+        "gates_passed": eval_result["passed"],
+        "override_gates": override,
+        "gates": eval_result["gates"],
+        "message": f"Strategy {strategy_id} → {target}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Auto-demote risk rules — LIVE strategies that breach risk limits get
+# automatically demoted to PAPER. Pairs with the kill switch as the
+# safety counterpart of the promotion gates.
+# ---------------------------------------------------------------------------
+
+DEMOTE_RULES = {
+    "max_drawdown_pct":          -10.0,   # 10% rolling drawdown from peak P&L
+    "max_daily_loss_pct":        -5.0,    # 5% loss in a single trading day
+    "max_consecutive_losses":    5,
+    "min_live_pf":               0.70,    # PF below 0.7 over last 20 trades
+    "min_live_trades_for_pf":    10,      # need at least 10 trades to evaluate PF
+}
+
+
+def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
+    """Evaluate risk rules against live trade history. Returns rule status list."""
+    # Pull recent live trades (limit 50 to stay fast)
+    recent = safe_query(db, """
+        SELECT executed_at, pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+        ORDER BY executed_at DESC
+        LIMIT 50
+    """, {"sid": strategy_id}, label="demote_recent")
+
+    # Pull all-time live cumulative pnl for drawdown calc
+    daily = safe_query(db, """
+        SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+        FROM gold.trade_executions
+        WHERE strategy_id = :sid AND pnl IS NOT NULL
+        GROUP BY DATE(executed_at)
+        ORDER BY d ASC
+    """, {"sid": strategy_id}, label="demote_daily")
+
+    # Pool size to compute pct losses
+    pool = safe_query_one(db, """
+        SELECT assigned_capital
+        FROM gold.strategy_definitions
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="demote_pool")
+    pool_size = float(pool.assigned_capital) if pool and pool.assigned_capital else 100_000.0
+
+    rules = []
+
+    # Rule 1: rolling max drawdown from peak cumulative P&L
+    cum = 0.0
+    peak = 0.0
+    max_dd_pct = 0.0
+    for r in daily:
+        cum += float(r.day_pnl or 0)
+        peak = max(peak, cum)
+        if peak > 0:
+            dd_pct = ((cum - peak) / pool_size) * 100
+            max_dd_pct = min(max_dd_pct, dd_pct)
+    rules.append({
+        "id": "max_drawdown",
+        "label": f"Max DD ≥ {DEMOTE_RULES['max_drawdown_pct']:.1f}%",
+        "actual": round(max_dd_pct, 2),
+        "threshold": DEMOTE_RULES["max_drawdown_pct"],
+        "breach": max_dd_pct < DEMOTE_RULES["max_drawdown_pct"],
+        "reason": "Live drawdown exceeds risk limit",
+    })
+
+    # Rule 2: worst daily loss (% of pool)
+    worst_daily_pct = 0.0
+    if daily:
+        worst_day = min((float(r.day_pnl or 0) for r in daily), default=0)
+        worst_daily_pct = (worst_day / pool_size) * 100
+    rules.append({
+        "id": "max_daily_loss",
+        "label": f"Daily loss ≥ {DEMOTE_RULES['max_daily_loss_pct']:.1f}%",
+        "actual": round(worst_daily_pct, 2),
+        "threshold": DEMOTE_RULES["max_daily_loss_pct"],
+        "breach": worst_daily_pct < DEMOTE_RULES["max_daily_loss_pct"],
+        "reason": "Single-day loss exceeds risk limit",
+    })
+
+    # Rule 3: consecutive losses (most recent streak)
+    streak = 0
+    for r in recent:  # already DESC
+        if (r.pnl or 0) < 0:
+            streak += 1
+        else:
+            break
+    rules.append({
+        "id": "consecutive_losses",
+        "label": f"Consecutive losses ≤ {DEMOTE_RULES['max_consecutive_losses']}",
+        "actual": streak,
+        "threshold": DEMOTE_RULES["max_consecutive_losses"],
+        "breach": streak >= DEMOTE_RULES["max_consecutive_losses"],
+        "reason": f"{streak} losing trades in a row",
+    })
+
+    # Rule 4: live PF over last 20 trades
+    last_n = recent[:20]
+    gross_win = sum(float(r.pnl) for r in last_n if (r.pnl or 0) > 0)
+    gross_loss = sum(-float(r.pnl) for r in last_n if (r.pnl or 0) < 0)
+    pf = (gross_win / gross_loss) if gross_loss > 0 else None
+    eligible = len(last_n) >= DEMOTE_RULES["min_live_trades_for_pf"]
+    rules.append({
+        "id": "min_live_pf",
+        "label": f"Rolling PF ≥ {DEMOTE_RULES['min_live_pf']:.2f} (last 20 trades)",
+        "actual": round(pf, 3) if pf is not None else None,
+        "threshold": DEMOTE_RULES["min_live_pf"],
+        "breach": eligible and pf is not None and pf < DEMOTE_RULES["min_live_pf"],
+        "reason": "Profit factor degraded below threshold",
+    })
+
+    breaches = [r for r in rules if r["breach"]]
+    return {
+        "strategy_id": strategy_id,
+        "rules": rules,
+        "breaches": breaches,
+        "should_demote": len(breaches) > 0,
+        "trades_analyzed": len(recent),
+    }
+
+
+@app.get("/api/strategies/{strategy_id}/risk-status")
+def get_risk_status(strategy_id: str, db: Session = Depends(get_db)):
+    """Return the demote-rule status for a strategy without taking action."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    status = _evaluate_demote_rules(db, strategy_id)
+    return {
+        **status,
+        "name": strat.name,
+        "execution_mode": strat.execution_mode,
+    }
+
+
+def _demote_strategy(db: Session, strategy_id: str, breaches: list, source: str = "auto"):
+    """Demote a LIVE strategy to PAPER. Audits + emits WS event."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat or strat.execution_mode != "LIVE_TRADING":
+        return False
+
+    db.execute(text("""
+        UPDATE gold.strategy_definitions
+        SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
+        WHERE strategy_id = :sid
+    """), {"sid": strategy_id})
+    db.commit()
+
+    _audit(db, "strategy.auto_demote", strategy_id, {
+        "from": "LIVE_TRADING",
+        "to": "PAPER_TRADING",
+        "source": source,
+        "breaches": [{"id": b["id"], "actual": b["actual"], "threshold": b["threshold"]} for b in breaches],
+    })
+
+    event_bus.publish_sync("auto_demote", {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "from": "LIVE_TRADING",
+        "to": "PAPER_TRADING",
+        "breaches": [b["id"] for b in breaches],
+    })
+    logger.warning(f"AUTO-DEMOTE {strategy_id} ({strat.name}) — breaches: {[b['id'] for b in breaches]}")
+    return True
+
+
+# Background scanner — checks every LIVE strategy and demotes breached ones.
+DEMOTE_SCAN_INTERVAL_S = int(os.environ.get("JTCML_DEMOTE_SCAN_S", "300"))
+
+async def _demote_scanner_loop():
+    while True:
+        try:
+            await asyncio.sleep(DEMOTE_SCAN_INTERVAL_S)
+            db = SessionLocal()
+            try:
+                live = db.execute(text("""
+                    SELECT strategy_id FROM gold.strategy_definitions
+                    WHERE execution_mode = 'LIVE_TRADING'
+                """)).fetchall()
+                for row in live:
+                    sid = row.strategy_id
+                    try:
+                        status = _evaluate_demote_rules(db, sid)
+                        if status["should_demote"]:
+                            _demote_strategy(db, sid, status["breaches"], source="auto_scanner")
+                    except Exception as e:
+                        logger.error(f"Demote check failed for {sid}: {e}")
+                        db.rollback()
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Demote scanner loop error: {e}")
+
+
+@app.post("/api/strategies/{strategy_id}/auto-demote-check")
+def force_demote_check(strategy_id: str, db: Session = Depends(get_db)):
+    """Manually trigger an auto-demote check for one strategy (for testing/UI)."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_definitions WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    status = _evaluate_demote_rules(db, strategy_id)
+    demoted = False
+    if status["should_demote"] and strat.execution_mode == "LIVE_TRADING":
+        demoted = _demote_strategy(db, strategy_id, status["breaches"], source="manual_check")
+
+    return {**status, "demoted": demoted, "execution_mode": strat.execution_mode}
+
 
 @app.post("/api/strategies/{strategy_id:path}/mode")
 def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
@@ -5101,6 +6244,11 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
     })
 
     db.commit()
+
+    event_bus.publish_sync("order_placed", {
+        "strategy_id": strategy_id, "ticker": ticker, "side": side,
+        "quantity": quantity, "execution_mode": execution_mode,
+    })
 
     if execution_mode == "SIMULATION":
         # Simulation mode - just update database
