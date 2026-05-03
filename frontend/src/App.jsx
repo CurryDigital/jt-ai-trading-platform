@@ -1,20 +1,28 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, Suspense, lazy } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { MarketsTab } from './components/MarketsTab';
-import { SettingsTab } from './components/SettingsTab';
-import { StrategyLab } from './components/StrategyLab';
-import { ResearchTab } from './components/ResearchTab';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
-import { GoldenStrategies } from './components/GoldenStrategies';
-import { StrategyPerformance } from './components/StrategyPerformance';
-import { AgenticResearch } from './components/AgenticResearch';
-import { StrategyDetail } from './components/StrategyDetail';
-import { StrategyCompare } from './components/StrategyCompare';
 import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
+
+// Lazy-loaded tab components (code-split per route)
+const MarketsTab = lazy(() => import('./components/MarketsTab'));
+const SettingsTab = lazy(() => import('./components/SettingsTab'));
+const StrategyLab = lazy(() => import('./components/StrategyLab'));
+const ResearchTab = lazy(() => import('./components/ResearchTab'));
+const GoldenStrategies = lazy(() => import('./components/GoldenStrategies'));
+const StrategyPerformance = lazy(() => import('./components/StrategyPerformance'));
+const AgenticResearch = lazy(() => import('./components/AgenticResearch'));
+const StrategyDetail = lazy(() => import('./components/StrategyDetail'));
+const StrategyCompare = lazy(() => import('./components/StrategyCompare'));
+
+const TabSpinner = () => (
+  <div className="flex items-center justify-center py-16">
+    <div className="w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+  </div>
+);
 
 // =================================================================
 // Iconography — minimal stroke icons sized for the dense UI (12px)
@@ -518,7 +526,7 @@ const PerformanceTab = ({ data, onSelectStrategy, onCompare }) => {
           </div>
           <button onClick={() => setView('overview')} className="qr-btn-ghost">← Overview</button>
         </div>
-        <StrategyPerformance />
+        <Suspense fallback={<TabSpinner />}><StrategyPerformance /></Suspense>
       </div>
     );
   }
@@ -1062,25 +1070,27 @@ export default function App() {
 
       {/* Main */}
       <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
-        {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} />}
-        {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
-        {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} />}
-        {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
-        {currentTab === 'settings'         && <SettingsTab />}
-        {currentTab === 'lab'              && <StrategyLab />}
-        {currentTab === 'strategies'       && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
-        {currentTab === 'agentic_research' && <AgenticResearch />}
-        {currentTab === 'research'         && <ResearchTab onTickerClick={() => {}} />}
-        {currentTab === 'strategy_detail'  && (
-          selectedStrategyId
-            ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
-            : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button></div>
-        )}
-        {currentTab === 'compare'          && (
-          compareIds.length >= 2
-            ? <StrategyCompare strategyIds={compareIds} onClose={closeCompare} onSelectStrategy={openStrategyDetail} />
-            : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategies selected · pick 2–6 from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button> and click Compare</div>
-        )}
+        <Suspense fallback={<TabSpinner />}>
+          {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} />}
+          {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
+          {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} />}
+          {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
+          {currentTab === 'settings'         && <SettingsTab />}
+          {currentTab === 'lab'              && <StrategyLab />}
+          {currentTab === 'strategies'       && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
+          {currentTab === 'agentic_research' && <AgenticResearch />}
+          {currentTab === 'research'         && <ResearchTab onTickerClick={() => {}} />}
+          {currentTab === 'strategy_detail'  && (
+            selectedStrategyId
+              ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
+              : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button></div>
+          )}
+          {currentTab === 'compare'          && (
+            compareIds.length >= 2
+              ? <StrategyCompare strategyIds={compareIds} onClose={closeCompare} onSelectStrategy={openStrategyDetail} />
+              : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategies selected · pick 2–6 from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button> and click Compare</div>
+          )}
+        </Suspense>
       </main>
 
       {/* Mobile bottom nav */}
