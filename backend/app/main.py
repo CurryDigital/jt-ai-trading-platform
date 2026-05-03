@@ -1921,13 +1921,12 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
 def get_portfolio_positions(db: Session = Depends(get_db)):
     """
     Get all portfolio positions with current market data.
-    Unified view of all assets across strategies.
+    Falls back to gold.paper_strategies when the consumption view is missing.
     """
     result = safe_query(db, """
         SELECT
             position_id as id,
             ticker,
-            name as strategy_name,
             asset_class,
             side,
             quantity,
@@ -1944,21 +1943,80 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     """, label="portfolio_positions")
 
     positions = []
-    for r in result:
-        positions.append({
-            "id": r.id,
-            "ticker": r.ticker,
-            "strategy": r.strategy,
-            "asset_class": r.asset_class,
-            "side": r.side,
-            "quantity": float(r.quantity or 0),
-            "entry_price": float(r.entry_price or 0),
-            "current_price": float(r.current_price or 0),
-            "market_value": float(r.market_value or 0),
-            "pnl": float(r.pnl or 0),
-            "pnl_pct": float(r.pnl_pct or 0),
-            "days_held": r.days_held
-        })
+    source = "consumption.Portfolio_Positions_Current"
+
+    if result:
+        for r in result:
+            positions.append({
+                "id": r.id,
+                "ticker": r.ticker,
+                "strategy": r.strategy,
+                "asset_class": r.asset_class,
+                "side": r.side,
+                "quantity": float(r.quantity or 0),
+                "entry_price": float(r.entry_price or 0),
+                "current_price": float(r.current_price or 0),
+                "market_value": float(r.market_value or 0),
+                "pnl": float(r.pnl or 0),
+                "pnl_pct": float(r.pnl_pct or 0),
+                "days_held": r.days_held
+            })
+    else:
+        # Fallback: synthesize positions from gold.paper_strategies (canonical platform table)
+        source = "gold.paper_strategies (fallback)"
+        fallback_rows = safe_query(db, """
+            SELECT
+                ps.id,
+                ps.ticker,
+                ps.strategy_id,
+                COALESCE(sd.name, ps.strategy_id) as strategy_name,
+                COALESCE(sd.asset_class, 'STOCK') as asset_class,
+                COALESCE(sd.direction, 'LONG') as side,
+                ps.entry_price,
+                ps.current_price,
+                ps.invested_capital,
+                ps.unrealized_pnl,
+                ps.realized_pnl,
+                ps.created_at,
+                ps.status
+            FROM gold.paper_strategies ps
+            LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
+            WHERE ps.status = 'ACTIVE'
+              AND ps.invested_capital IS NOT NULL
+              AND ps.invested_capital > 0
+            ORDER BY ps.invested_capital DESC
+        """, label="portfolio_positions_fallback")
+
+        from datetime import datetime, timezone
+        for r in fallback_rows:
+            entry_price = float(r.entry_price or 0)
+            current_price = float(r.current_price or r.entry_price or 0)
+            invested = float(r.invested_capital or 0)
+            quantity = (invested / entry_price) if entry_price > 0 else 0
+            market_value = quantity * current_price
+            pnl = float(r.unrealized_pnl or 0)
+            pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+            days_held = None
+            if r.created_at:
+                try:
+                    delta = datetime.now(timezone.utc) - r.created_at.replace(tzinfo=timezone.utc) if r.created_at.tzinfo is None else datetime.now(timezone.utc) - r.created_at
+                    days_held = delta.days
+                except Exception:
+                    days_held = None
+            positions.append({
+                "id": r.id,
+                "ticker": r.ticker,
+                "strategy": r.strategy_name,
+                "asset_class": r.asset_class,
+                "side": r.side or 'LONG',
+                "quantity": quantity,
+                "entry_price": entry_price,
+                "current_price": current_price,
+                "market_value": market_value,
+                "pnl": pnl,
+                "pnl_pct": pnl_pct,
+                "days_held": days_held,
+            })
 
     total_value = sum(p["market_value"] for p in positions)
     total_pnl = sum(p["pnl"] for p in positions)
@@ -1968,7 +2026,8 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
         "total_positions": len(positions),
         "total_value": total_value,
         "total_pnl": total_pnl,
-        "active_positions": len([p for p in positions if p["quantity"] > 0])
+        "active_positions": len([p for p in positions if p["quantity"] > 0]),
+        "source": source,
     }
 
 # --- MAINTENANCE & REFRESH APIS (5 DOMAINS) ---
@@ -2721,10 +2780,51 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         ORDER BY return_pct DESC
     """, {"portfolio_type": portfolio_type}, label="perf_attribution")
 
-    # If no data for current mode, return empty (not historical data from other modes)
+    # Fallback: synthesize attribution from gold.paper_strategies + strategy_definitions
+    # when consumption.Performance_Strategy_Attribution doesn't exist or is empty
     if not attribution:
-        return {**_empty_perf, "execution_mode": current_mode,
-                "note": f"No strategies deployed in {current_mode} mode"}
+        fallback = safe_query(db, """
+            SELECT
+                ps.strategy_id,
+                COALESCE(sd.name, ps.strategy_id) as strategy_name,
+                COUNT(*) as num_positions,
+                SUM(ps.invested_capital) as total_invested,
+                SUM(COALESCE(ps.realized_pnl, 0) + COALESCE(ps.unrealized_pnl, 0)) as total_pnl,
+                SUM(CASE WHEN COALESCE(ps.realized_pnl, 0) + COALESCE(ps.unrealized_pnl, 0) > 0
+                         THEN 1 ELSE 0 END) as winners,
+                SUM(ps.trades_count) as total_trades,
+                COALESCE(sd.asset_class, 'STOCK') as asset_class,
+                COALESCE(sd.sharpe_ratio, 0) as sharpe_ratio
+            FROM gold.paper_strategies ps
+            LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
+            WHERE ps.execution_mode = :execution_mode
+              AND ps.status = 'ACTIVE'
+            GROUP BY ps.strategy_id, sd.name, sd.asset_class, sd.sharpe_ratio
+            ORDER BY total_pnl DESC NULLS LAST
+        """, {"execution_mode": current_mode}, label="perf_attribution_fallback")
+
+        if not fallback:
+            return {**_empty_perf, "execution_mode": current_mode,
+                    "note": f"No strategies deployed in {current_mode} mode"}
+
+        # Build attribution-shaped rows from the fallback data
+        from types import SimpleNamespace
+        total_capital = sum(float(r.total_invested or 0) for r in fallback) or 1
+        attribution = [
+            SimpleNamespace(
+                strategy_id=r.strategy_id,
+                strategy_name=r.strategy_name,
+                allocation=(float(r.total_invested or 0) / total_capital) * 100,
+                contribution=float(r.total_pnl or 0),
+                returns=(float(r.total_pnl or 0) / float(r.total_invested or 1)) * 100,
+                num_trades=int(r.total_trades or 0),
+                win_rate=(float(r.winners or 0) / float(r.num_positions or 1)) * 100,
+                sharpe_ratio=float(r.sharpe_ratio or 0),
+                asset_class=r.asset_class,
+                priority=None,
+            )
+            for r in fallback
+        ]
 
     # Get backtest win rates
     backtests = safe_query(db, """
@@ -2742,7 +2842,9 @@ def get_strategy_performance(db: Session = Depends(get_db)):
     live_stats = safe_query(db, """
         SELECT strategy_id,
                COUNT(*) as total_trades,
-               SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades
+               SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
+               SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl ELSE 0 END) as gross_profit,
+               SUM(CASE WHEN realized_pnl < 0 THEN ABS(realized_pnl) ELSE 0 END) as gross_loss
         FROM gold.paper_strategies
         WHERE status = 'ACTIVE'
         GROUP BY strategy_id
@@ -2776,12 +2878,25 @@ def get_strategy_performance(db: Session = Depends(get_db)):
 
         # Calculate live win rate from actual trades
         live_win_rate = None
+        live_profit_factor = None
         if live and live.total_trades > 0:
             live_win_rate = round((live.winning_trades / live.total_trades) * 100, 1)
+            gross_profit = float(getattr(live, 'gross_profit', 0) or 0)
+            gross_loss = float(getattr(live, 'gross_loss', 0) or 0)
+            if gross_loss > 0:
+                live_profit_factor = round(gross_profit / gross_loss, 2)
+
+        # Tier from priority (GOLDEN=T1, NEAR_GOLDEN=T2, EXPERIMENTAL=T3)
+        priority = getattr(a, 'priority', None)
+        tier_map = {'GOLDEN': 'T1', 'NEAR_GOLDEN': 'T2', 'EXPERIMENTAL': 'T3'}
+        tier = tier_map.get(priority, 'T4')
 
         strategies.append({
             "strategy_id": a.strategy_id,
             "strategy_name": a.strategy_name,
+            "asset_class": getattr(a, 'asset_class', None),
+            "priority": priority,
+            "tier": tier,
             "allocation": float(a.allocation or 0),
             "contribution": float(a.contribution or 0),
             "returns": float(a.returns or 0),
@@ -2790,8 +2905,10 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             # Live/Actual metrics
             "live_win_rate": live_win_rate,
             "live_trades": live.total_trades if live else 0,
+            "live_profit_factor": live_profit_factor,
             # Backtest metrics
             "backtest_win_rate": round((bt.backtest_win_rate or 0) * 100, 1) if bt and bt.backtest_win_rate else None,
+            "backtest_pf": round(float(bt.profit_factor), 2) if bt and bt.profit_factor else None,
             "backtest_return": round(bt.backtest_return or 0, 2) if bt else None,
             "backtest_trades": bt.backtest_total_trades if bt else 0,
             # CURRENT SIGNAL
@@ -5216,6 +5333,11 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
         return {"strategies": result, "count": len(result)}
     except Exception as e:
         logger.error(f"Error fetching from strategy_registry: {e}")
+        # Critical: roll back the aborted transaction so the fallback query can run
+        try:
+            db.rollback()
+        except Exception:
+            pass
         # Fallback to legacy table for backward compatibility during migration
         return _get_strategies_from_definitions(db, asset_class)
 

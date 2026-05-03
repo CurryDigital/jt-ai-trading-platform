@@ -935,9 +935,9 @@ export default function App() {
       ]);
 
       setData({
-        strategies: strategies?.strategies || [],
-        positions: positions?.positions || positions || [],
-        paperStrategies: paper?.strategies || [],
+        strategies: Array.isArray(strategies?.strategies) ? strategies.strategies : (Array.isArray(strategies) ? strategies : []),
+        positions: Array.isArray(positions?.positions) ? positions.positions : (Array.isArray(positions) ? positions : []),
+        paperStrategies: Array.isArray(paper?.strategies) ? paper.strategies : [],
         dailyPnl: performance?.monthly_returns || [],
         monthlyReturns: performance?.monthly_returns || [],
         trades: [],
