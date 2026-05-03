@@ -19,7 +19,7 @@ const PnLBadge = ({ value, size = 'md' }) => {
 
 // Enhanced Markets Tab with Comprehensive Market Intelligence
 export const MarketsTab = ({ onTickerClick }) => {
-  const [activeView, setActiveView] = useState('overview'); // overview, movers, sectors, global
+  const [activeView, setActiveView] = useState('overview');
   const [marketData, setMarketData] = useState({
     indices: [],
     gainers: [],
@@ -41,11 +41,44 @@ export const MarketsTab = ({ onTickerClick }) => {
     putCall: 1.0
   });
   const [loading, setLoading] = useState(true);
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1D'); // 1D, 1W, 1M, YTD
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1D');
+  const [selectedMarket, setSelectedMarket] = useState('ALL'); // ALL, US, HK, CN, etc.
+
+  // Helper to detect market from ticker
+  const getMarketFromTicker = (ticker) => {
+    if (!ticker) return 'US';
+    if (ticker.endsWith('.HK')) return 'HK';
+    if (ticker.startsWith('0') && ticker.length === 6) return 'CN'; // Shanghai/Shenzhen
+    if (ticker.endsWith('.SS') || ticker.endsWith('.SZ')) return 'CN';
+    if (ticker.endsWith('.TO') || ticker.endsWith('.V')) return 'CA';
+    if (ticker.endsWith('.L')) return 'UK';
+    if (ticker.endsWith('.DE') || ticker.endsWith('.XETRA')) return 'DE';
+    if (ticker.endsWith('.PA') || ticker.endsWith('.EPA')) return 'FR';
+    if (ticker.endsWith('.JP')) return 'JP';
+    if (ticker.endsWith('.AU')) return 'AU';
+    if (ticker.endsWith('.SG')) return 'SG';
+    return 'US';
+  };
+
+  const marketFlags = {
+    'US': '🇺🇸', 'HK': '🇭🇰', 'CN': '🇨🇳', 'JP': '🇯🇵', 'AU': '🇦🇺',
+    'UK': '🇬🇧', 'DE': '🇩🇪', 'FR': '🇫🇷', 'CA': '🇨🇦', 'SG': '🇸🇬'
+  };
+
+  // Group stocks by market
+  const groupByMarket = (stocks) => {
+    const grouped = {};
+    stocks.forEach(stock => {
+      const market = getMarketFromTicker(stock.ticker);
+      if (!grouped[market]) grouped[market] = [];
+      grouped[market].push(stock);
+    });
+    return grouped;
+  };
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 60000); // Refresh every 60s
+    const interval = setInterval(fetchMarketData, 60000);
     return () => clearInterval(interval);
   }, [selectedTimeframe]);
 
@@ -80,14 +113,14 @@ export const MarketsTab = ({ onTickerClick }) => {
         global: global.data || []
       });
 
-      // Fetch market breadth
-      const breadthRes = await fetch('/api/market/breadth');
+      // Fetch US market breadth (default)
+      const breadthRes = await fetch('/api/market/breadth?country=US');
       if (breadthRes.ok) {
         setMarketBreadth(await breadthRes.json());
       }
 
-      // Fetch sentiment
-      const sentimentRes = await fetch('/api/market/sentiment');
+      // Fetch US sentiment (default)
+      const sentimentRes = await fetch('/api/market/sentiment?country=US');
       if (sentimentRes.ok) {
         setSentiment(await sentimentRes.json());
       }
@@ -227,160 +260,187 @@ export const MarketsTab = ({ onTickerClick }) => {
             ))}
           </div>
 
-          {/* Fear & Greed + Market Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Fear & Greed Index */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-3">Fear & Greed Index</h3>
-              <div className="flex items-center gap-4">
-                <div className="relative w-24 h-24">
-                  <svg className="w-full h-full transform -rotate-90">
-                    <circle cx="48" cy="48" r="40" stroke="#334155" strokeWidth="8" fill="none" />
-                    <circle 
-                      cx="48" cy="48" r="40" 
-                      stroke={sentiment.fearGreed > 75 ? '#10b981' : sentiment.fearGreed > 50 ? '#3b82f6' : sentiment.fearGreed > 25 ? '#f59e0b' : '#f43f5e'}
-                      strokeWidth="8" 
-                      fill="none"
-                      strokeDasharray={`${sentiment.fearGreed * 2.51} 251`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-xl font-black text-white">{sentiment.fearGreed}</span>
+          {/* Country-Specific Market Health */}
+          <div className="space-y-3">
+            {/* US Market Health */}
+            <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-base">🇺🇸</span>
+                <span className="text-xs font-bold text-white">US Market Health</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Fear & Greed */}
+                <div className="p-2 bg-slate-800/50 rounded-lg">
+                  <div className="text-[9px] text-slate-500 uppercase mb-1">Fear & Greed</div>
+                  <div className="text-lg font-bold text-white">{sentiment.fearGreed}</div>
+                  <div className={`text-[10px] ${sentiment.fearGreed > 55 ? 'text-emerald-400' : sentiment.fearGreed > 45 ? 'text-blue-400' : 'text-rose-400'}`}>
+                    {sentiment.fearGreed > 75 ? 'Extreme Greed' : sentiment.fearGreed > 55 ? 'Greed' : sentiment.fearGreed > 45 ? 'Neutral' : sentiment.fearGreed > 25 ? 'Fear' : 'Extreme Fear'}
                   </div>
                 </div>
-                <div>
-                  <div className={`text-sm font-bold ${
-                    sentiment.fearGreed > 75 ? 'text-emerald-400' : 
-                    sentiment.fearGreed > 50 ? 'text-blue-400' : 
-                    sentiment.fearGreed > 25 ? 'text-amber-400' : 'text-rose-400'
-                  }`}>
-                    {sentiment.fearGreed > 75 ? 'Extreme Greed' : 
-                     sentiment.fearGreed > 55 ? 'Greed' : 
-                     sentiment.fearGreed > 45 ? 'Neutral' : 
-                     sentiment.fearGreed > 25 ? 'Fear' : 'Extreme Fear'}
+                {/* VIX */}
+                <div className="p-2 bg-slate-800/50 rounded-lg">
+                  <div className="text-[9px] text-slate-500 uppercase mb-1">VIX</div>
+                  <div className={`text-lg font-bold ${sentiment.vix > 30 ? 'text-rose-400' : sentiment.vix > 20 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {sentiment.vix?.toFixed(2) || '--'}
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">Market sentiment indicator</p>
+                  <div className="text-[10px] text-slate-500">{sentiment.vix > 30 ? 'High Fear' : sentiment.vix > 20 ? 'Elevated' : 'Low Vol'}</div>
+                </div>
+                {/* 52W Highs/Lows */}
+                <div className="p-2 bg-slate-800/50 rounded-lg">
+                  <div className="text-[9px] text-slate-500 uppercase mb-1">52W Extremes</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-emerald-400">{marketBreadth.newHighs}</span>
+                    <span className="text-slate-500">/</span>
+                    <span className="text-sm font-bold text-rose-400">{marketBreadth.newLows}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500">Highs / Lows</div>
+                </div>
+                {/* MA % */}
+                <div className="p-2 bg-slate-800/50 rounded-lg">
+                  <div className="text-[9px] text-slate-500 uppercase mb-1">Above MA</div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-blue-400">{marketBreadth.above50MA || '--'}%</span>
+                    <span className="text-slate-500">/</span>
+                    <span className="text-sm font-bold text-indigo-400">{marketBreadth.above200MA || '--'}%</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500">50d / 200d</div>
                 </div>
               </div>
             </div>
 
-            {/* VIX & Put/Call */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-3">Volatility</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">VIX</span>
-                  <div className="text-right">
-                    <span className={`text-lg font-bold ${sentiment.vix > 30 ? 'text-rose-400' : sentiment.vix > 20 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                      {sentiment.vix?.toFixed(2)}
-                    </span>
-                    <p className="text-xs text-slate-500">
-                      {sentiment.vix > 30 ? 'High Fear' : sentiment.vix > 20 ? 'Elevated' : 'Low Volatility'}
-                    </p>
-                  </div>
+            {/* HK & CN Row - Compact */}
+            <div className="grid grid-cols-2 gap-2">
+              {/* HK Market Health */}
+              <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🇭🇰</span>
+                  <span className="text-xs font-bold text-white">HK</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Put/Call Ratio</span>
-                  <div className="text-right">
-                    <span className={`text-lg font-bold ${sentiment.putCall > 1.2 ? 'text-rose-400' : sentiment.putCall < 0.8 ? 'text-emerald-400' : 'text-blue-400'}`}>
-                      {sentiment.putCall?.toFixed(2)}
-                    </span>
-                    <p className="text-xs text-slate-500">
-                      {sentiment.putCall > 1.2 ? 'Bearish' : sentiment.putCall < 0.8 ? 'Bullish' : 'Neutral'}
-                    </p>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-slate-500">F&G Index</span>
+                    <span className="text-[11px] font-bold text-white">--</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-slate-500">Adv/Dec</span>
+                    <span className="text-[10px] text-emerald-400">--</span>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Market Summary */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-3">Market Summary</h3>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">52W Highs</span>
-                  <span className="text-sm font-bold text-emerald-400">{marketBreadth.newHighs}</span>
+              {/* CN Market Health */}
+              <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🇨🇳</span>
+                  <span className="text-xs font-bold text-white">CN</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">52W Lows</span>
-                  <span className="text-sm font-bold text-rose-400">{marketBreadth.newLows}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Above 200 MA</span>
-                  <span className="text-sm font-bold text-blue-400">{marketBreadth.above200MA || '---'}%</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Above 50 MA</span>
-                  <span className="text-sm font-bold text-blue-400">{marketBreadth.above50MA || '---'}%</span>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-slate-500">F&G Index</span>
+                    <span className="text-[11px] font-bold text-white">--</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-slate-500">Adv/Dec</span>
+                    <span className="text-[10px] text-emerald-400">--</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Top Movers Preview */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Top Gainers */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-emerald-400 uppercase mb-3 flex items-center gap-2">
-                🚀 Top Gainers
-                <span className="text-slate-500 font-normal">{selectedTimeframe}</span>
-              </h3>
-              <div className="space-y-2">
-                {marketData.gainers.slice(0, 5).map((stock, idx) => (
-                  <div 
-                    key={stock.ticker}
-                    onClick={() => onTickerClick && onTickerClick(stock.ticker)}
-                    className="flex items-center justify-between p-2 bg-emerald-500/5 rounded-lg cursor-pointer hover:bg-emerald-500/10 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-slate-500 w-4">{idx + 1}</span>
-                      <div>
-                        <span className="text-sm font-bold text-white">{stock.ticker}</span>
-                        <p className="text-[10px] text-slate-500">{stock.name}</p>
+          {/* Country-Specific Market Sections */}
+          <div className="space-y-2">
+            {/* US Market */}
+            <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-base">🇺🇸</span>
+                <span className="text-xs font-bold text-white">US Markets</span>
+                <span className="text-[9px] text-slate-500 ml-auto">{(groupByMarket(marketData.gainers)['US'] || []).length} gainers • {(groupByMarket(marketData.losers)['US'] || []).length} losers</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {/* US Gainers */}
+                <div className="space-y-1">
+                  <h4 className="text-[9px] font-bold text-emerald-400/70 uppercase">Gainers</h4>
+                  {(groupByMarket(marketData.gainers)['US'] || []).slice(0, 3).map((stock) => (
+                    <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-emerald-500/5 rounded cursor-pointer hover:bg-emerald-500/10">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                        <p className="text-[7px] text-slate-500 truncate">{stock.name}</p>
                       </div>
+                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(1)}%</span>
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-emerald-400">+{stock.change_percent?.toFixed(2)}%</span>
-                      <p className="text-[10px] text-slate-500">${stock.price?.toFixed(2)}</p>
+                  ))}
+                  {(groupByMarket(marketData.gainers)['US'] || []).length === 0 && <p className="text-[8px] text-slate-500 py-1">No gainers</p>}
+                </div>
+                {/* US Losers */}
+                <div className="space-y-1">
+                  <h4 className="text-[9px] font-bold text-rose-400/70 uppercase">Losers</h4>
+                  {(groupByMarket(marketData.losers)['US'] || []).slice(0, 3).map((stock) => (
+                    <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-rose-500/5 rounded cursor-pointer hover:bg-rose-500/10">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                        <p className="text-[7px] text-slate-500 truncate">{stock.name}</p>
+                      </div>
+                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(1)}%</span>
                     </div>
-                  </div>
-                ))}
-                {marketData.gainers.length === 0 && (
-                  <p className="text-xs text-slate-500 text-center py-4">No gainers data</p>
-                )}
+                  ))}
+                  {(groupByMarket(marketData.losers)['US'] || []).length === 0 && <p className="text-[8px] text-slate-500 py-1">No losers</p>}
+                </div>
               </div>
             </div>
 
-            {/* Top Losers */}
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10">
-              <h3 className="text-xs font-bold text-rose-400 uppercase mb-3 flex items-center gap-2">
-                📉 Top Losers
-                <span className="text-slate-500 font-normal">{selectedTimeframe}</span>
-              </h3>
-              <div className="space-y-2">
-                {marketData.losers.slice(0, 5).map((stock, idx) => (
-                  <div 
-                    key={stock.ticker}
-                    onClick={() => onTickerClick && onTickerClick(stock.ticker)}
-                    className="flex items-center justify-between p-2 bg-rose-500/5 rounded-lg cursor-pointer hover:bg-rose-500/10 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-slate-500 w-4">{idx + 1}</span>
-                      <div>
-                        <span className="text-sm font-bold text-white">{stock.ticker}</span>
-                        <p className="text-[10px] text-slate-500">{stock.name}</p>
-                      </div>
+            {/* HK & CN Row */}
+            <div className="grid grid-cols-2 gap-2">
+              {/* HK Market */}
+              <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🇭🇰</span>
+                  <span className="text-xs font-bold text-white">HK</span>
+                  <span className="text-[9px] text-slate-500 ml-auto">{(groupByMarket(marketData.gainers)['HK'] || []).length}/{(groupByMarket(marketData.losers)['HK'] || []).length}</span>
+                </div>
+                <div className="space-y-1">
+                  {(groupByMarket(marketData.gainers)['HK'] || []).slice(0, 2).map((stock) => (
+                    <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-emerald-500/5 rounded cursor-pointer hover:bg-emerald-500/10">
+                      <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(1)}%</span>
                     </div>
-                    <div className="text-right">
-                      <span className="text-sm font-bold text-rose-400">{stock.change_percent?.toFixed(2)}%</span>
-                      <p className="text-[10px] text-slate-500">${stock.price?.toFixed(2)}</p>
+                  ))}
+                  {(groupByMarket(marketData.losers)['HK'] || []).slice(0, 2).map((stock) => (
+                    <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-rose-500/5 rounded cursor-pointer hover:bg-rose-500/10">
+                      <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(1)}%</span>
                     </div>
-                  </div>
-                ))}
-                {marketData.losers.length === 0 && (
-                  <p className="text-xs text-slate-500 text-center py-4">No losers data</p>
-                )}
+                  ))}
+                  {(groupByMarket(marketData.gainers)['HK'] || []).length === 0 && (groupByMarket(marketData.losers)['HK'] || []).length === 0 && (
+                    <p className="text-[8px] text-slate-500 py-2 text-center">No HK data</p>
+                  )}
+                </div>
+              </div>
+
+              {/* CN Market */}
+              <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🇨🇳</span>
+                  <span className="text-xs font-bold text-white">CN</span>
+                  <span className="text-[9px] text-slate-500 ml-auto">{(groupByMarket(marketData.gainers)['CN'] || []).length}/{(groupByMarket(marketData.losers)['CN'] || []).length}</span>
+                </div>
+                <div className="space-y-1">
+                  {(groupByMarket(marketData.gainers)['CN'] || []).slice(0, 2).map((stock) => (
+                    <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-emerald-500/5 rounded cursor-pointer hover:bg-emerald-500/10">
+                      <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                  {(groupByMarket(marketData.losers)['CN'] || []).slice(0, 2).map((stock) => (
+                    <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-rose-500/5 rounded cursor-pointer hover:bg-rose-500/10">
+                      <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
+                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                  {(groupByMarket(marketData.gainers)['CN'] || []).length === 0 && (groupByMarket(marketData.losers)['CN'] || []).length === 0 && (
+                    <p className="text-[8px] text-slate-500 py-2 text-center">No CN data</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -61,7 +61,21 @@ jt_strategy_executor = None
 
 app = FastAPI()
 
-# Include stock detail router
+# Include all routers
+app.include_router(market.router)
+app.include_router(stocks.router)
+app.include_router(fx.router)
+app.include_router(crypto.router)
+app.include_router(strategies.router)
+app.include_router(positions.router)
+app.include_router(performance.router)
+app.include_router(execution.router)
+app.include_router(ibkr.router)
+app.include_router(alerts.router)
+app.include_router(metadata.router)
+app.include_router(hkex.router)
+
+# Include stock detail router (conditional)
 if HAS_STOCK_DETAIL_API and stock_detail_router:
     app.include_router(stock_detail_router)
 
@@ -431,54 +445,53 @@ def system_health(db: Session = Depends(get_db)):
 @app.get("/api/positions")
 def get_open_positions(db: Session = Depends(get_db)):
     """Get all open positions (inventory) with current P&L"""
-    try:
-        positions = db.execute(text("""
-            SELECT i.*, s.close_price as current_market_price
-            FROM consumption.inventory i
-            LEFT JOIN consumption.stock s ON i.ticker = s.ticker
-            WHERE i.status = 'held'
-            ORDER BY i.purchase_date DESC
-        """)).fetchall()
+    # Use safe_query to handle missing tables gracefully
+    positions = safe_query(db, """
+        SELECT 
+            position_id as id,
+            ticker,
+            asset_class,
+            quantity,
+            avg_entry_price as buy_price,
+            current_price,
+            unrealized_pnl,
+            days_held as purchase_date
+        FROM consumption.Portfolio_Positions_Current
+        WHERE quantity > 0
+        ORDER BY market_value DESC
+    """, label="open_positions")
 
-        result = []
-        for p in positions:
-            current_price = p.current_market_price or p.current_price or p.buy_price
-            quantity = float(p.quantity) if p.quantity else 0
-            buy_price = float(p.buy_price) if p.buy_price else 0
+    result = []
+    for p in positions:
+        current_price = float(p.current_price or p.buy_price or 0)
+        quantity = float(p.quantity or 0)
+        buy_price = float(p.buy_price or 0)
+        unrealized_pnl = float(p.unrealized_pnl or 0)
+        pnl_pct = ((current_price / buy_price) - 1) * 100 if buy_price > 0 else 0
 
-            unrealized_pnl = (current_price - buy_price) * quantity
-            pnl_pct = ((current_price / buy_price) - 1) * 100 if buy_price > 0 else 0
+        result.append({
+            "id": p.id,
+            "ticker": p.ticker,
+            "asset_class": p.asset_class,
+            "quantity": quantity,
+            "buy_price": buy_price,
+            "current_price": current_price,
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "unrealized_pnl_pct": round(pnl_pct, 2),
+            "purchase_date": p.purchase_date,
+            "estimates": {"1d": "---", "7d": "---", "1m": "---"},
+            "analysis": {},
+            "status": "held"
+        })
 
-            result.append({
-                "id": p.id,
-                "ticker": p.ticker,
-                "asset_class": p.asset_class,
-                "quantity": quantity,
-                "buy_price": buy_price,
-                "current_price": current_price,
-                "unrealized_pnl": round(unrealized_pnl, 2),
-                "unrealized_pnl_pct": round(pnl_pct, 2),
-                "purchase_date": p.purchase_date.isoformat() if p.purchase_date else None,
-                "estimates": {
-                    "1d": p.est_1d,
-                    "7d": p.est_7d,
-                    "1m": p.est_1m
-                },
-                "analysis": p.analysis,
-                "status": p.status
-            })
-
-        return {
-            "positions": result,
-            "summary": {
-                "total_positions": len(result),
-                "total_unrealized_pnl": round(sum(p["unrealized_pnl"] for p in result), 2),
-                "by_asset_class": {}
-            }
+    return {
+        "positions": result,
+        "summary": {
+            "total_positions": len(result),
+            "total_unrealized_pnl": round(sum(p["unrealized_pnl"] for p in result), 2),
+            "by_asset_class": {}
         }
-    except Exception as e:
-        print(f"Positions API Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    }
 
 
 @app.get("/api/execution/status")
@@ -4871,6 +4884,71 @@ def get_pending_work(agent_id: str = None, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Pending work error: {e}")
         return {"work_items": [], "count": 0, "by_agent": {}}
+
+
+@app.get("/api/agents/completed-work")
+def get_completed_work(
+    agent_id: str = None,
+    date_from: str = None,
+    date_to: str = None,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get completed (processed) work items with optional date filtering"""
+    try:
+        query = """
+            SELECT 
+                ep.event_id,
+                ep.agent_name as processed_by,
+                ep.processed_at,
+                ep.status as processing_status,
+                e.event_type,
+                e.strategy_id,
+                e.domain,
+                e.source_agent as emitted_by,
+                e.created_at as event_created_at
+            FROM openclaw_researcher.event_processing ep
+            JOIN openclaw_researcher.events e ON ep.event_id = e.id
+            WHERE 1=1
+        """
+        params = {}
+        if agent_id:
+            query += " AND ep.agent_name = :agent_id"
+            params["agent_id"] = agent_id
+        if date_from:
+            query += " AND ep.processed_at >= :date_from"
+            params["date_from"] = date_from
+        if date_to:
+            query += " AND ep.processed_at < :date_to"
+            params["date_to"] = date_to
+        query += " ORDER BY ep.processed_at DESC LIMIT :limit"
+        params["limit"] = limit
+
+        rows = db.execute(text(query), params).fetchall()
+        completed_items = []
+        for r in rows:
+            agent_info = AGENT_REGISTRY.get(r.processed_by, {"name": r.processed_by, "icon": "🤖"})
+            emitter_info = AGENT_REGISTRY.get(r.emitted_by, {"name": r.emitted_by, "icon": "🤖"})
+            completed_items.append({
+                "event_id": str(r.event_id),
+                "event_type": r.event_type,
+                "strategy_id": r.strategy_id,
+                "domain": r.domain,
+                "processed_by": r.processed_by,
+                "processor_name": agent_info["name"],
+                "processor_icon": agent_info["icon"],
+                "emitted_by": r.emitted_by,
+                "emitter_name": emitter_info["name"],
+                "emitter_icon": emitter_info["icon"],
+                "processing_status": r.processing_status,
+                "event_created_at": r.event_created_at.isoformat() if r.event_created_at else None,
+                "processed_at": r.processed_at.isoformat() if r.processed_at else None,
+            })
+
+        return {"completed_items": completed_items, "count": len(completed_items)}
+    except Exception as e:
+        logger.error(f"Completed work error: {e}")
+        return {"completed_items": [], "count": 0}
 
 
 @app.get("/api/agents/routing-rules")

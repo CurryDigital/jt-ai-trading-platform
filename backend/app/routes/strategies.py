@@ -11,9 +11,6 @@ from app.db.safe_query import safe_query, safe_query_one
 router = APIRouter(prefix="/api", tags=["strategies"])
 
 
-# =============================================================================
-# Quant Strategy CRUD
-# =============================================================================
 
 @router.get("/quant/templates")
 def get_strategy_templates_quant():

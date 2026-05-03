@@ -10,15 +10,23 @@ router = APIRouter(prefix="/api/market", tags=["market"])
 
 @router.get("/indices")
 def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
-    """Get major market indices — same as global but structured for MarketsTab."""
+    """Get major market indices with proper timeframe-based change calculation."""
     try:
+        # Use latest rows with non-NULL close prices to get most recent valid close
+        # This handles the case where today's row exists but market is still open
         rows = db.execute(text("""
-            SELECT ticker, close as price, date,
-                   LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close
-            FROM silver.unified_prices
-            WHERE ticker IN ('^GSPC', '^IXIC', '^DJI', '^VIX', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
-            AND date >= CURRENT_DATE - INTERVAL '5 days'
-            ORDER BY date DESC
+            WITH ranked_prices AS (
+                SELECT ticker, close as price, date,
+                       LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_price,
+                       LAG(date) OVER (PARTITION BY ticker ORDER BY date) as prev_date,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM silver.unified_prices
+                WHERE ticker IN ('^GSPC', '^IXIC', '^DJI', '^VIX', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
+                  AND close IS NOT NULL
+            )
+            SELECT ticker, price, date, prev_price, prev_date
+            FROM ranked_prices
+            WHERE rn = 1 AND prev_price IS NOT NULL
         """)).fetchall()
 
         index_map = {
@@ -34,25 +42,30 @@ def get_market_indices(timeframe: str = "1D", db: Session = Depends(get_db)):
             "^AXJO": {"name": "ASX 200", "symbol": "ASX"},
         }
 
-        seen = set()
         indices = []
         for row in rows:
-            if row.ticker not in seen and row.ticker in index_map and row.prev_close:
+            if row.ticker in index_map and row.prev_price:
                 info = index_map[row.ticker]
-                change_pct = ((row.price - row.prev_close) / row.prev_close * 100)
+                change_pct = ((row.price - row.prev_price) / row.prev_price * 100)
                 indices.append({
                     **info,
                     "price": float(row.price),
                     "change_percent": round(float(change_pct), 2),
                     "value": float(row.price),
-                    "change": round(float(row.price - row.prev_close), 2),
+                    "change": round(float(row.price - row.prev_price), 2),
                 })
-                seen.add(row.ticker)
 
         if indices:
             return {"data": indices}
     except Exception as e:
         logger.error(f"Error in indices: {e}")
+
+    # Fallback skeleton
+    return {"data": [
+        {"name": "S&P 500", "symbol": "SPX", "price": 0, "change_percent": 0, "value": 0, "change": 0},
+        {"name": "Nasdaq", "symbol": "COMP", "price": 0, "change_percent": 0, "value": 0, "change": 0},
+        {"name": "Dow Jones", "symbol": "DJI", "price": 0, "change_percent": 0, "value": 0, "change": 0},
+    ]}
 
     # Fallback skeleton
     return {"data": [
@@ -153,15 +166,19 @@ def get_volume_leaders(db: Session = Depends(get_db)):
 
 @router.get("/global")
 def get_global_markets(db: Session = Depends(get_db)):
-    """Get global market indices from DB."""
+    """Get global market indices — uses latest available data regardless of date."""
     try:
         rows = db.execute(text("""
-            SELECT ticker, close as price, 
-                   LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close
-            FROM silver.unified_prices
-            WHERE ticker IN ('^GSPC', '^IXIC', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
-            AND date >= CURRENT_DATE - INTERVAL '5 days'
-            ORDER BY date DESC
+            WITH latest_prices AS (
+                SELECT ticker, close as price, date,
+                       LAG(close) OVER (PARTITION BY ticker ORDER BY date) as prev_close,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM silver.unified_prices
+                WHERE ticker IN ('^GSPC', '^IXIC', '^FTSE', '^GDAXI', '^N225', '^HSI', '000001.SS', '^AXJO')
+            )
+            SELECT ticker, price, date, prev_close
+            FROM latest_prices
+            WHERE rn = 1 AND prev_close IS NOT NULL
         """)).fetchall()
 
         index_map = {
@@ -175,14 +192,12 @@ def get_global_markets(db: Session = Depends(get_db)):
             "^AXJO": {"name": "ASX 200", "region": "Asia", "flag": "🇦🇺"},
         }
 
-        seen = set()
         markets = []
         for row in rows:
-            if row.ticker not in seen and row.ticker in index_map and row.prev_close:
+            if row.ticker in index_map and row.prev_close:
                 info = index_map[row.ticker]
                 change_pct = ((row.price - row.prev_close) / row.prev_close * 100)
                 markets.append({**info, "price": float(row.price), "change_percent": round(float(change_pct), 2)})
-                seen.add(row.ticker)
 
         if markets:
             return {"data": markets}
@@ -197,58 +212,152 @@ def get_global_markets(db: Session = Depends(get_db)):
 
 
 @router.get("/breadth")
-def get_market_breadth(db: Session = Depends(get_db)):
-    """Get market breadth from consumption view."""
+def get_market_breadth(country: str = "US", db: Session = Depends(get_db)):
+    """Get market breadth by country. Supports US, HK, CN."""
     try:
-        # Try consumption view
-        rows = db.execute(text("""
+        # Define ticker suffix patterns by country
+        country_patterns = {
+            "US": "AND NOT (ticker LIKE '%.HK' OR ticker LIKE '%.SS' OR ticker LIKE '%.SZ' OR ticker ~ '^[0-9]{6}$')",
+            "HK": "AND ticker LIKE '%.HK'",
+            "CN": "AND (ticker LIKE '%.SS' OR ticker LIKE '%.SZ' OR ticker ~ '^[0-9]{6}$')"
+        }
+        suffix_filter = country_patterns.get(country, country_patterns["US"])
+
+        # Basic breadth metrics
+        rows = db.execute(text(f"""
             SELECT 
                 SUM(CASE WHEN change_pct > 0 THEN 1 ELSE 0 END) as advancing,
                 SUM(CASE WHEN change_pct < 0 THEN 1 ELSE 0 END) as declining,
                 SUM(CASE WHEN change_pct = 0 THEN 1 ELSE 0 END) as unchanged,
                 COUNT(*) as total
             FROM consumption.Markets_Stocks_Overview
-            WHERE change_pct IS NOT NULL
+            WHERE change_pct IS NOT NULL {suffix_filter}
         """)).fetchone()
 
-        if rows and rows.total:
-            return {
-                "advancing": rows.advancing or 0,
-                "declining": rows.declining or 0,
-                "unchanged": rows.unchanged or 0,
-                "newHighs": 0, "newLows": 0,
-                "above50MA": None, "above200MA": None,
-                "overbought": None, "oversold": None,
-            }
-    except Exception as e:
-        logger.warning(f"Consumption breadth failed: {e}")
+        # Calculate 52W highs/lows from unified_prices
+        highs_lows = db.execute(text(f"""
+            WITH latest_prices AS (
+                SELECT ticker, close as current_price, date
+                FROM silver.unified_prices
+                WHERE ticker IN (
+                    SELECT ticker FROM consumption.Markets_Stocks_Overview
+                    WHERE change_pct IS NOT NULL {suffix_filter}
+                )
+                AND date = (SELECT MAX(date) FROM silver.unified_prices)
+            ),
+            yearly_extremes AS (
+                SELECT 
+                    ticker,
+                    MAX(close) as high_52w,
+                    MIN(close) as low_52w
+                FROM silver.unified_prices
+                WHERE date >= CURRENT_DATE - INTERVAL '52 weeks'
+                  AND ticker IN (SELECT ticker FROM latest_prices)
+                GROUP BY ticker
+            )
+            SELECT 
+                SUM(CASE WHEN l.current_price >= y.high_52w * 0.995 THEN 1 ELSE 0 END) as new_highs,
+                SUM(CASE WHEN l.current_price <= y.low_52w * 1.005 THEN 1 ELSE 0 END) as new_lows
+            FROM latest_prices l
+            JOIN yearly_extremes y ON l.ticker = y.ticker
+        """)).fetchone()
 
-    return {"advancing": 0, "declining": 0, "unchanged": 0, "newHighs": 0, "newLows": 0}
+        # Calculate MA percentages (simplified - last 50/200 days)
+        ma_data = db.execute(text(f"""
+            WITH price_stats AS (
+                SELECT 
+                    ticker,
+                    close,
+                    AVG(close) OVER (PARTITION BY ticker ORDER BY date ROWS BETWEEN 49 PRECEDING AND CURRENT ROW) as ma50,
+                    AVG(close) OVER (PARTITION BY ticker ORDER BY date ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) as ma200,
+                    ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM silver.unified_prices
+                WHERE ticker IN (
+                    SELECT ticker FROM consumption.Markets_Stocks_Overview
+                    WHERE change_pct IS NOT NULL {suffix_filter}
+                )
+                AND date >= CURRENT_DATE - INTERVAL '1 year'
+            ),
+            latest_stats AS (
+                SELECT * FROM price_stats WHERE rn = 1
+            )
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN close > ma50 THEN 1 ELSE 0 END) as above_50ma,
+                SUM(CASE WHEN close > ma200 THEN 1 ELSE 0 END) as above_200ma
+            FROM latest_stats
+            WHERE ma50 IS NOT NULL AND ma200 IS NOT NULL
+        """)).fetchone()
+
+        result = {
+            "advancing": rows.advancing or 0,
+            "declining": rows.declining or 0,
+            "unchanged": rows.unchanged or 0,
+            "newHighs": highs_lows.new_highs or 0 if highs_lows else 0,
+            "newLows": highs_lows.new_lows or 0 if highs_lows else 0,
+            "above50MA": round((ma_data.above_50ma / ma_data.total * 100), 1) if ma_data and ma_data.total else None,
+            "above200MA": round((ma_data.above_200ma / ma_data.total * 100), 1) if ma_data and ma_data.total else None,
+            "country": country
+        }
+        return result
+
+    except Exception as e:
+        logger.warning(f"Consumption breadth failed for {country}: {e}")
+
+    return {"advancing": 0, "declining": 0, "unchanged": 0, "newHighs": 0, "newLows": 0, "above50MA": None, "above200MA": None, "country": country}
 
 
 @router.get("/sentiment")
-def get_market_sentiment(db: Session = Depends(get_db)):
-    """Get market sentiment indicators from DB."""
+def get_market_sentiment(country: str = "US", db: Session = Depends(get_db)):
+    """Get market sentiment indicators by country. VIX is US-only; others use proxies."""
     try:
-        vix_row = db.execute(text("""
-            SELECT close FROM silver.unified_prices
-            WHERE ticker = '^VIX' ORDER BY date DESC LIMIT 1
-        """)).fetchone()
+        # VIX is US-specific
+        if country == "US":
+            vix_row = db.execute(text("""
+                SELECT close FROM silver.unified_prices
+                WHERE ticker = '^VIX' ORDER BY date DESC LIMIT 1
+            """)).fetchone()
+            vix = float(vix_row.close) if vix_row and vix_row.close else 20.0
 
-        vix = float(vix_row.close) if vix_row and vix_row.close else 20.0
+            if vix < 15:
+                fear_greed = 75
+            elif vix < 20:
+                fear_greed = 55
+            elif vix < 25:
+                fear_greed = 50
+            elif vix < 30:
+                fear_greed = 35
+            else:
+                fear_greed = 20
 
-        if vix < 15:
-            fear_greed = 75
-        elif vix < 20:
-            fear_greed = 55
-        elif vix < 25:
-            fear_greed = 50
-        elif vix < 30:
-            fear_greed = 35
+            return {"fearGreed": fear_greed, "vix": vix, "putCall": 1.0, "country": "US"}
+
+        # For HK/CN, use index volatility as proxy
+        index_ticker = {"HK": "^HSI", "CN": "000001.SS"}.get(country, "^GSPC")
+
+        # Get index recent volatility (5-day vs 20-day)
+        vol_row = db.execute(text("""
+            WITH prices AS (
+                SELECT close, date,
+                       STDDEV(close) OVER (ORDER BY date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) as vol_5d,
+                       STDDEV(close) OVER (ORDER BY date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as vol_20d
+                FROM silver.unified_prices
+                WHERE ticker = :ticker AND date >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY date DESC
+                LIMIT 1
+            )
+            SELECT vol_5d, vol_20d FROM prices
+        """), {"ticker": index_ticker}).fetchone()
+
+        # Estimate fear/greed from volatility ratio (simplified)
+        if vol_row and vol_row.vol_20d and vol_row.vol_20d > 0:
+            vol_ratio = vol_row.vol_5d / vol_row.vol_20d if vol_row.vol_5d else 1.0
+            # High recent vol = fear (0-30), Low vol = greed (70-100)
+            fear_greed = int(max(0, min(100, 100 - (vol_ratio - 0.5) * 100)))
         else:
-            fear_greed = 20
+            fear_greed = 50
 
-        return {"fearGreed": fear_greed, "vix": vix, "putCall": 1.0}
+        return {"fearGreed": fear_greed, "vix": None, "putCall": 1.0, "country": country}
     except Exception as e:
-        logger.error(f"Error in market sentiment: {e}")
-        return {"fearGreed": 50, "vix": 20.0, "putCall": 1.0}
+        logger.error(f"Error in market sentiment for {country}: {e}")
+        return {"fearGreed": 50, "vix": None, "putCall": 1.0, "country": country}

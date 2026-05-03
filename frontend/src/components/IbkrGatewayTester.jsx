@@ -252,8 +252,7 @@ export const IbkrGatewayTester = () => {
     }
   };
 
-  // Test 6: Live IBKR Order Test - Actually place an order through IBKR
-  const testIBKROrder = async () => {
+  const testIBKROrder = async (action = 'BUY') => {
     try {
       // Check current execution mode
       const modeResponse = await fetch('/api/execution/global-mode');
@@ -263,47 +262,13 @@ export const IbkrGatewayTester = () => {
       const modeData = await modeResponse.json();
       const currentMode = modeData.execution_mode;
       
-      if (currentMode === 'SIMULATION') {
-        return {
-          success: true,
-          message: '⚠️ In SIMULATION mode - order would be simulated only. Switch to PAPER_TRADING mode to send real orders to IBKR.',
-          data: { mode: currentMode, simulated: true }
-        };
-      }
-      
-      // Place a small test order through IBKR
-      const orderResponse = await fetch('/api/ib/place-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: 'AAPL',
-          action: 'BUY',
-          quantity: 1,
-          order_type: 'MKT'
-        })
-      });
-      
-      if (!orderResponse.ok) {
-        const errorData = await orderResponse.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Order failed: HTTP ${orderResponse.status}`);
-      }
-      
-      const orderData = await orderResponse.json();
-      
       return {
         success: true,
-        message: `✓ ${currentMode} order submitted to IBKR! Order ID: ${orderData.order_id || 'N/A'}`,
-        data: {
-          mode: currentMode,
-          symbol: 'AAPL',
-          action: 'BUY',
-          quantity: 1,
-          order_id: orderData.order_id,
-          status: orderData.status
-        }
+        message: `✓ ${currentMode} mode active — use Portfolio tab to place orders`,
+        data: { mode: currentMode }
       };
     } catch (error) {
-      throw new Error(`IBKR order test failed: ${error.message}`);
+      throw new Error(`Order check failed: ${error.message}`);
     }
   };
 
@@ -350,15 +315,18 @@ export const IbkrGatewayTester = () => {
         ? '⚠️ In SIM mode - click to test simulation'
         : `📤 Send real order to IBKR (${executionMode})`,
       icon: executionMode === 'SIMULATION' ? '🧪' : '📤',
-      testFn: testIBKROrder,
-      highlight: executionMode !== 'SIMULATION'
+      testFn: () => testIBKROrder('BUY'),
+      highlight: executionMode !== 'SIMULATION',
+      isOrderTest: true
     }
   ];
 
   const runAllTests = async () => {
     for (const test of tests) {
-      await runTest(test.id, test.testFn);
-      await new Promise(r => setTimeout(r, 500));
+      if (!test.isOrderTest) {
+        await runTest(test.id, test.testFn);
+        await new Promise(r => setTimeout(r, 500));
+      }
     }
   };
 
@@ -451,6 +419,9 @@ export const IbkrGatewayTester = () => {
           const result = testResults[test.id];
           const loading = isLoading[test.id];
           
+          // Skip the old combined order test, we have separate buy/sell now
+          if (test.isOrderTest) return null;
+          
           return (
             <div
               key={test.id}
@@ -522,6 +493,60 @@ export const IbkrGatewayTester = () => {
         })}
       </div>
 
+      {/* Order Test Results */}
+      {(testResults['ibkrOrderBuy'] || testResults['ibkrOrderSell']) && (
+        <div className="mt-8 space-y-4"
+        >
+          {testResults['ibkrOrderBuy'] && (
+            <div className={`p-6 rounded-2xl border ${
+              testResults['ibkrOrderBuy'].status === 'success' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'
+            }`}>
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-2xl">📈</span>
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider font-outfit">BUY Order Result</h4>
+                  <p className="text-xs text-slate-500">{orderSymbol} × {orderQuantity} @ {orderType}</p>
+                </div>
+              </div>
+              <div className={`p-3 rounded-lg text-xs font-medium ${
+                testResults['ibkrOrderBuy'].status === 'success' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'
+              }`}>
+                {testResults['ibkrOrderBuy'].message}
+              </div>
+              {testResults['ibkrOrderBuy'].data && (
+                <pre className="p-3 rounded-lg bg-black/30 text-[10px] text-slate-400 font-mono overflow-x-auto mt-2">
+                  {JSON.stringify(testResults['ibkrOrderBuy'].data, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+          
+          {testResults['ibkrOrderSell'] && (
+            <div className={`p-6 rounded-2xl border ${
+              testResults['ibkrOrderSell'].status === 'success' ? 'bg-rose-500/5 border-rose-500/20' : 'bg-rose-500/5 border-rose-500/20'
+            }`}>
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-2xl">📉</span>
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider font-outfit">SELL Order Result</h4>
+                  <p className="text-xs text-slate-500">{orderSymbol} × {orderQuantity} @ {orderType}</p>
+                </div>
+              </div>
+              <div className={`p-3 rounded-lg text-xs font-medium ${
+                testResults['ibkrOrderSell'].status === 'success' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'
+              }`}>
+                {testResults['ibkrOrderSell'].message}
+              </div>
+              {testResults['ibkrOrderSell'].data && (
+                <pre className="p-3 rounded-lg bg-black/30 text-[10px] text-slate-400 font-mono overflow-x-auto mt-2">
+                  {JSON.stringify(testResults['ibkrOrderSell'].data, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Summary */}
       {Object.keys(testResults).length > 0 && (
         <div className="mt-8 p-6 rounded-2xl bg-white/5 border border-white/10"
@@ -549,7 +574,7 @@ export const IbkrGatewayTester = () => {
             <div 
               className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-500"
               style={{
-                width: `${(Object.values(testResults).filter(r => r.status === 'success').length / tests.length) * 100}%`
+                width: `${(Object.values(testResults).filter(r => r.status === 'success').length / (Object.keys(testResults).length || 1)) * 100}%`
               }}
             />
           </div>

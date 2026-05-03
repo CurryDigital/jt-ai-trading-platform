@@ -1,4 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+
+// Extract symbols from strategy name (e.g., "breakout_nvda_sl4" -> ["NVDA"], "mom_msftgoog_sl5" -> ["MSFT","GOOG"])
+const extractSymbols = (name) => {
+  if (!name) return [];
+  // Common ticker patterns: uppercase sequences of 1-5 letters
+  const matches = name.match(/[A-Z]{1,5}/g) || [];
+  // Filter out common non-ticker words
+  const exclude = new Set(['SL', 'TP', 'RSI', 'MACD', 'EMA', 'SMA', 'ATR', 'VWAP', 'IV', 'RV', 'USD', 'EUR', 'GBP', 'JPY', 'BTC', 'ETH']);
+  return matches.filter(s => !exclude.has(s) && s.length >= 2);
+};
 
 const EVENT_TYPE_COLORS = {
   'strategy.created': 'bg-emerald-500/20 text-emerald-400',
@@ -37,48 +47,76 @@ function formatTimeAgo(timestamp) {
   return `${days}d ago`;
 }
 
-// Pipeline Flow — agents in order, with pending work badge
-const PipelineFlow = ({ agents, pendingByAgent, selectedAgent, onSelectAgent }) => (
-  <div className="overflow-x-auto no-scrollbar">
-    <div className="flex items-center gap-1 min-w-max p-3">
-      {agents.map((agent, i) => {
-        const isSelected = selectedAgent === agent.agent_id;
-        const pendingCount = pendingByAgent[agent.agent_id] || 0;
-        return (
-          <React.Fragment key={agent.agent_id}>
-            {i > 0 && (
-              <div className="flex-shrink-0 w-6 flex items-center justify-center">
-                <svg className="w-4 h-3 text-slate-700" viewBox="0 0 16 12" fill="none">
-                  <path d="M1 6h14M11 1l4 5-4 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-            )}
-            <button
-              onClick={() => onSelectAgent(isSelected ? null : agent.agent_id)}
-              className={`relative flex-shrink-0 flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all ${
-                isSelected
-                  ? 'bg-blue-500/20 border border-blue-500/40 ring-1 ring-blue-500/20'
-                  : 'bg-slate-900/50 border border-white/5 hover:border-white/10'
-              }`}
-            >
-              <span className="text-lg">{agent.icon}</span>
-              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-medium whitespace-nowrap">{agent.name}</span>
-              {pendingCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-[8px] text-white font-bold flex items-center justify-center">
-                  {pendingCount}
-                </span>
+// Pipeline Flow — agents in order, with pending work badge and symbols
+const PipelineFlow = ({ agents, pendingByAgent, selectedAgent, onSelectAgent, onAgentClick, workItems }) => {
+  // Build symbol map per agent from work items
+  const agentSymbols = useMemo(() => {
+    const map = {};
+    (workItems || []).forEach(w => {
+      const syms = extractSymbols(w.strategy_id) || [];
+      if (!map[w.target_agent]) map[w.target_agent] = new Set();
+      syms.forEach(s => map[w.target_agent].add(s));
+    });
+    // Convert sets to arrays
+    const result = {};
+    Object.keys(map).forEach(k => { result[k] = Array.from(map[k]); });
+    return result;
+  }, [workItems]);
+
+  return (
+    <div className="overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-1 min-w-max p-3">
+        {agents.map((agent, i) => {
+          const isSelected = selectedAgent === agent.agent_id;
+          const pendingCount = pendingByAgent[agent.agent_id] || 0;
+          const symbols = agentSymbols[agent.agent_id] || [];
+          return (
+            <React.Fragment key={agent.agent_id}>
+              {i > 0 && (
+                <div className="flex-shrink-0 w-6 flex items-center justify-center">
+                  <svg className="w-4 h-3 text-slate-700" viewBox="0 0 16 12" fill="none">
+                    <path d="M1 6h14M11 1l4 5-4 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
               )}
-            </button>
-          </React.Fragment>
-        );
-      })}
+              <button
+                onClick={() => onAgentClick(agent.agent_id)}
+                className={`relative flex-shrink-0 flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all ${
+                  isSelected
+                    ? 'bg-blue-500/20 border border-blue-500/40 ring-1 ring-blue-500/20'
+                    : 'bg-slate-900/50 border border-white/5 hover:border-white/10'
+                }`}
+              >
+                <span className="text-lg">{agent.icon}</span>
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-medium whitespace-nowrap">{agent.name}</span>
+                {symbols.length > 0 && (
+                  <div className="flex gap-0.5 mt-0.5">
+                    {symbols.slice(0, 3).map(s => (
+                      <span key={s} className="text-[7px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 font-mono font-bold">{s}</span>
+                    ))}
+                    {symbols.length > 3 && (
+                      <span className="text-[7px] px-1 py-0.5 rounded bg-slate-700/50 text-slate-500 font-mono">+{symbols.length - 3}</span>
+                    )}
+                  </div>
+                )}
+                {pendingCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-[8px] text-white font-bold flex items-center justify-center">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // Event Feed Item
 const EventItem = ({ event }) => {
   const typeClass = EVENT_TYPE_COLORS[event.event_type] || 'bg-slate-600/20 text-slate-300';
+  const symbols = extractSymbols(event.strategy_id);
   return (
     <div className="flex gap-3 p-3 hover:bg-white/[0.02] transition-colors">
       <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-sm">
@@ -92,8 +130,15 @@ const EventItem = ({ event }) => {
           </span>
           {event.strategy_id && (
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono">
-              {event.strategy_id}
+              {event.strategy_id.slice(0, 8)}…
             </span>
+          )}
+          {symbols.length > 0 && (
+            <div className="flex gap-1">
+              {symbols.map(s => (
+                <span key={s} className="text-[8px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-mono font-bold">{s}</span>
+              ))}
+            </div>
           )}
           {event.domain && (
             <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400">
@@ -122,6 +167,7 @@ const EventItem = ({ event }) => {
 // Strategy Workflow Card
 const WorkflowCard = ({ strategy, onSelect }) => {
   const statusClass = STATUS_COLORS[strategy.status] || STATUS_COLORS.pending;
+  const symbols = extractSymbols(strategy.name);
   return (
     <button
       onClick={() => onSelect(strategy.strategy_id)}
@@ -133,6 +179,13 @@ const WorkflowCard = ({ strategy, onSelect }) => {
           <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${statusClass}`}>
             {strategy.status}
           </span>
+          {symbols.length > 0 && (
+            <div className="flex gap-1">
+              {symbols.map(s => (
+                <span key={s} className="text-[8px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 font-mono font-bold">{s}</span>
+              ))}
+            </div>
+          )}
         </div>
         <span className="text-[10px] text-slate-600">{formatTimeAgo(strategy.updated_at)}</span>
       </div>
@@ -291,8 +344,209 @@ const StrategyDetail = ({ strategyId, onClose }) => {
   );
 };
 
-// Pending Work View — grouped by agent
-const PendingWorkView = ({ workItems, agents }) => {
+// Agent Work View — shows pending and completed items for ANY agent
+const AgentWorkView = ({ agentId, agentName, agentIcon, agentRole, pendingItems, completedItems, loadingCompleted, dateFilter, onDateFilterChange, onSelectStrategy }) => {
+  const [activeTab, setActiveTab] = useState('pending');
+  
+  // Filter completed items by date if filter is set
+  const filteredCompleted = useMemo(() => {
+    if (!dateFilter) return completedItems;
+    const today = new Date().toISOString().split('T')[0];
+    if (dateFilter === 'today') {
+      return completedItems.filter(item => item.processed_at?.startsWith(today));
+    }
+    if (dateFilter === 'week') {
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      return completedItems.filter(item => item.processed_at >= weekAgo);
+    }
+    if (dateFilter === 'month') {
+      const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      return completedItems.filter(item => item.processed_at >= monthAgo);
+    }
+    return completedItems;
+  }, [completedItems, dateFilter]);
+
+  const agentPending = pendingItems.filter(w => w.target_agent === agentId);
+  const agentCompleted = filteredCompleted.filter(c => c.processed_by === agentId);
+
+  // Auto-switch to completed tab if no pending but has completed
+  useEffect(() => {
+    if (agentPending.length === 0 && agentCompleted.length > 0 && activeTab === 'pending') {
+      setActiveTab('completed');
+    }
+  }, [agentPending.length, agentCompleted.length]);
+
+  return (
+    <div className="space-y-4">
+      {/* Agent Header */}
+      <div className="flex items-center gap-3 p-3 bg-blue-500/5 rounded-xl border border-blue-500/20">
+        <span className="text-2xl">{agentIcon}</span>
+        <div className="flex-1">
+          <div className="text-sm font-bold text-white">{agentName} <span className="text-[10px] text-slate-500 font-normal font-mono">({agentId})</span></div>
+          <p className="text-[11px] text-slate-400">{agentRole || 'Agent in research pipeline'}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-1 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-bold">
+            {agentPending.length} pending
+          </span>
+          <span className="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-bold">
+            {agentCompleted.length} completed
+          </span>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`flex-1 px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${
+            activeTab === 'pending' ? 'bg-blue-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Pending ({agentPending.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('completed')}
+          className={`flex-1 px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${
+            activeTab === 'completed' ? 'bg-emerald-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Completed ({agentCompleted.length})
+        </button>
+      </div>
+
+      {/* Pending List */}
+      {activeTab === 'pending' && (
+        <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending Items</span>
+            <span className="text-[10px] text-slate-600">{agentPending.length} items waiting</span>
+          </div>
+          {agentPending.length > 0 ? (
+            <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto">
+              {agentPending.map(w => {
+                const syms = extractSymbols(w.strategy_id) || [];
+                return (
+                  <div 
+                    key={w.event_id} 
+                    onClick={() => w.strategy_id && onSelectStrategy && onSelectStrategy(w.strategy_id)}
+                    className={`flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors ${w.strategy_id && onSelectStrategy ? 'cursor-pointer' : ''}`}
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-sm">
+                      {w.emitter_icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[w.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
+                          {w.event_type}
+                        </span>
+                        {w.strategy_id && (
+                          <span className="text-[9px] text-amber-400 font-mono">
+                            {w.strategy_id}
+                            {syms.length > 0 && (
+                              <span className="text-slate-500 ml-1">({syms.join(', ')})</span>
+                            )}
+                          </span>
+                        )}
+                        <span className="text-[9px] text-slate-600">from {w.emitter_name}</span>
+                      </div>
+                      <div className="text-[9px] text-slate-600">Domain: {w.domain || 'general'}</div>
+                    </div>
+                    <span className="text-[10px] text-slate-600 flex-shrink-0">{formatTimeAgo(w.created_at)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center p-8 text-slate-500">
+              <div className="text-3xl mb-3">✅</div>
+              <p className="text-sm font-medium text-slate-400">No pending items</p>
+              <p className="text-[11px] text-slate-600 mt-1">All work has been processed by {agentName}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Completed List */}
+      {activeTab === 'completed' && (
+        <div className="bg-slate-900/40 rounded-xl border border-white/[0.06] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+            <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Completed History</span>
+            <div className="flex items-center gap-1">
+              <select
+                value={dateFilter}
+                onChange={(e) => onDateFilterChange(e.target.value)}
+                className="bg-slate-800/80 border border-white/10 rounded px-2 py-1 text-[10px] text-slate-300 outline-none"
+              >
+                <option value="">All time</option>
+                <option value="today">Today</option>
+                <option value="week">Last 7 days</option>
+                <option value="month">Last 30 days</option>
+              </select>
+              <span className="text-[10px] text-slate-600">{agentCompleted.length} items</span>
+            </div>
+          </div>
+          {loadingCompleted ? (
+            <div className="text-center p-8 text-slate-500">
+              <div className="w-6 h-6 border-2 border-slate-600 border-t-emerald-500 rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-xs">Loading completed items...</p>
+            </div>
+          ) : agentCompleted.length > 0 ? (
+            <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto">
+              {agentCompleted.map(c => {
+                const syms = extractSymbols(c.strategy_id) || [];
+                return (
+                  <div 
+                    key={c.event_id} 
+                    onClick={() => c.strategy_id && onSelectStrategy && onSelectStrategy(c.strategy_id)}
+                    className={`flex items-center gap-3 p-3 hover:bg-white/[0.02] transition-colors ${c.strategy_id && onSelectStrategy ? 'cursor-pointer' : ''}`}
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-sm">
+                      ✅
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[c.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
+                          {c.event_type}
+                        </span>
+                        {c.strategy_id && (
+                          <span className="text-[9px] text-amber-400 font-mono">
+                            {c.strategy_id}
+                            {syms.length > 0 && (
+                              <span className="text-slate-500 ml-1">({syms.join(', ')})</span>
+                            )}
+                          </span>
+                        )}
+                        <span className="text-[9px] text-slate-600">from {c.emitter_name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[9px] text-slate-500">
+                        <span>Processed by: <span className="text-emerald-400">{c.processor_name}</span></span>
+                        <span>Status: <span className={c.processing_status === 'success' ? 'text-emerald-400' : 'text-amber-400'}>{c.processing_status}</span></span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end flex-shrink-0">
+                      <span className="text-[10px] text-slate-600">{formatTimeAgo(c.processed_at)}</span>
+                      <span className="text-[8px] text-slate-700">{c.processed_at?.slice(0, 10)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center p-8 text-slate-500">
+              <div className="text-3xl mb-3">📭</div>
+              <p className="text-sm font-medium text-slate-400">No completed items</p>
+              <p className="text-[11px] text-slate-600 mt-1">No processed work found for the selected filter</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Pending Work View — grouped by agent, with symbols
+const PendingWorkView = ({ workItems, agents, selectedAgent }) => {
   if (!workItems || workItems.length === 0) {
     return (
       <div className="text-center p-8 text-slate-500">
@@ -310,29 +564,63 @@ const PendingWorkView = ({ workItems, agents }) => {
     grouped[w.target_agent].push(w);
   });
 
+  // If an agent is selected, only show that agent's pending work
+  const agentsToShow = selectedAgent ? [selectedAgent] : Object.keys(grouped);
+
   return (
     <div className="divide-y divide-white/5">
-      {Object.entries(grouped).map(([agentId, items]) => (
-        <div key={agentId} className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-lg">{items[0].target_agent_icon}</span>
-            <span className="text-xs font-bold text-white">{items[0].target_agent_name}</span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">{items.length} pending</span>
+      {agentsToShow.map(agentId => {
+        const items = grouped[agentId];
+        if (!items || items.length === 0) return null;
+        // Collect all unique symbols for this agent
+        const allSymbols = new Set();
+        items.forEach(w => {
+          const syms = extractSymbols(w.strategy_id) || [];
+          syms.forEach(s => allSymbols.add(s));
+        });
+        const symbols = Array.from(allSymbols);
+        return (
+          <div key={agentId} className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">{items[0].target_agent_icon}</span>
+              <span className="text-xs font-bold text-white">{items[0].target_agent_name}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">{items.length} pending</span>
+              {symbols.length > 0 && (
+                <div className="flex gap-1 ml-auto">
+                  {symbols.slice(0, 5).map(s => (
+                    <span key={s} className="text-[8px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-mono font-bold">{s}</span>
+                  ))}
+                  {symbols.length > 5 && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-500 font-mono">+{symbols.length - 5}</span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              {items.map(w => {
+                const syms = extractSymbols(w.strategy_id) || [];
+                return (
+                  <div key={w.event_id} className="flex items-center gap-2 py-1.5 px-2 rounded bg-slate-800/30">
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[w.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
+                      {w.event_type}
+                    </span>
+                    {w.strategy_id && (
+                      <span className="text-[9px] text-amber-400 font-mono">
+                        {w.strategy_id.slice(0, 8)}…
+                        {syms.length > 0 && (
+                          <span className="text-slate-500 ml-1">({syms.join(', ')})</span>
+                        )}
+                      </span>
+                    )}
+                    <span className="text-[9px] text-slate-600">from {w.emitter_icon} {w.emitter_name}</span>
+                    <span className="text-[9px] text-slate-600 ml-auto">{formatTimeAgo(w.created_at)}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          <div className="space-y-1">
-            {items.map(w => (
-              <div key={w.event_id} className="flex items-center gap-2 py-1.5 px-2 rounded bg-slate-800/30">
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${EVENT_TYPE_COLORS[w.event_type] || 'bg-slate-700/50 text-slate-400'}`}>
-                  {w.event_type}
-                </span>
-                {w.strategy_id && <span className="text-[9px] text-amber-400 font-mono">{w.strategy_id}</span>}
-                <span className="text-[9px] text-slate-600">from {w.emitter_icon} {w.emitter_name}</span>
-                <span className="text-[9px] text-slate-600 ml-auto">{formatTimeAgo(w.created_at)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
@@ -342,11 +630,32 @@ export const AgenticResearch = () => {
   const [events, setEvents] = useState([]);
   const [workflows, setWorkflows] = useState([]);
   const [pendingWork, setPendingWork] = useState({ work_items: [], by_agent: {} });
+  const [completedWork, setCompletedWork] = useState({ completed_items: [], count: 0 });
   const [workflowSummary, setWorkflowSummary] = useState(null);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [selectedStrategy, setSelectedStrategy] = useState(null);
-  const [activeView, setActiveView] = useState('events'); // 'events', 'workflows', 'pending'
+  const [activeView, setActiveView] = useState('events'); // 'events', 'workflows', 'pending', 'intake'
   const [loading, setLoading] = useState(true);
+  const [loadingCompleted, setLoadingCompleted] = useState(false);
+  const [dateFilter, setDateFilter] = useState('');
+
+  // When an agent is selected via pipeline click with pending work, switch to pending view
+  const handleSelectAgent = (agentId) => {
+    if (agentId) {
+      const pendingCount = pendingWork.by_agent?.[agentId] || 0;
+      if (pendingCount > 0) {
+        setActiveView('pending');
+      }
+    }
+    setSelectedAgent(agentId);
+  };
+
+  // Handle clicking on an agent in the pipeline to show intake view
+  const handleAgentClick = (agentId) => {
+    setSelectedAgent(agentId);
+    setActiveView('intake');
+    fetchCompletedWork(agentId);
+  };
 
   useEffect(() => {
     fetchAll();
@@ -396,6 +705,16 @@ export const AgenticResearch = () => {
       .catch(e => console.error('Failed to fetch pending work:', e));
   };
 
+  const fetchCompletedWork = (agentId) => {
+    setLoadingCompleted(true);
+    const params = new URLSearchParams({ limit: '100' });
+    if (agentId) params.set('agent_id', agentId);
+    fetch(`/api/agents/completed-work?${params}`)
+      .then(r => r.json())
+      .then(data => { setCompletedWork(data); setLoadingCompleted(false); })
+      .catch(e => { console.error('Failed to fetch completed work:', e); setLoadingCompleted(false); });
+  };
+
   const fetchWorkflowSummary = () => {
     fetch('/api/agents/workflow-summary')
       .then(r => r.json())
@@ -425,6 +744,7 @@ export const AgenticResearch = () => {
             { id: 'events', label: 'Events' },
             { id: 'workflows', label: 'Workflows' },
             { id: 'pending', label: `Pending (${pendingWork.count || 0})` },
+            { id: 'intake', label: 'Intake' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -471,12 +791,14 @@ export const AgenticResearch = () => {
           agents={agents}
           pendingByAgent={pendingWork.by_agent || {}}
           selectedAgent={selectedAgent}
-          onSelectAgent={setSelectedAgent}
+          onSelectAgent={handleSelectAgent}
+          onAgentClick={handleAgentClick}
+          workItems={pendingWork.work_items || []}
         />
       </div>
 
-      {/* Agent Info Card */}
-      {selectedAgent && (() => {
+      {/* Agent Info Card - HIDDEN when in intake view to prevent duplication */}
+      {selectedAgent && activeView !== 'intake' && (() => {
         const agent = agents.find(a => a.agent_id === selectedAgent);
         if (!agent) return null;
         const agentPending = pendingWork.by_agent?.[selectedAgent] || 0;
@@ -551,14 +873,31 @@ export const AgenticResearch = () => {
           </>
         )}
 
-        {activeView === 'pending' && (
-          <>
-            <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
-              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Pending Work by Agent</span>
-              <span className="text-[10px] text-slate-600">{pendingWork.count || 0} items</span>
-            </div>
-            <PendingWorkView workItems={pendingWork.work_items} agents={agents} />
-          </>
+        {activeView === 'intake' && selectedAgent && (() => {
+          const agent = agents.find(a => a.agent_id === selectedAgent);
+          if (!agent) return null;
+          return (
+            <AgentWorkView
+              agentId={selectedAgent}
+              agentName={agent.name}
+              agentIcon={agent.icon}
+              agentRole={agent.role}
+              pendingItems={pendingWork.work_items || []}
+              completedItems={completedWork.completed_items || []}
+              loadingCompleted={loadingCompleted}
+              dateFilter={dateFilter}
+              onDateFilterChange={setDateFilter}
+              onSelectStrategy={setSelectedStrategy}
+            />
+          );
+        })()}
+
+        {activeView === 'intake' && !selectedAgent && (
+          <div className="text-center p-12 text-slate-500">
+            <div className="text-3xl mb-3">👆</div>
+            <p className="text-sm font-medium text-slate-400">Select an agent from the pipeline above</p>
+            <p className="text-[11px] text-slate-600 mt-1">Click on any agent in the Agent Pipeline to see their pending and completed work</p>
+          </div>
         )}
       </div>
 

@@ -206,148 +206,278 @@ const KPI = ({ l, v, sub, pos, hint }) => (
   </div>
 );
 
-// =================================================================
-// Sortable column header
-// =================================================================
-const SortableHeader = ({ label, sortKey, current, onSort, align = 'right' }) => {
-  const active = current?.key === sortKey;
-  const asc = active && current?.dir === 'asc';
-  return (
-    <th
-      onClick={() => onSort(sortKey)}
-      className={`py-1.5 px-2 cursor-pointer select-none qr-label hover:text-slate-200 ${align === 'left' ? 'text-left' : 'text-right'}`}
-    >
-      <span className={active ? 'text-blue-300' : ''}>{label}</span>
-      {active && <span className="ml-0.5 text-[8px]">{asc ? '▲' : '▼'}</span>}
-    </th>
-  );
-};
-
-const useSort = (initialKey, initialDir = 'desc') => {
-  const [sort, setSort] = useState({ key: initialKey, dir: initialDir });
-  const onSort = (key) => setSort(s => s.key === key ? { ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' });
-  const sorter = (a, b) => {
-    const av = a[sort.key], bv = b[sort.key];
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    if (typeof av === 'string') return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-    return sort.dir === 'asc' ? av - bv : bv - av;
-  };
-  return { sort, onSort, sorter };
-};
-
-// =================================================================
-// Portfolio Tab — quant-dense table with sortable columns
-// =================================================================
+// Portfolio Component — Split by Asset Class
 const PortfolioTab = ({ data }) => {
   const [search, setSearch] = useState('');
-  const { sort, onSort, sorter } = useSort('market_value');
+  const [activeFilter, setActiveFilter] = useState('ALL');
+  const [orderSymbol, setOrderSymbol] = useState('');
+  const [orderQty, setOrderQty] = useState(1);
+  const [orderType, setOrderType] = useState('MKT');
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderMsg, setOrderMsg] = useState(null);
 
-  const positions = useMemo(() => {
-    const filtered = data.positions.filter(p => !search || p.ticker?.toLowerCase().includes(search.toLowerCase()));
-    return [...filtered].sort(sorter);
-  }, [data.positions, search, sort]);
+  const placeOrder = async (action) => {
+    if (!orderSymbol) { setOrderMsg({ type: 'error', text: 'Enter a symbol' }); return; }
+    setOrderLoading(true);
+    setOrderMsg(null);
+    try {
+      const res = await fetch('/api/ib/place-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: orderSymbol.toUpperCase(), action, quantity: parseInt(orderQty) || 1, order_type: orderType })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOrderMsg({ type: 'success', text: data.message || `${action} order placed` });
+        setOrderSymbol('');
+        setOrderQty(1);
+      } else {
+        setOrderMsg({ type: 'error', text: data.detail || 'Order failed' });
+      }
+    } catch (e) {
+      setOrderMsg({ type: 'error', text: e.message || 'Network error' });
+    } finally {
+      setOrderLoading(false);
+    }
+  };
+
+  const positions = useMemo(() =>
+    (data.positions || []).filter(p => {
+      const matchesSearch = !search || p.ticker?.toLowerCase().includes(search.toLowerCase());
+      const matchesFilter = activeFilter === 'ALL' || p.asset_class === activeFilter;
+      return matchesSearch && matchesFilter;
+    }),
+    [data.positions, search, activeFilter]
+  );
+
+  // Group by asset class
+  const byAssetClass = useMemo(() => {
+    const groups = {};
+    for (const p of positions) {
+      const cls = p.asset_class || 'OTHER';
+      if (!groups[cls]) groups[cls] = [];
+      groups[cls].push(p);
+    }
+    return groups;
+  }, [positions]);
+
+  const assetClasses = ['STOCK', 'FX', 'CRYPTO', 'BOND', 'ETF', 'OPTION', 'FUTURE', 'OTHER'];
+  const activeClasses = assetClasses.filter(c => byAssetClass[c]?.length > 0);
 
   const totalValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
-  const totalPnL = positions.reduce((s, p) => s + (p.pnl || 0), 0);
-  const longCount = positions.filter(p => p.side === 'LONG').length;
-  const shortCount = positions.filter(p => p.side === 'SHORT').length;
+  const totalPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
+
+  // Summary by class
+  const classSummary = useMemo(() => {
+    const summary = {};
+    for (const cls of activeClasses) {
+      const grp = byAssetClass[cls];
+      summary[cls] = {
+        count: grp.length,
+        value: grp.reduce((s, p) => s + (p.market_value || 0), 0),
+        pnl: grp.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0),
+      };
+    }
+    return summary;
+  }, [byAssetClass, activeClasses]);
+
+  const classLabels = {
+    STOCK: { label: 'Stocks', icon: '📈', color: 'blue' },
+    FX: { label: 'FX', icon: '💱', color: 'emerald' },
+    CRYPTO: { label: 'Crypto', icon: '₿', color: 'amber' },
+    BOND: { label: 'Bonds', icon: '📋', color: 'slate' },
+    ETF: { label: 'ETFs', icon: '📊', color: 'violet' },
+    OPTION: { label: 'Options', icon: '⚡', color: 'rose' },
+    FUTURE: { label: 'Futures', icon: '⏳', color: 'orange' },
+    CASH: { label: 'Cash', icon: '💵', color: 'emerald' },
+    OTHER: { label: 'Other', icon: '💼', color: 'slate' },
+  };
+
+  const PositionTable = ({ positions, title, icon, color }) => {
+    const colorMap = {
+      blue: 'border-blue-500/20 bg-blue-500/5',
+      emerald: 'border-emerald-500/20 bg-emerald-500/5',
+      amber: 'border-amber-500/20 bg-amber-500/5',
+      slate: 'border-slate-500/20 bg-slate-500/5',
+      violet: 'border-violet-500/20 bg-violet-500/5',
+      rose: 'border-rose-500/20 bg-rose-500/5',
+      orange: 'border-orange-500/20 bg-orange-500/5',
+    };
+
+    const grpValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
+    const grpPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
+
+    return (
+      <div className={`rounded-xl border ${colorMap[color] || colorMap.slate} overflow-hidden mb-4`}>
+        <div className="px-3 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">{icon}</span>
+            <span className="text-xs font-bold text-white uppercase tracking-wider">{title}</span>
+            <span className="text-[10px] text-slate-500">{positions.length} positions</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-mono text-slate-400">{fmtK(grpValue)}</span>
+            <span className={`text-[11px] font-mono font-bold ${pnlCl(grpPnL)}`}>{grpPnL >= 0 ? '+' : ''}{fmtK(grpPnL)}</span>
+          </div>
+        </div>
+
+        <table className="w-full text-xs">
+          <thead className="bg-slate-900/80">
+            <tr className="text-[9px] text-slate-500 uppercase">
+              {['Ticker', 'Name', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
+                <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {positions.map(p => {
+              const entry = p.avg_entry_price || p.entry_price || 0;
+              const current = p.current_price || 0;
+              const pnlPct = entry > 0 ? ((current - entry) / entry * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
+              return (
+                <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
+                  <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
+                  <td className="py-2 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
+                  <td className="py-2 px-2 text-center">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : p.side === 'SHORT' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.side || '—'}</span>
+                  </td>
+                  <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
+                  <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(entry)}</td>
+                  <td className="py-2 px-2 text-right font-mono text-white">${fmt(current)}</td>
+                  <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
+                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
+                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-end justify-between flex-wrap gap-2">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-bold text-white tracking-tight">Portfolio</h2>
-          <p className="text-[10px] text-slate-500">Live positions · sortable · P&L tracking</p>
+          <h2 className="text-sm font-bold text-white">Portfolio</h2>
+          <p className="text-[10px] text-slate-500">Live positions & P&L by asset class</p>
+        </div>
+        <Pill c={totalPnL >= 0 ? 'emerald' : 'rose'}>{totalPnL >= 0 ? '+' : ''}{fmtK(totalPnL)}</Pill>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <KPI l="Total Value" v={fmtK(totalValue)} />
+        <KPI l="Positions" v={positions.length} />
+        <KPI l="Asset Classes" v={activeClasses.length} />
+        <KPI l="Unrealized P&L" v={fmtK(totalPnL)} pos={totalPnL >= 0} />
+      </div>
+
+      {/* Manual Order */}
+      <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs font-bold text-white">Quick Order</span>
+          {orderMsg && (
+            <span className={`text-[10px] ${orderMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{orderMsg.text}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Filter ticker…"
-            className="px-2.5 py-1 bg-slate-900/60 border border-white/[0.08] rounded-md text-[11px] text-white w-36 placeholder-slate-600 focus:outline-none focus:border-blue-500/50 font-mono"
+            type="text"
+            value={orderSymbol}
+            onChange={e => setOrderSymbol(e.target.value.toUpperCase())}
+            placeholder="Symbol"
+            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-24 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
           />
+          <input
+            type="number"
+            value={orderQty}
+            onChange={e => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+            min="1"
+            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-16 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+          />
+          <select
+            value={orderType}
+            onChange={e => setOrderType(e.target.value)}
+            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500/50"
+          >
+            <option value="MKT">MKT</option>
+            <option value="LMT">LMT</option>
+            <option value="STP">STP</option>
+          </select>
+          <button
+            onClick={() => placeOrder('BUY')}
+            disabled={orderLoading}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
+          >
+            {orderLoading ? '...' : '📈 BUY'}
+          </button>
+          <button
+            onClick={() => placeOrder('SELL')}
+            disabled={orderLoading}
+            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
+          >
+            {orderLoading ? '...' : '📉 SELL'}
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-        <KPI l="Total Value"   v={fmtK(totalValue)} />
-        <KPI l="Net P&L"       v={fmtK(totalPnL)} pos={totalPnL >= 0} sub={totalValue > 0 ? `${((totalPnL/totalValue)*100).toFixed(2)}%` : null} />
-        <KPI l="Positions"     v={positions.length} sub={`${longCount}L / ${shortCount}S`} />
-        <KPI l="Long Exposure" v={fmtK(positions.filter(p => p.side === 'LONG').reduce((s,p)=>s+(p.market_value||0),0))} />
-        <KPI l="Short Exposure"v={fmtK(positions.filter(p => p.side === 'SHORT').reduce((s,p)=>s+(p.market_value||0),0))} />
+      {/* Asset Class Filter */}
+      <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06] overflow-x-auto">
+        <button
+          onClick={() => setActiveFilter('ALL')}
+          className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap ${activeFilter === 'ALL' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
+        >
+          All ({positions.length})
+        </button>
+        {activeClasses.map(cls => (
+          <button
+            key={cls}
+            onClick={() => setActiveFilter(cls)}
+            className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap ${activeFilter === cls ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
+          >
+            {classLabels[cls]?.icon} {classLabels[cls]?.label} ({byAssetClass[cls].length})
+          </button>
+        ))}
       </div>
 
-      <div className="qr-surface overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full hidden md:table">
-            <thead>
-              <tr className="border-b border-white/[0.06]">
-                <SortableHeader label="Ticker"   sortKey="ticker"        current={sort} onSort={onSort} align="left" />
-                <SortableHeader label="Strategy" sortKey="strategy"      current={sort} onSort={onSort} align="left" />
-                <SortableHeader label="Side"     sortKey="side"          current={sort} onSort={onSort} />
-                <SortableHeader label="Qty"      sortKey="quantity"      current={sort} onSort={onSort} />
-                <SortableHeader label="Entry"    sortKey="entry_price"   current={sort} onSort={onSort} />
-                <SortableHeader label="Last"     sortKey="current_price" current={sort} onSort={onSort} />
-                <SortableHeader label="Value"    sortKey="market_value"  current={sort} onSort={onSort} />
-                <SortableHeader label="P&L $"    sortKey="pnl"           current={sort} onSort={onSort} />
-                <SortableHeader label="P&L %"    sortKey="pnl_pct"       current={sort} onSort={onSort} />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04]">
-              {positions.map(p => {
-                const pnlPct = p.pnl_pct ?? (p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0);
-                return (
-                  <tr key={p.id || p.ticker} className="qr-tr-hover">
-                    <td className="py-1 px-2 text-[12px] font-bold text-white tracking-tight">{p.ticker}</td>
-                    <td className="py-1 px-2 text-[10px] text-slate-400 truncate max-w-[160px]">{p.strategy || '—'}</td>
-                    <td className="py-1 px-2 text-center">
-                      <span className={`qr-chip ${p.side === 'LONG' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{p.side}</span>
-                    </td>
-                    <td className="py-1 px-2 qr-num text-slate-200">{fmt(p.quantity, 0)}</td>
-                    <td className="py-1 px-2 qr-num text-slate-400">{fmt(p.entry_price)}</td>
-                    <td className="py-1 px-2 qr-num text-white">{fmt(p.current_price)}</td>
-                    <td className="py-1 px-2 qr-num text-slate-200">{fmtK(p.market_value)}</td>
-                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</td>
-                    <td className={`py-1 px-2 qr-num ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
-                  </tr>
-                );
-              })}
-              {!positions.length && (
-                <tr><td colSpan={9} className="py-8 text-center text-slate-600 text-[11px]">No positions · {search ? 'no matches for filter' : 'deploy a strategy from the Lab tab'}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile rows */}
-        <div className="md:hidden divide-y divide-white/5">
-          {positions.map(p => {
-            const pnlPct = p.pnl_pct ?? (p.entry_price > 0 ? ((p.current_price - p.entry_price) / p.entry_price * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0);
-            return (
-              <div key={p.id || p.ticker} className="px-3 py-2">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-[13px]">{p.ticker}</span>
-                    <span className={`qr-chip ${p.side === 'LONG' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{p.side}</span>
-                  </div>
-                  <span className={`qr-num font-bold text-[13px] ${pnlCl(p.pnl)}`}>{fmtK(p.pnl)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-slate-400">
-                  <span>{p.strategy || '—'}</span>
-                  <span className="qr-num">{fmt(p.quantity,0)} @ {fmt(p.entry_price)}</span>
-                </div>
-                <div className="flex items-center justify-between text-[10px] mt-0.5">
-                  <span className="text-slate-500">last <span className="text-slate-200 qr-num">{fmt(p.current_price)}</span></span>
-                  <span className={`qr-num ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</span>
-                </div>
-              </div>
-            );
-          })}
-          {!positions.length && <div className="py-6 text-center text-slate-600 text-[11px]">No positions</div>}
-        </div>
+      {/* Search */}
+      <div className="flex items-center gap-2">
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Filter by ticker..."
+          className="px-3 py-2 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-48 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+        />
       </div>
+
+      {/* Positions by Asset Class */}
+      {activeFilter === 'ALL' ? (
+        activeClasses.map(cls => (
+          <PositionTable
+            key={cls}
+            positions={byAssetClass[cls]}
+            title={classLabels[cls]?.label || cls}
+            icon={classLabels[cls]?.icon || '💼'}
+            color={classLabels[cls]?.color || 'slate'}
+          />
+        ))
+      ) : (
+        byAssetClass[activeFilter] && (
+          <PositionTable
+            positions={byAssetClass[activeFilter]}
+            title={classLabels[activeFilter]?.label || activeFilter}
+            icon={classLabels[activeFilter]?.icon || '💼'}
+            color={classLabels[activeFilter]?.color || 'slate'}
+          />
+        )
+      )}
+
+      {!positions.length && (
+        <div className="py-12 text-center text-slate-600 text-sm bg-slate-900/30 rounded-xl border border-white/[0.06]">
+          No positions found
+        </div>
+      )}
     </div>
   );
 };

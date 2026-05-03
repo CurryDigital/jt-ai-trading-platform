@@ -269,7 +269,7 @@ class AgentActivity(Base):
     strategy_id = Column(String(10), nullable=True)  # FK to strategy_registry
     action = Column(String(50))  # e.g. REVIEW, APPROVE, COMMENT, SIGNAL, VALIDATE
     message = Column(Text)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     timestamp = Column(DateTime, default=get_hkt_now)
 
 class Trade(Base):
