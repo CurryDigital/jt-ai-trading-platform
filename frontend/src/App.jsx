@@ -461,17 +461,20 @@ export default function App() {
   };
 
   const navItems = useMemo(() => [
-    { id: 'command',          label: 'Command',  short: 'Cmd',     IconComponent: Icon.Command,     key: '1' },
-    { id: 'lab',              label: 'Lab',      short: 'Lab',     IconComponent: Icon.Lab,         key: '2' },
-    { id: 'strategies',       label: 'Strategies', short: 'Strat', IconComponent: Icon.Strategies,  key: '3' },
-    { id: 'agentic_research', label: 'Agents',   short: 'Agt',     IconComponent: Icon.Agents,      key: '4' },
-    { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance, key: '5' },
-    { id: 'research',         label: 'Research', short: 'Res',     IconComponent: Icon.Research,    key: '6' },
-    { id: 'portfolio',        label: 'Portfolio', short: 'Port',   IconComponent: Icon.Portfolio,   key: '7' },
-    { id: 'markets',          label: 'Markets',  short: 'Mkt',     IconComponent: Icon.Markets,     key: '8' },
-    { id: 'reconciliation',   label: 'Recon',    short: 'Rec',     IconComponent: Icon.Reconciliation, key: '9' },
-    { id: 'backtests',         label: 'Backtests', short: 'BT',     IconComponent: Icon.Backtest,    key: '0' },
-    { id: 'settings',         label: 'Settings', short: 'Set',     IconComponent: Icon.Settings },
+    // Operate cluster — daily workflow
+    { id: 'command',          label: 'Command',     short: 'Cmd',  IconComponent: Icon.Command,        key: '1', group: 'op' },
+    { id: 'portfolio',        label: 'Portfolio',   short: 'Port', IconComponent: Icon.Portfolio,      key: '2', group: 'op' },
+    { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance,    key: '3', group: 'op' },
+    { id: 'reconciliation',   label: 'Recon',       short: 'Rec',  IconComponent: Icon.Reconciliation, key: '4', group: 'op' },
+    // Research cluster — periodic / build & test
+    { id: 'markets',          label: 'Markets',     short: 'Mkt',  IconComponent: Icon.Markets,        key: '5', group: 'rs' },
+    { id: 'lab',              label: 'Lab',         short: 'Lab',  IconComponent: Icon.Lab,            key: '6', group: 'rs' },
+    { id: 'strategies',       label: 'Strategies',  short: 'Strat',IconComponent: Icon.Strategies,     key: '7', group: 'rs' },
+    { id: 'backtests',        label: 'Backtests',   short: 'BT',   IconComponent: Icon.Backtest,       key: '8', group: 'rs' },
+    { id: 'research',         label: 'Research',    short: 'Res',  IconComponent: Icon.Research,       key: '9', group: 'rs' },
+    { id: 'agentic_research', label: 'Agents',      short: 'Agt',  IconComponent: Icon.Agents,         key: '0', group: 'rs' },
+    // Admin
+    { id: 'settings',         label: 'Settings',    short: 'Set',  IconComponent: Icon.Settings,                 group: 'admin' },
   ], []);
 
   const navigateToTab = (tab) => navigate(`/${currentMode}/${tab}`);
@@ -616,24 +619,30 @@ export default function App() {
               </div>
             </div>
 
-            {/* Desktop Nav — dense pill row with kbd hints */}
-            <nav className="hidden md:flex gap-px p-0.5 rounded-md bg-slate-900/50 border border-white/[0.05]">
-              {navItems.map(n => (
-                <button
-                  key={n.id}
-                  onClick={() => navigateToTab(n.id)}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-semibold transition-all relative ${
-                    currentTab === n.id
-                      ? 'bg-white/[0.08] text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-                  }`}
-                  title={`${n.label} (${n.key})`}
-                >
-                  <n.IconComponent />
-                  <span>{n.label}</span>
-                  <span className="hidden lg:inline qr-kbd ml-0.5">{n.key}</span>
-                </button>
-              ))}
+            {/* Desktop Nav — dense pill row with kbd hints, visually grouped */}
+            <nav className="hidden md:flex items-center gap-px p-0.5 rounded-md bg-slate-900/50 border border-white/[0.05]">
+              {navItems.map((n, i) => {
+                const prev = navItems[i - 1];
+                const groupChanged = prev && prev.group !== n.group;
+                return (
+                  <React.Fragment key={n.id}>
+                    {groupChanged && <span className="w-px h-4 bg-white/[0.08] mx-1" aria-hidden="true" />}
+                    <button
+                      onClick={() => navigateToTab(n.id)}
+                      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-semibold transition-all relative ${
+                        currentTab === n.id
+                          ? 'bg-white/[0.08] text-white'
+                          : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                      }`}
+                      title={`${n.label}${n.key ? ` (${n.key})` : ''}`}
+                    >
+                      <n.IconComponent />
+                      <span>{n.label}</span>
+                      {n.key && <span className="hidden lg:inline qr-kbd ml-0.5">{n.key}</span>}
+                    </button>
+                  </React.Fragment>
+                );
+              })}
             </nav>
 
             {/* Mobile hamburger */}
