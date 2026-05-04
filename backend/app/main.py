@@ -3954,6 +3954,346 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
     return get_global_execution_mode(db)
 
 
+@app.get("/api/reconciliation/positions")
+def get_reconciliation(db: Session = Depends(get_db)):
+    """Reconcile DB-recorded positions against trade-implied positions.
+
+    Three sources are cross-checked:
+    1. gold.paper_strategies — current state (qty/invested)
+    2. gold.trade_executions — historical fills (sum of executed quantities)
+    3. IBKR account summary — live broker funding (if connected)
+
+    A 'discrepancy' is any row where the trade-implied quantity differs
+    from the recorded quantity by more than 0.0001 shares, or where one
+    side has rows the other doesn't.
+    """
+    # 1. DB positions
+    db_rows = safe_query(db, """
+        SELECT
+            ps.id,
+            ps.strategy_id,
+            ps.ticker,
+            ps.execution_mode,
+            ps.entry_price,
+            ps.invested_capital,
+            ps.unrealized_pnl,
+            ps.realized_pnl,
+            ps.status,
+            ps.created_at
+        FROM gold.paper_strategies ps
+        WHERE ps.status = 'ACTIVE'
+        ORDER BY ps.ticker
+    """, label="recon_db_positions")
+
+    # 2. Trade-implied: net qty per (strategy_id, ticker, mode) from executions
+    trade_rows = safe_query(db, """
+        SELECT
+            strategy_id,
+            ticker,
+            execution_mode,
+            SUM(CASE WHEN action = 'BUY'  THEN quantity ELSE 0 END) -
+            SUM(CASE WHEN action = 'SELL' THEN quantity ELSE 0 END) as net_qty,
+            SUM(quantity) as gross_qty,
+            COUNT(*) as n_trades,
+            MAX(executed_at) as last_fill_at,
+            SUM(COALESCE(pnl, 0)) as realized_pnl
+        FROM gold.trade_executions
+        GROUP BY strategy_id, ticker, execution_mode
+    """, label="recon_trade_positions")
+
+    db_positions = []
+    for r in db_rows:
+        invested = float(r.invested_capital or 0)
+        entry = float(r.entry_price or 0)
+        implied_qty = invested / entry if entry > 0 else 0
+        db_positions.append({
+            "id": r.id,
+            "strategy_id": r.strategy_id,
+            "ticker": r.ticker,
+            "execution_mode": r.execution_mode,
+            "implied_qty": round(implied_qty, 4),
+            "invested_capital": invested,
+            "entry_price": entry,
+            "unrealized_pnl": float(r.unrealized_pnl or 0),
+            "realized_pnl": float(r.realized_pnl or 0),
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    trade_index = {}
+    for r in trade_rows:
+        key = (r.strategy_id, r.ticker, r.execution_mode)
+        trade_index[key] = {
+            "strategy_id": r.strategy_id,
+            "ticker": r.ticker,
+            "execution_mode": r.execution_mode,
+            "net_qty": float(r.net_qty or 0),
+            "gross_qty": float(r.gross_qty or 0),
+            "n_trades": int(r.n_trades or 0),
+            "last_fill_at": r.last_fill_at.isoformat() if r.last_fill_at else None,
+            "realized_pnl": float(r.realized_pnl or 0),
+        }
+
+    # 3. Compute per-(strategy, ticker, mode) discrepancies
+    discrepancies = []
+    db_keys = set()
+    for p in db_positions:
+        key = (p["strategy_id"], p["ticker"], p["execution_mode"])
+        db_keys.add(key)
+        trade = trade_index.get(key)
+        if trade is None:
+            discrepancies.append({
+                "kind": "db_only",
+                "strategy_id": p["strategy_id"],
+                "ticker": p["ticker"],
+                "execution_mode": p["execution_mode"],
+                "db_qty": p["implied_qty"],
+                "trade_qty": 0,
+                "delta_qty": p["implied_qty"],
+                "note": "DB has position but no trade history",
+            })
+        else:
+            delta = abs(p["implied_qty"] - trade["net_qty"])
+            if delta > 0.0001:
+                discrepancies.append({
+                    "kind": "qty_mismatch",
+                    "strategy_id": p["strategy_id"],
+                    "ticker": p["ticker"],
+                    "execution_mode": p["execution_mode"],
+                    "db_qty": p["implied_qty"],
+                    "trade_qty": trade["net_qty"],
+                    "delta_qty": p["implied_qty"] - trade["net_qty"],
+                    "n_trades": trade["n_trades"],
+                    "last_fill_at": trade["last_fill_at"],
+                    "note": f"DB shows {p['implied_qty']:.4f} but trades net to {trade['net_qty']:.4f}",
+                })
+
+    for key, t in trade_index.items():
+        if key not in db_keys and t["net_qty"] != 0:
+            discrepancies.append({
+                "kind": "trades_only",
+                "strategy_id": t["strategy_id"],
+                "ticker": t["ticker"],
+                "execution_mode": t["execution_mode"],
+                "db_qty": 0,
+                "trade_qty": t["net_qty"],
+                "delta_qty": -t["net_qty"],
+                "n_trades": t["n_trades"],
+                "last_fill_at": t["last_fill_at"],
+                "note": "Trade history shows net position but DB has none",
+            })
+
+    # 4. IBKR account snapshot (best-effort)
+    ibkr_snapshot = None
+    ibkr_connected = False
+    try:
+        from app.services.ib_service import ib_quant_service, get_ib_threaded_service
+        ibkr_connected = bool(get_ib_threaded_service().is_connected)
+        if ibkr_connected:
+            ibkr_snapshot = ib_quant_service.get_account_summary()
+    except Exception as e:
+        logger.warning(f"Reconciliation: IBKR snapshot unavailable: {e}")
+
+    return {
+        "db_positions": db_positions,
+        "trade_positions": list(trade_index.values()),
+        "discrepancies": discrepancies,
+        "ibkr": {
+            "connected": ibkr_connected,
+            "snapshot": ibkr_snapshot,
+        },
+        "summary": {
+            "db_count": len(db_positions),
+            "trade_keys": len(trade_index),
+            "discrepancy_count": len(discrepancies),
+            "by_kind": {
+                "db_only":      len([d for d in discrepancies if d["kind"] == "db_only"]),
+                "trades_only":  len([d for d in discrepancies if d["kind"] == "trades_only"]),
+                "qty_mismatch": len([d for d in discrepancies if d["kind"] == "qty_mismatch"]),
+            },
+        },
+        "as_of": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@app.get("/api/backtests/strategies")
+def list_backtest_strategies(db: Session = Depends(get_db)):
+    """List all strategies that have backtest results, with aggregate stats."""
+    rows = safe_query(db, """
+        SELECT
+            b.strategy_id,
+            COALESCE(sd.name, b.strategy_id) as strategy_name,
+            COALESCE(sd.asset_class, 'STOCK') as asset_class,
+            COUNT(*) as ticker_count,
+            AVG(b.win_rate) as avg_win_rate,
+            AVG(b.sharpe_ratio) as avg_sharpe,
+            AVG(b.profit_factor) as avg_pf,
+            AVG(b.max_drawdown) as avg_max_dd,
+            AVG(b.total_return) as avg_return,
+            AVG(b.strategy_score) as avg_score,
+            SUM(b.num_trades) as total_trades,
+            MAX(b.calculated_at) as last_run
+        FROM gold.strategy_backtests b
+        LEFT JOIN gold.strategy_definitions sd ON sd.strategy_id = b.strategy_id
+        GROUP BY b.strategy_id, sd.name, sd.asset_class
+        ORDER BY avg_score DESC NULLS LAST
+    """, label="backtest_strategies")
+
+    return {
+        "strategies": [{
+            "strategy_id": r.strategy_id,
+            "strategy_name": r.strategy_name,
+            "asset_class": r.asset_class,
+            "ticker_count": int(r.ticker_count or 0),
+            "win_rate": round(float(r.avg_win_rate or 0) * 100, 1) if r.avg_win_rate and r.avg_win_rate <= 1 else round(float(r.avg_win_rate or 0), 1),
+            "sharpe": round(float(r.avg_sharpe or 0), 2),
+            "profit_factor": round(float(r.avg_pf or 0), 2),
+            "max_drawdown": round(float(r.avg_max_dd or 0), 2),
+            "total_return": round(float(r.avg_return or 0), 2),
+            "score": round(float(r.avg_score or 0), 2),
+            "total_trades": int(r.total_trades or 0),
+            "last_run": r.last_run.isoformat() if r.last_run else None,
+        } for r in rows],
+        "count": len(rows),
+    }
+
+
+@app.get("/api/backtests/strategy/{strategy_id}")
+def get_backtest_strategy_detail(strategy_id: str, limit: int = 100, db: Session = Depends(get_db)):
+    """Per-ticker backtest results for one strategy, ranked by score."""
+    rows = safe_query(db, """
+        SELECT
+            ticker, market,
+            win_rate, sharpe_ratio, profit_factor, total_return, max_drawdown,
+            num_trades, avg_trade_return,
+            current_signal, signal_strength,
+            entry_price, stop_loss, target_price,
+            strategy_score, rationale, calculated_at
+        FROM gold.strategy_backtests
+        WHERE strategy_id = :sid
+        ORDER BY strategy_score DESC NULLS LAST
+        LIMIT :limit
+    """, {"sid": strategy_id, "limit": limit}, label="backtest_strategy_detail")
+
+    tickers = [{
+        "ticker": r.ticker,
+        "market": r.market,
+        "win_rate": round(float(r.win_rate or 0) * 100, 1) if r.win_rate and r.win_rate <= 1 else round(float(r.win_rate or 0), 1),
+        "sharpe": round(float(r.sharpe_ratio or 0), 2),
+        "profit_factor": round(float(r.profit_factor or 0), 2),
+        "total_return": round(float(r.total_return or 0), 2),
+        "max_drawdown": round(float(r.max_drawdown or 0), 2),
+        "num_trades": int(r.num_trades or 0),
+        "avg_trade_return": round(float(r.avg_trade_return or 0), 2),
+        "current_signal": r.current_signal,
+        "signal_strength": round(float(r.signal_strength or 0), 2),
+        "entry_price": float(r.entry_price) if r.entry_price else None,
+        "stop_loss": float(r.stop_loss) if r.stop_loss else None,
+        "target_price": float(r.target_price) if r.target_price else None,
+        "score": round(float(r.strategy_score or 0), 2),
+        "rationale": r.rationale,
+        "calculated_at": r.calculated_at.isoformat() if r.calculated_at else None,
+    } for r in rows]
+
+    # Aggregate stats
+    if tickers:
+        wrs = [t["win_rate"] for t in tickers if t["win_rate"]]
+        sharpes = [t["sharpe"] for t in tickers if t["sharpe"]]
+        scores = [t["score"] for t in tickers if t["score"]]
+        agg = {
+            "ticker_count": len(tickers),
+            "avg_win_rate": round(sum(wrs) / len(wrs), 1) if wrs else 0,
+            "avg_sharpe": round(sum(sharpes) / len(sharpes), 2) if sharpes else 0,
+            "avg_score": round(sum(scores) / len(scores), 2) if scores else 0,
+            "best_ticker": tickers[0]["ticker"] if tickers else None,
+        }
+    else:
+        agg = {"ticker_count": 0, "avg_win_rate": 0, "avg_sharpe": 0, "avg_score": 0, "best_ticker": None}
+
+    return {"strategy_id": strategy_id, "tickers": tickers, "aggregate": agg}
+
+
+@app.get("/api/backtests/compare")
+def compare_backtests(ids: str, db: Session = Depends(get_db)):
+    """Side-by-side backtest comparison for 2-6 strategies.
+
+    `ids` is a comma-separated list of strategy_ids.
+    Returns aggregate metrics and the top tickers per strategy.
+    """
+    sids = [s.strip() for s in (ids or "").split(",") if s.strip()][:6]
+    if len(sids) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 strategy_ids in `ids`")
+
+    out = []
+    for sid in sids:
+        agg_row = safe_query_one(db, """
+            SELECT
+                COALESCE(sd.name, b.strategy_id) as strategy_name,
+                COALESCE(sd.asset_class, 'STOCK') as asset_class,
+                COUNT(*) as ticker_count,
+                AVG(b.win_rate) as win_rate,
+                AVG(b.sharpe_ratio) as sharpe,
+                AVG(b.profit_factor) as pf,
+                AVG(b.max_drawdown) as max_dd,
+                AVG(b.total_return) as total_return,
+                AVG(b.strategy_score) as score,
+                SUM(b.num_trades) as total_trades,
+                MAX(b.calculated_at) as last_run
+            FROM gold.strategy_backtests b
+            LEFT JOIN gold.strategy_definitions sd ON sd.strategy_id = b.strategy_id
+            WHERE b.strategy_id = :sid
+            GROUP BY b.strategy_id, sd.name, sd.asset_class
+        """, {"sid": sid}, label=f"bt_compare_agg_{sid}")
+
+        top_tickers = safe_query(db, """
+            SELECT ticker, win_rate, sharpe_ratio, total_return, max_drawdown,
+                   strategy_score, current_signal, num_trades
+            FROM gold.strategy_backtests
+            WHERE strategy_id = :sid
+            ORDER BY strategy_score DESC NULLS LAST
+            LIMIT 10
+        """, {"sid": sid}, label=f"bt_compare_top_{sid}")
+
+        if agg_row is None:
+            out.append({
+                "strategy_id": sid,
+                "strategy_name": sid,
+                "asset_class": None,
+                "ticker_count": 0,
+                "missing": True,
+                "top_tickers": [],
+            })
+            continue
+
+        out.append({
+            "strategy_id": sid,
+            "strategy_name": agg_row.strategy_name,
+            "asset_class": agg_row.asset_class,
+            "ticker_count": int(agg_row.ticker_count or 0),
+            "win_rate": round(float(agg_row.win_rate or 0) * 100, 1) if agg_row.win_rate and agg_row.win_rate <= 1 else round(float(agg_row.win_rate or 0), 1),
+            "sharpe": round(float(agg_row.sharpe or 0), 2),
+            "profit_factor": round(float(agg_row.pf or 0), 2),
+            "max_drawdown": round(float(agg_row.max_dd or 0), 2),
+            "total_return": round(float(agg_row.total_return or 0), 2),
+            "score": round(float(agg_row.score or 0), 2),
+            "total_trades": int(agg_row.total_trades or 0),
+            "last_run": agg_row.last_run.isoformat() if agg_row.last_run else None,
+            "top_tickers": [{
+                "ticker": t.ticker,
+                "win_rate": round(float(t.win_rate or 0) * 100, 1) if t.win_rate and t.win_rate <= 1 else round(float(t.win_rate or 0), 1),
+                "sharpe": round(float(t.sharpe_ratio or 0), 2),
+                "total_return": round(float(t.total_return or 0), 2),
+                "max_drawdown": round(float(t.max_drawdown or 0), 2),
+                "score": round(float(t.strategy_score or 0), 2),
+                "signal": t.current_signal,
+                "num_trades": int(t.num_trades or 0),
+            } for t in top_tickers],
+            "missing": False,
+        })
+
+    return {"strategies": out, "count": len(out)}
+
+
 @app.post("/api/execution/halt")
 def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
     """Emergency kill switch — demote ALL live strategies to PAPER and set
