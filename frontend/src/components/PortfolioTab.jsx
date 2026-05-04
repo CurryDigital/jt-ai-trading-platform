@@ -94,9 +94,66 @@ const PositionTable = ({ positions, title, icon, color }) => {
   );
 };
 
+const CorrelationHeatmap = ({ data }) => {
+  if (!data?.strategies?.length || !data?.matrix?.length) return null;
+  const ids = data.strategies;
+  const cell = (v) => {
+    const intensity = Math.min(1, Math.abs(v));
+    const bg = v > 0.7 ? `rgba(244,63,94,${0.15 + intensity * 0.5})`
+             : v > 0.4 ? `rgba(251,146,60,${0.15 + intensity * 0.4})`
+             : v > 0.1 ? `rgba(250,204,21,${0.1 + intensity * 0.3})`
+             : 'rgba(100,116,139,0.05)';
+    return bg;
+  };
+  return (
+    <div className="qr-surface p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="qr-label">Strategy Correlation (ticker overlap)</span>
+        <span className="text-[10px] text-slate-500">{ids.length} strategies</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr>
+              <th className="py-0.5 px-1"></th>
+              {ids.map(id => (
+                <th key={id} className="qr-label text-[8px] font-mono text-slate-500 px-1 pb-1 truncate max-w-[60px]" title={id}>
+                  {id.length > 6 ? id.slice(0, 6) : id}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.matrix.map((row, i) => (
+              <tr key={ids[i]}>
+                <td className="qr-label text-[9px] font-mono text-slate-400 pr-2 text-right truncate max-w-[80px]" title={ids[i]}>
+                  {ids[i].length > 8 ? ids[i].slice(0, 8) : ids[i]}
+                </td>
+                {row.map((v, j) => (
+                  <td
+                    key={j}
+                    className="text-center text-[9px] font-mono"
+                    style={{ background: cell(v), color: v > 0.5 ? '#fff' : '#94a3b8', minWidth: 28, height: 22 }}
+                    title={`${ids[i]} ↔ ${ids[j]}: ${(v * 100).toFixed(0)}%`}
+                  >
+                    {i === j ? '·' : v > 0.05 ? (v * 100).toFixed(0) : ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 text-[9px] text-slate-600">
+        Higher values (red) = strategies share more tickers, increasing correlated risk.
+      </div>
+    </div>
+  );
+};
+
 const RiskDashboard = ({ risk }) => {
   if (!risk) return null;
-  const { summary, var: varData, concentration, alerts } = risk;
+  const { summary, var: varData, concentration, alerts, correlations } = risk;
 
   return (
     <div className="space-y-3">
@@ -158,7 +215,7 @@ const RiskDashboard = ({ risk }) => {
               </span>
             </div>
             <div className="mb-2">
-              <div className="text-[10px] text-slate-500 mb-1">Top 5 = {fmtPct(concentration.top_5_concentration)}% of portfolio</div>
+              <div className="text-[10px] text-slate-500 mb-1">Top 5 = {fmtPct(concentration.top_5_concentration)} of portfolio</div>
               <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className={`h-full rounded-full ${(concentration.top_5_concentration || 0) > 80 ? 'bg-rose-500' : (concentration.top_5_concentration || 0) > 60 ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -169,12 +226,55 @@ const RiskDashboard = ({ risk }) => {
             {concentration.by_ticker?.slice(0, 5).map((t, i) => (
               <div key={t.ticker} className="flex items-center justify-between py-0.5">
                 <span className="text-[10px] font-mono text-slate-300">{i + 1}. {t.ticker}</span>
-                <span className="text-[10px] font-mono text-slate-400">{fmtPct(t.weight_pct)}%</span>
+                <span className="text-[10px] font-mono text-slate-400">{fmtPct(t.weight_pct)}</span>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Correlation matrix */}
+      {correlations && correlations.strategies?.length > 1 && (
+        <CorrelationHeatmap data={correlations} />
+      )}
+
+      {/* Concentration breakdowns by strategy + asset class */}
+      {concentration && (concentration.by_strategy?.length || concentration.by_asset_class?.length) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {concentration.by_strategy?.length > 0 && (
+            <div className="qr-surface p-3">
+              <div className="qr-label mb-2">By Strategy ({concentration.by_strategy.length})</div>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {concentration.by_strategy.slice(0, 10).map(s => (
+                  <div key={s.strategy_id} className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono text-slate-300 truncate flex-1">{s.strategy_id}</span>
+                    <span className="text-[10px] font-mono text-slate-400">{fmtPct(s.weight_pct)}</span>
+                    <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div className="h-full bg-violet-500" style={{ width: `${Math.min(100, s.weight_pct || 0)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {concentration.by_asset_class?.length > 0 && (
+            <div className="qr-surface p-3">
+              <div className="qr-label mb-2">By Asset Class</div>
+              <div className="space-y-1.5">
+                {concentration.by_asset_class.map(c => (
+                  <div key={c.asset_class} className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-200">{c.asset_class || 'OTHER'}</span>
+                    <span className="text-[10px] font-mono text-slate-400">{fmtPct(c.weight_pct)}</span>
+                    <div className="w-24 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, c.weight_pct || 0)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
