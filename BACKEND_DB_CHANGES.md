@@ -420,6 +420,71 @@ ALTER TABLE gold.audit_events OWNER TO openclaw_user;
 
 ---
 
+## 6.2. `gold.strategy_backtests` 🔴
+
+**Used by:** `/api/backtests/strategies`, `/api/backtests/strategy/{id}`, `/api/backtests/compare`, `/api/strategies/{id}/score`, Backtest Comparator UI tab.
+
+**Status:** **Exists in DB** (created by OpenClaw pipeline), but DE must ensure the schema includes all expected columns.
+
+**Expected schema:**
+
+```sql
+CREATE TABLE IF NOT EXISTS gold.strategy_backtests (
+    id                BIGSERIAL PRIMARY KEY,
+    strategy_id       VARCHAR(32) NOT NULL,
+    ticker            VARCHAR(20) NOT NULL,
+    market            VARCHAR(20),            -- e.g. 'NYSE', 'HKEX', 'CRYPTO'
+    win_rate          NUMERIC,                -- 0.0 to 1.0
+    sharpe_ratio      NUMERIC,
+    profit_factor     NUMERIC,                -- gross_profit / gross_loss
+    total_return      NUMERIC,                -- decimal pct (e.g. 0.15 = 15%)
+    max_drawdown      NUMERIC,                -- decimal pct (positive = bad)
+    num_trades        INTEGER,
+    avg_trade_return  NUMERIC,                -- decimal pct per trade
+    current_signal    VARCHAR(10),            -- 'BUY' | 'SELL' | 'HOLD' | NULL
+    signal_strength   NUMERIC,                -- 0.0 to 1.0
+    entry_price       NUMERIC,                -- suggested entry
+    stop_loss         NUMERIC,                -- suggested stop
+    target_price      NUMERIC,                -- suggested take-profit
+    strategy_score    NUMERIC,                -- 0.0 to 100.0 composite score
+    rationale         TEXT,                   -- AI-generated explanation
+    calculated_at     TIMESTAMP DEFAULT NOW(),
+
+    CONSTRAINT uq_backtest_strat_ticker UNIQUE (strategy_id, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_backtests_strategy   ON gold.strategy_backtests (strategy_id);
+CREATE INDEX IF NOT EXISTS idx_backtests_score      ON gold.strategy_backtests (strategy_score DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_backtests_calculated ON gold.strategy_backtests (calculated_at DESC);
+ALTER TABLE gold.strategy_backtests OWNER TO openclaw_user;
+```
+
+**DE responsibility:**
+- Populate from OpenClaw backtest pipeline. One row per `(strategy_id, ticker)`.
+- Re-run on schedule (daily or on strategy update).
+- The platform reads ALL columns above — missing columns will cause query failures.
+- `strategy_score` is the primary sort key for UI ranking.
+
+---
+
+## 6.3. Reconciliation Feature — Table Dependencies 🟢
+
+**Used by:** `/api/reconciliation/positions`, Reconciliation UI tab.
+
+The reconciliation feature cross-checks positions across three sources:
+1. `gold.paper_strategies` — **EXISTS** (platform-owned, always populated)
+2. `gold.trade_executions` — **EXISTS** (platform writes on fills)
+3. IBKR broker account — live connection (optional, not a DB dependency)
+
+**No new DDL required** for reconciliation, but DE should ensure:
+
+- `gold.trade_executions` has columns: `strategy_id`, `ticker`, `execution_mode`, `action` (BUY/SELL), `quantity`, `executed_at`, `pnl`
+- `gold.paper_strategies` has columns: `id`, `strategy_id`, `ticker`, `execution_mode`, `entry_price`, `invested_capital`, `unrealized_pnl`, `realized_pnl`, `status`, `created_at`
+
+Both tables are populated by the platform itself on trade events. DE does not need to populate them, but should **not** drop or alter their schemas.
+
+---
+
 ## 7. Verification checklist
 
 After DE applies the changes, run these from `psql`:
@@ -430,6 +495,8 @@ SELECT table_schema, table_name FROM information_schema.tables
 WHERE table_schema IN ('gold', 'consumption')
   AND table_name IN (
     'strategy_registry',
+    'strategy_backtests',
+    'audit_events',
     'Strategies_Signals_Current',
     'Strategies_Backtest_Results',
     'Performance_Strategy_Attribution',
@@ -444,11 +511,40 @@ WHERE table_schema IN ('gold', 'consumption')
   )
 ORDER BY 1, 2;
 
--- Quick smoke test: each view returns ≥1 row
-SELECT 'registry' AS v, COUNT(*) FROM gold.strategy_registry
-UNION ALL SELECT 'signals',     COUNT(*) FROM consumption.Strategies_Signals_Current
-UNION ALL SELECT 'backtests',   COUNT(*) FROM consumption.Strategies_Backtest_Results
-UNION ALL SELECT 'attribution', COUNT(*) FROM consumption.Performance_Strategy_Attribution;
+-- Quick smoke test: each view/table returns ≥1 row
+SELECT 'registry'    AS v, COUNT(*) FROM gold.strategy_registry
+UNION ALL SELECT 'backtests_gold', COUNT(*) FROM gold.strategy_backtests
+UNION ALL SELECT 'signals',        COUNT(*) FROM consumption.Strategies_Signals_Current
+UNION ALL SELECT 'backtests_view', COUNT(*) FROM consumption.Strategies_Backtest_Results
+UNION ALL SELECT 'attribution',    COUNT(*) FROM consumption.Performance_Strategy_Attribution;
+
+-- Verify backtest table has all expected columns
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_schema = 'gold' AND table_name = 'strategy_backtests'
+ORDER BY ordinal_position;
+-- Expected: strategy_id, ticker, market, win_rate, sharpe_ratio, profit_factor,
+--           total_return, max_drawdown, num_trades, avg_trade_return,
+--           current_signal, signal_strength, entry_price, stop_loss,
+--           target_price, strategy_score, rationale, calculated_at
+
+-- Verify trade_executions columns for reconciliation
+SELECT column_name FROM information_schema.columns
+WHERE table_schema = 'gold' AND table_name = 'trade_executions'
+  AND column_name IN ('strategy_id','ticker','execution_mode','action','quantity','executed_at','pnl');
+-- Should return 7 rows
 ```
 
 After verification, the platform's `/api/system/health` should show `status: "healthy"` and populated `counts`.
+
+### API endpoint smoke tests (run from shell):
+
+```bash
+# Reconciliation — should return 200 with discrepancy list
+curl -s http://localhost:8000/api/reconciliation/positions | jq '.summary'
+
+# Backtest strategies list
+curl -s http://localhost:8000/api/backtests/strategies | jq '.count'
+
+# Backtest comparison (use real strategy IDs from above)
+curl -s "http://localhost:8000/api/backtests/compare?ids=STR001,STR002" | jq '.strategies | length'
+```
