@@ -604,7 +604,8 @@ def get_portfolio_risk_summary(db: Session = Depends(get_db)):
         from app.services.portfolio_risk import portfolio_risk_manager
         return portfolio_risk_manager.get_portfolio_summary()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio risk-summary error: {e}")
+        return {"total_invested": 0, "total_unrealized_pnl": 0, "total_realized_pnl": 0, "active_positions": 0, "strategies_count": 0, "best_strategy": None, "worst_strategy": None, "long_exposure": 0, "short_exposure": 0, "net_exposure": 0}
 
 
 @app.get("/api/portfolio/correlations")
@@ -614,7 +615,8 @@ def get_portfolio_correlations(db: Session = Depends(get_db)):
         from app.services.portfolio_risk import portfolio_risk_manager
         return portfolio_risk_manager.get_correlation_matrix()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio correlations error: {e}")
+        return {"strategies": [], "matrix": []}
 
 
 @app.get("/api/portfolio/var")
@@ -624,7 +626,8 @@ def get_portfolio_var(confidence: float = 0.95, db: Session = Depends(get_db)):
         from app.services.portfolio_risk import portfolio_risk_manager
         return portfolio_risk_manager.get_var_analysis(confidence)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio VaR error: {e}")
+        return {"confidence": confidence, "daily_var": 0, "monthly_var": 0, "max_loss_observed": 0, "avg_daily_pnl": 0, "pnl_std": 0, "n_observations": 0}
 
 
 @app.get("/api/portfolio/concentration")
@@ -634,7 +637,8 @@ def get_portfolio_concentration(db: Session = Depends(get_db)):
         from app.services.portfolio_risk import portfolio_risk_manager
         return portfolio_risk_manager.get_concentration_risk()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio concentration error: {e}")
+        return {"by_ticker": [], "by_strategy": [], "by_asset_class": [], "hhi_ticker": 0, "top_5_concentration": 0}
 
 
 @app.get("/api/portfolio/alerts")
@@ -644,7 +648,8 @@ def get_portfolio_risk_alerts(db: Session = Depends(get_db)):
         from app.services.portfolio_risk import portfolio_risk_manager
         return portfolio_risk_manager.get_risk_alerts()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio alerts error: {e}")
+        return []
 
 
 @app.get("/api/portfolio/dashboard")
@@ -662,7 +667,16 @@ def get_full_portfolio_dashboard(db: Session = Depends(get_db)):
             "timestamp": datetime.datetime.now().isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Portfolio dashboard error: {e}")
+        return {
+            "summary": None,
+            "correlations": None,
+            "var": None,
+            "concentration": None,
+            "alerts": [],
+            "timestamp": datetime.datetime.now().isoformat(),
+            "error": str(e)
+        }
 
 @app.post("/api/inventory/analyze")
 async def api_trigger_sell_analysis(bg: BackgroundTasks, db: Session = Depends(get_db)):
