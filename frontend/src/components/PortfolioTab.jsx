@@ -32,6 +32,76 @@ const classLabels = {
 
 const assetClasses = ['STOCK', 'FX', 'CRYPTO', 'BOND', 'ETF', 'OPTION', 'FUTURE', 'OTHER'];
 
+const CashSummaryWidget = () => {
+  const [cash, setCash] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const res = await api.get('/api/positions/cash-summary');
+      if (res && !res.error) setCash(res);
+    })();
+  }, []);
+
+  if (!cash) return null;
+
+  const fxPositions = Object.entries(cash.fx_positions || {}).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const totalFx = fxPositions.reduce((s, [, v]) => s + Math.abs(v), 0);
+
+  return (
+    <div className="qr-surface overflow-hidden">
+      <div
+        className="px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-white/[0.02] transition-colors"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="qr-label">Cash & FX</span>
+          <span className="text-[9px] text-slate-500">{cash.base_currency}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="qr-num text-[12px] font-bold text-white">{fmtK(cash.base_balance)}</span>
+          {cash.total_trades > 0 && (
+            <span className="qr-chip qr-chip-amber">{cash.total_trades} to close</span>
+          )}
+          <span className="text-[9px] text-slate-600">{expanded ? '▲' : '▼'}</span>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-white/[0.05]">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1.5 mt-2">
+            {fxPositions.map(([ccy, amt]) => (
+              <div key={ccy} className="flex items-center justify-between">
+                <span className="text-[10px] font-mono text-slate-400">{ccy}</span>
+                <span className={`text-[10px] font-mono font-bold ${amt >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {fmtK(amt)}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {cash.trades_to_close?.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/[0.05]">
+              <div className="qr-label mb-1.5">FX Trades to Flatten</div>
+              <div className="space-y-1">
+                {cash.trades_to_close.map(t => (
+                  <div key={t.pair} className="flex items-center justify-between text-[10px]">
+                    <div className="flex items-center gap-2">
+                      <span className={`qr-chip ${t.action === 'BUY' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{t.action}</span>
+                      <span className="font-mono text-white">{t.pair}</span>
+                    </div>
+                    <span className="font-mono text-slate-400">{fmtK(t.quantity)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PositionTable = ({ positions, title, icon, color }) => {
   const colorMap = {
     blue: 'border-blue-500/20 bg-blue-500/5',
@@ -362,6 +432,9 @@ export const PortfolioTab = ({ data }) => {
           <Pill c={totalPnL >= 0 ? 'emerald' : 'rose'}>{totalPnL >= 0 ? '+' : ''}{fmtK(totalPnL)}</Pill>
         </div>
       </div>
+
+      {/* Cash & FX Exposure Widget */}
+      <CashSummaryWidget />
 
       {riskView ? (
         <RiskDashboard risk={risk} />

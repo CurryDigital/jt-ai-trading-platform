@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
+import { StrategyReviewQueue } from './components/StrategyReviewQueue';
+import { KillSwitchHistory } from './components/KillSwitchHistory';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
@@ -57,6 +59,7 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
   const [haltPhrase, setHaltPhrase] = useState('');
   const [haltBusy, setHaltBusy] = useState(false);
   const [haltResult, setHaltResult] = useState(null);
+  const [haltHistory, setHaltHistory] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -161,13 +164,26 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
 
           {/* Kill switch — only visible in LIVE mode */}
           {isLive && !haltConfirm && (
-            <div className="px-2 border-r border-white/[0.05]">
+            <div className="relative px-2 border-r border-white/[0.05] flex items-center gap-1">
               <button
                 onClick={() => setHaltConfirm(true)}
                 className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40 text-[10px] font-bold hover:bg-rose-500/30 animate-pulse-soft"
               >
                 HALT
               </button>
+              <button
+                onClick={() => setHaltHistory(h => !h)}
+                className="text-[9px] text-slate-500 hover:text-rose-300 transition-colors"
+                title="Kill switch history"
+              >
+                ▾
+              </button>
+              {haltHistory && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setHaltHistory(false)} />
+                  <KillSwitchHistory onClose={() => setHaltHistory(false)} />
+                </>
+              )}
             </div>
           )}
 
@@ -227,7 +243,51 @@ const KPI = ({ l, v, sub, pos, hint }) => (
 // =================================================================
 // Command Center — quant overview at-a-glance
 // =================================================================
-const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData, onSelectStrategy }) => {
+const FillsFeed = ({ fills }) => {
+  if (!fills.length) return (
+    <div className="qr-surface overflow-hidden">
+      <div className="px-3 py-2 border-b border-white/[0.05]">
+        <span className="qr-label">Live Feed</span>
+      </div>
+      <div className="px-3 py-4 text-center text-slate-600 text-[11px]">
+        Waiting for fills & orders via WebSocket…
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="qr-surface overflow-hidden">
+      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="qr-label">Live Feed</span>
+          <span className="qr-dot qr-dot-live animate-pulse-dot" />
+        </div>
+        <span className="text-[10px] text-slate-500">{fills.length} events</span>
+      </div>
+      <div className="max-h-48 overflow-y-auto divide-y divide-white/[0.04]">
+        {fills.map((f, i) => {
+          const isFill = f._type === 'fill';
+          const mode = (f.execution_mode || '').replace('_TRADING', '').replace('SIMULATION', 'SIM');
+          return (
+            <div key={`${f._ts}-${i}`} className="px-3 py-1.5 flex items-center gap-2 text-[10px]">
+              <span className={`qr-chip ${isFill ? 'qr-chip-emerald' : 'qr-chip-blue'}`}>
+                {isFill ? 'FILL' : 'ORDER'}
+              </span>
+              <span className={`font-bold ${f.side === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{f.side}</span>
+              <span className="text-slate-300 font-mono">{f.quantity}</span>
+              <span className="text-white font-bold font-mono">{f.ticker}</span>
+              {isFill && f.price && <span className="text-slate-400">@ {fmt(f.price)}</span>}
+              {mode && <span className="text-slate-600">{mode}</span>}
+              <span className="text-slate-600 ml-auto">{fmtAge(f._ts)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData, onSelectStrategy, recentFills = [] }) => {
   const totalPositionValue = data.positions.reduce((s, p) => s + (p.market_value || 0), 0);
   const totalPnLOpen = data.positions.reduce((s, p) => s + (p.pnl || 0), 0);
   const sortedStrategies = useMemo(() =>
@@ -329,6 +389,12 @@ const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData, onSel
         )}
       </div>
 
+      {/* Review Queue + Live Feed side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <StrategyReviewQueue onSelectStrategy={onSelectStrategy} />
+        <FillsFeed fills={recentFills} />
+      </div>
+
       {/* Live operations: active orders / today's fills / active signals */}
       <LiveOpsPanel onSelectStrategy={onSelectStrategy} />
 
@@ -372,6 +438,7 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
   const [compareIds, setCompareIds] = useState([]);
+  const [recentFills, setRecentFills] = useState([]);
 
   // Auth state — if backend has JTCML_AUTH=1, /api/auth/me returns auth_enabled=true
   const [authEnabled, setAuthEnabled] = useState(false);
@@ -422,9 +489,11 @@ export default function App() {
         break;
       case 'fill':
         pushToast(`Fill: ${d.side} ${d.quantity} ${d.ticker} @ ${d.price}`, d.side === 'BUY' ? 'success' : 'warning');
+        setRecentFills(prev => [{ ...d, _type: 'fill', _ts: new Date().toISOString() }, ...prev].slice(0, 30));
         break;
       case 'order_placed':
         pushToast(`Order: ${d.side} ${d.quantity} ${d.ticker} (${(d.execution_mode || '').replace('_TRADING','').replace('SIMULATION','SIM')})`, 'info', 4000);
+        setRecentFills(prev => [{ ...d, _type: 'order', _ts: new Date().toISOString() }, ...prev].slice(0, 30));
         break;
       case 'signal':
         pushToast(`Signal: ${d.signal} ${d.ticker} (${d.strategy_id})`, 'info');
@@ -700,7 +769,7 @@ export default function App() {
       {/* Main */}
       <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
         <Suspense fallback={<TabSpinner />}>
-          {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} />}
+          {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} recentFills={recentFills} />}
           {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
           {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} />}
           {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
