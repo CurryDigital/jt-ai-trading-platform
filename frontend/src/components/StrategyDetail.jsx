@@ -138,7 +138,7 @@ const MODE_STYLE = {
 };
 
 // Main component --------------------------------------------------------
-export const StrategyDetail = ({ strategyId, onBack }) => {
+export const StrategyDetail = ({ strategyId, onBack, onViewLineage }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('trades');
@@ -188,7 +188,10 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
       <div className="qr-surface px-3 py-2.5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
-            <button onClick={onBack} className="qr-btn-ghost mb-1.5">← Strategies</button>
+            <div className="flex items-center gap-2 mb-1.5">
+              <button onClick={onBack} className="qr-btn-ghost">← Strategies</button>
+              {onViewLineage && <button onClick={() => onViewLineage(strategyId)} className="qr-btn-ghost">Lineage →</button>}
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-[15px] font-bold text-white tracking-tight truncate max-w-[420px]" title={data.name}>{data.name}</h1>
               {data.priority && <span className={`qr-chip ${PRIORITY_STYLE[data.priority] || 'qr-chip-slate'}`}>{data.priority}</span>}

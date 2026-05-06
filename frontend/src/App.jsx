@@ -23,6 +23,8 @@ const ReconciliationPanel = lazy(() => import('./components/ReconciliationPanel'
 const BacktestComparator = lazy(() => import('./components/BacktestComparator'));
 const PortfolioTab = lazy(() => import('./components/PortfolioTab'));
 const PerformanceTab = lazy(() => import('./components/PerformanceTab'));
+const HftMatrix = lazy(() => import('./components/HftMatrix'));
+const StrategyLineage = lazy(() => import('./components/StrategyLineage'));
 
 const TabSpinner = () => (
   <div className="flex items-center justify-center py-16">
@@ -771,7 +773,7 @@ export default function App() {
         <Suspense fallback={<TabSpinner />}>
           {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} recentFills={recentFills} />}
           {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
-          {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} />}
+          {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} onNavigate={navigateToTab} />}
           {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
           {currentTab === 'settings'         && <SettingsTab />}
           {currentTab === 'lab'              && <StrategyLab />}
@@ -780,9 +782,15 @@ export default function App() {
           {currentTab === 'research'         && <ResearchTab onTickerClick={() => {}} />}
           {currentTab === 'reconciliation'   && <ReconciliationPanel onSelectStrategy={openStrategyDetail} />}
           {currentTab === 'backtests'        && <BacktestComparator onSelectStrategy={openStrategyDetail} />}
+          {currentTab === 'hft'              && <HftMatrix />}
+          {currentTab === 'lineage'          && (
+            selectedStrategyId
+              ? <StrategyLineage strategyId={selectedStrategyId} onBack={() => { setSelectedStrategyId(null); navigate(`/${currentMode}/agentic_research`); }} />
+              : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => navigateToTab('agentic_research')} className="text-blue-400 hover:text-blue-300 underline">Agents</button></div>
+          )}
           {currentTab === 'strategy_detail'  && (
             selectedStrategyId
-              ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
+              ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} onViewLineage={(id) => { setSelectedStrategyId(id); navigate(`/${currentMode}/lineage`); }} />
               : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => navigateToTab('performance')} className="text-blue-400 hover:text-blue-300 underline">Performance</button></div>
           )}
           {currentTab === 'compare'          && (

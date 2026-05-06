@@ -41,7 +41,7 @@ const SortableHeader = ({ label, sortKey, current, onSort, align = 'right' }) =>
   </th>
 );
 
-export const PerformanceTab = ({ data, onSelectStrategy, onCompare }) => {
+export const PerformanceTab = ({ data, onSelectStrategy, onCompare, onNavigate }) => {
   const [tf, setTf] = useState('1M');
   const [view, setView] = useState('overview');
   const [selected, setSelected] = useState(new Set());
@@ -98,6 +98,7 @@ export const PerformanceTab = ({ data, onSelectStrategy, onCompare }) => {
               >Compare ({selected.size}) →</button>
             </>
           )}
+          <button onClick={() => onNavigate?.('hft')} className="qr-btn-ghost">HFT Matrix</button>
           <button onClick={() => setView('analytics')} className="qr-btn-primary">Deep Analytics →</button>
           <div className="flex gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.06]">
             {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>

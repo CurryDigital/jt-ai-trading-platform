@@ -1,5 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import { api, fmt, fmtK, fmtPct, pnlCl } from '../utils';
+
+const CandlestickChart = lazy(() => import('./CandlestickChart'));
 
 const KPI = ({ l, v, sub, pos, hint }) => (
   <div className="px-3 py-2 qr-surface min-w-0" title={hint}>
@@ -102,7 +104,37 @@ const CashSummaryWidget = () => {
   );
 };
 
+const PositionChart = ({ ticker }) => {
+  const [chartData, setChartData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const res = await api.get(`/api/stocks/${encodeURIComponent(ticker)}?timeframe=3m`);
+      if (res?.chart_data) setChartData(res.chart_data);
+      setLoading(false);
+    })();
+  }, [ticker]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-8">
+      <div className="w-4 h-4 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
+  if (!chartData?.length) return (
+    <div className="py-6 text-center text-[11px] text-slate-600">No chart data available for {ticker}</div>
+  );
+
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center py-8"><div className="w-4 h-4 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" /></div>}>
+      <CandlestickChart ticker={ticker} data={chartData} />
+    </Suspense>
+  );
+};
+
 const PositionTable = ({ positions, title, icon, color }) => {
+  const [expandedTicker, setExpandedTicker] = useState(null);
+
   const colorMap = {
     blue: 'border-blue-500/20 bg-blue-500/5',
     emerald: 'border-emerald-500/20 bg-emerald-500/5',
@@ -142,20 +174,40 @@ const PositionTable = ({ positions, title, icon, color }) => {
             const entry = p.avg_entry_price || p.entry_price || 0;
             const current = p.current_price || 0;
             const pnlPct = entry > 0 ? ((current - entry) / entry * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
+            const isExpanded = expandedTicker === p.ticker;
             return (
-              <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
-                <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
-                <td className="py-2 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
-                <td className="py-2 px-2 text-center">
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : p.side === 'SHORT' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.side || '—'}</span>
-                </td>
-                <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
-                <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(entry)}</td>
-                <td className="py-2 px-2 text-right font-mono text-white">${fmt(current)}</td>
-                <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
-                <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
-                <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
-              </tr>
+              <React.Fragment key={p.id || p.ticker}>
+                <tr
+                  className={`hover:bg-white/[0.03] transition-colors cursor-pointer ${isExpanded ? 'bg-white/[0.03]' : ''}`}
+                  onClick={() => setExpandedTicker(isExpanded ? null : p.ticker)}
+                >
+                  <td className="py-2 px-2 font-bold text-white">
+                    <span className="flex items-center gap-1">
+                      <span className={`text-[8px] text-slate-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}>&#9654;</span>
+                      {p.ticker}
+                    </span>
+                  </td>
+                  <td className="py-2 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
+                  <td className="py-2 px-2 text-center">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : p.side === 'SHORT' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.side || '—'}</span>
+                  </td>
+                  <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
+                  <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(entry)}</td>
+                  <td className="py-2 px-2 text-right font-mono text-white">${fmt(current)}</td>
+                  <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
+                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
+                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+                </tr>
+                {isExpanded && (
+                  <tr>
+                    <td colSpan={9} className="p-0">
+                      <div className="px-3 py-2 bg-slate-900/40">
+                        <PositionChart ticker={p.ticker} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             );
           })}
         </tbody>
