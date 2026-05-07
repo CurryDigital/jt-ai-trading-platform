@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
 import { AuditLog } from './AuditLog';
 import { AlertConfigPanel } from './AlertConfigPanel';
+
+const RiskLimitsConfig = lazy(() => import('./RiskLimitsConfig'));
 
 // Enhanced Settings Tab with Configuration Management
 export const SettingsTab = () => {
@@ -115,6 +117,7 @@ export const SettingsTab = () => {
     { id: 'sync', label: '🔄 Data Sync', icon: '🔄' },
     { id: 'data', label: '📊 Data Sources', icon: '📊' },
     { id: 'alerts', label: '📢 Alerts', icon: '📢' },
+    { id: 'risk', label: '🎯 Risk Limits', icon: '🎯' },
     { id: 'audit', label: '🛡️ Audit Log', icon: '🛡️' },
     { id: 'display', label: '🎨 Display', icon: '🎨' },
   ];
@@ -566,6 +569,14 @@ export const SettingsTab = () => {
       {activeSection === 'alerts' && (
         <div className="space-y-4">
           <AlertConfigPanel />
+        </div>
+      )}
+
+      {activeSection === 'risk' && (
+        <div className="space-y-4">
+          <Suspense fallback={<div className="flex items-center justify-center py-8"><div className="w-4 h-4 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" /></div>}>
+            <RiskLimitsConfig />
+          </Suspense>
         </div>
       )}
 

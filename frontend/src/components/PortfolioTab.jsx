@@ -401,7 +401,7 @@ const RiskDashboard = ({ risk }) => {
   );
 };
 
-export const PortfolioTab = ({ data }) => {
+export const PortfolioTab = ({ data, onNavigate }) => {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
   const [orderSymbol, setOrderSymbol] = useState('');
@@ -475,6 +475,7 @@ export const PortfolioTab = ({ data }) => {
           <p className="text-[10px] text-slate-500">Live positions & P&L by asset class</p>
         </div>
         <div className="flex items-center gap-2">
+          {riskView && <button onClick={() => onNavigate?.('risk_limits')} className="qr-btn-ghost text-[10px]">Configure Limits</button>}
           <button
             onClick={() => setRiskView(v => !v)}
             className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-colors ${riskView ? 'bg-violet-500/20 text-violet-300 ring-1 ring-violet-500/30' : 'text-slate-400 hover:text-white'}`}

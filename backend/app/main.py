@@ -1066,6 +1066,58 @@ def save_platform_settings(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+RISK_LIMIT_DEFAULTS = {
+    "risk_max_daily_loss_pct": 5.0,
+    "risk_max_position_pct": 20.0,
+    "risk_max_hhi": 2500,
+    "risk_max_consecutive_losses": 5,
+    "risk_max_drawdown_pct": 15.0,
+    "risk_max_correlation": 0.8,
+}
+
+
+@app.get("/api/risk/limits")
+def get_risk_limits(db: Session = Depends(get_db)):
+    """Get risk limit configuration from platform_settings"""
+    try:
+        rows = safe_query(db, """
+            SELECT key, value FROM gold.platform_settings
+            WHERE key LIKE 'risk\\_%' ESCAPE '\\'
+        """, label="risk_limits")
+        limits = dict(RISK_LIMIT_DEFAULTS)
+        for r in rows:
+            try:
+                limits[r.key] = float(r.value)
+            except (ValueError, TypeError):
+                limits[r.key] = r.value
+        return {"limits": limits}
+    except Exception as e:
+        logger.error(f"Risk limits fetch error: {e}")
+        return {"limits": dict(RISK_LIMIT_DEFAULTS)}
+
+
+@app.post("/api/risk/limits")
+def save_risk_limits(payload: dict, db: Session = Depends(get_db)):
+    """Save risk limit configuration to platform_settings"""
+    try:
+        for key, value in payload.items():
+            if not key.startswith("risk_"):
+                continue
+            db.execute(text("""
+                INSERT INTO gold.platform_settings (key, value, updated_at)
+                VALUES (:key, :value, NOW())
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value, updated_at = NOW()
+            """), {"key": key, "value": str(value)})
+        db.commit()
+        _audit(db, "risk_limits.update", None, payload)
+        return {"success": True, "message": "Risk limits updated"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Risk limits save error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/sync/status")
 def get_sync_status(db: Session = Depends(get_db)):
     """Get last sync timestamps for each data component"""

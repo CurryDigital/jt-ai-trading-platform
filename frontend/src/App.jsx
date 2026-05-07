@@ -25,6 +25,10 @@ const PortfolioTab = lazy(() => import('./components/PortfolioTab'));
 const PerformanceTab = lazy(() => import('./components/PerformanceTab'));
 const HftMatrix = lazy(() => import('./components/HftMatrix'));
 const StrategyLineage = lazy(() => import('./components/StrategyLineage'));
+const PnlWaterfall = lazy(() => import('./components/PnlWaterfall'));
+const RiskLimitsConfig = lazy(() => import('./components/RiskLimitsConfig'));
+const TradeReplay = lazy(() => import('./components/TradeReplay'));
+const BenchmarkOverlay = lazy(() => import('./components/BenchmarkOverlay'));
 
 const TabSpinner = () => (
   <div className="flex items-center justify-center py-16">
@@ -772,7 +776,7 @@ export default function App() {
       <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
         <Suspense fallback={<TabSpinner />}>
           {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} recentFills={recentFills} />}
-          {currentTab === 'portfolio'        && <PortfolioTab data={data} />}
+          {currentTab === 'portfolio'        && <PortfolioTab data={data} onNavigate={navigateToTab} />}
           {currentTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} onNavigate={navigateToTab} />}
           {currentTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
           {currentTab === 'settings'         && <SettingsTab />}
@@ -783,6 +787,10 @@ export default function App() {
           {currentTab === 'reconciliation'   && <ReconciliationPanel onSelectStrategy={openStrategyDetail} />}
           {currentTab === 'backtests'        && <BacktestComparator onSelectStrategy={openStrategyDetail} />}
           {currentTab === 'hft'              && <HftMatrix />}
+          {currentTab === 'pnl_waterfall'    && <PnlWaterfall onBack={() => navigateToTab('performance')} />}
+          {currentTab === 'risk_limits'      && <RiskLimitsConfig />}
+          {currentTab === 'trade_replay'     && <TradeReplay onBack={() => navigateToTab('performance')} />}
+          {currentTab === 'benchmarks'       && <BenchmarkOverlay onBack={() => navigateToTab('performance')} />}
           {currentTab === 'lineage'          && (
             selectedStrategyId
               ? <StrategyLineage strategyId={selectedStrategyId} onBack={() => { setSelectedStrategyId(null); navigate(`/${currentMode}/agentic_research`); }} />

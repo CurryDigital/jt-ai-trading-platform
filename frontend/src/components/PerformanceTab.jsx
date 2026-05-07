@@ -98,7 +98,10 @@ export const PerformanceTab = ({ data, onSelectStrategy, onCompare, onNavigate }
               >Compare ({selected.size}) →</button>
             </>
           )}
-          <button onClick={() => onNavigate?.('hft')} className="qr-btn-ghost">HFT Matrix</button>
+          <button onClick={() => onNavigate?.('pnl_waterfall')} className="qr-btn-ghost">Waterfall</button>
+          <button onClick={() => onNavigate?.('benchmarks')} className="qr-btn-ghost">Benchmarks</button>
+          <button onClick={() => onNavigate?.('trade_replay')} className="qr-btn-ghost">Replay</button>
+          <button onClick={() => onNavigate?.('hft')} className="qr-btn-ghost">HFT</button>
           <button onClick={() => setView('analytics')} className="qr-btn-primary">Deep Analytics →</button>
           <div className="flex gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.06]">
             {['1W', '1M', '3M', '1Y', 'ALL'].map(t =>
