@@ -5,7 +5,6 @@ from sqlalchemy import text
 import time
 
 from app.dependencies import get_db, logger
-from app.db.session import QuantStrategy, Trade
 from app.db.safe_query import safe_query, safe_query_one
 
 router = APIRouter(prefix="/api", tags=["strategies"])
@@ -21,7 +20,8 @@ def get_strategy_templates_quant():
 @router.get("/quant/strategies")
 def get_quant_strategies(db: Session = Depends(get_db)):
     try:
-        return db.query(QuantStrategy).all()
+        result = db.execute(text("SELECT strategy_id, name, asset_class, universe_tickers, frequency, execution_mode, status, sharpe_oos, max_drawdown_oos, trade_count_oos, win_rate_oos, conviction_score, assigned_capital, in_market_capital, signal_logic, exit_logic, created_at, updated_at FROM gold.strategy_registry WHERE asset_class = 'quant'")).fetchall()
+        return [dict(r._mapping) for r in result]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -55,7 +55,7 @@ def create_quant_strategy(payload: dict, db: Session = Depends(get_db)):
 @router.post("/quant/strategies/clear-logs")
 def clear_trade_logs(db: Session = Depends(get_db)):
     try:
-        db.execute(text("DELETE FROM consumption.trades"))
+        db.execute(text("DELETE FROM gold.trade_executions"))
         db.commit()
         return {"status": "success", "message": "Simulation logs cleared."}
     except Exception as e:
@@ -65,16 +65,15 @@ def clear_trade_logs(db: Session = Depends(get_db)):
 
 @router.post("/quant/strategies/toggle/{strat_id}")
 def toggle_strategy(strat_id: int, db: Session = Depends(get_db)):
-    strat = db.query(QuantStrategy).filter(QuantStrategy.id == strat_id).first()
-    if strat:
-        strat.is_active = not strat.is_active
+    result = db.execute(text("UPDATE gold.strategy_registry SET status = CASE WHEN status = 'ACTIVE' THEN 'INACTIVE' ELSE 'ACTIVE' END, updated_at = NOW() WHERE strategy_id = :sid AND asset_class = 'quant' RETURNING strategy_id, status"), {"sid": strat_id}).fetchone()
+    if result:
         db.commit()
     return {"status": "success"}
 
 
 @router.delete("/quant/strategies/delete/{strat_id}")
 def delete_strategy(strat_id: int, db: Session = Depends(get_db)):
-    db.execute(text("DELETE FROM gold.quant_strategies WHERE id = :sid"), {"sid": strat_id})
+    db.execute(text("DELETE FROM gold.strategy_registry WHERE asset_class = 'quant' WHERE id = :sid"), {"sid": strat_id})
     db.commit()
     return {"status": "success"}
 
@@ -90,7 +89,7 @@ def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get
         query = """
             SELECT strategy_id as id, name, description, asset_class, direction, time_horizon,
                    sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct, venue, status
-            FROM gold.strategy_definitions WHERE jt_ready = TRUE
+            FROM gold.strategy_registry 
         """
         params = {}
         if asset_class:
@@ -176,13 +175,13 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
     current_mode = mode_result.value if mode_result else "SIMULATION"
 
     strategy = db.execute(text(
-        "SELECT * FROM gold.strategy_definitions WHERE strategy_id = :sid AND jt_ready = TRUE"
+        "SELECT * FROM gold.strategy_registry WHERE strategy_id = :sid "
     ), {"sid": strategy_id}).fetchone()
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
     pool_status = db.execute(text("""
-        SELECT COALESCE(SUM(capital), 0) as used FROM gold.paper_strategies
+        SELECT COALESCE(SUM(capital), 0) as used FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
     """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
 
@@ -199,7 +198,7 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
             break
         try:
             db.execute(text("""
-                INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
+                INSERT INTO consumption.portfolio_positions_current (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', :mode, NOW(), NOW())
                 ON CONFLICT (strategy_id, ticker) DO UPDATE SET
                     status = 'ACTIVE', capital = EXCLUDED.capital,
@@ -227,7 +226,7 @@ def add_stocks_to_paper(payload: dict, db: Session = Depends(get_db)):
     for ticker in tickers:
         try:
             db.execute(text("""
-                INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, created_at, updated_at)
+                INSERT INTO consumption.portfolio_positions_current (strategy_id, ticker, capital, status, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', NOW(), NOW())
                 ON CONFLICT (strategy_id, ticker) DO UPDATE SET status = 'ACTIVE', capital = EXCLUDED.capital, updated_at = NOW()
             """), {"strategy_id": strategy_id, "ticker": ticker.upper(), "capital": capital})
@@ -272,28 +271,31 @@ def get_strategy_backtest_summary_api(strategy_id: int, db: Session = Depends(ge
 def get_strategy_detail(strategy_id: int, db: Session = Depends(get_db)):
     from app.services.strategy_manager import StrategyManager
     sm = StrategyManager()
-    strategy = db.query(QuantStrategy).filter(QuantStrategy.id == strategy_id).first()
-    if not strategy:
+    strategy_row = db.execute(text("SELECT strategy_id, name, asset_class, universe_tickers, frequency, execution_mode, status, sharpe_oos, max_drawdown_oos, trade_count_oos, win_rate_oos, conviction_score, assigned_capital, in_market_capital, signal_logic, exit_logic, created_at, updated_at FROM gold.strategy_registry WHERE strategy_id = :sid"), {"sid": strategy_id}).fetchone()
+    if not strategy_row:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
+    strategy = dict(strategy_row._mapping)
     daily_pnl = sm.get_strategy_daily_pnl(strategy_id)
     backtest = sm.get_strategy_backtest_summary(strategy_id)
-    trades = db.query(Trade).filter(Trade.strategy.like(f"{strategy.name}%")).order_by(Trade.timestamp.desc()).limit(50).all()
+    trades = db.execute(text("SELECT executed_at, ticker, side, quantity, price, pnl FROM gold.trade_executions WHERE strategy_id = :sid ORDER BY executed_at DESC LIMIT 50"), {"sid": strategy_id}).fetchall()
 
     return {
         "strategy": {
-            "id": strategy.id, "name": strategy.name, "ticker": strategy.target_ticker,
-            "is_active": strategy.is_active, "params": strategy.params,
-            "current_pnl": strategy.current_pnl, "total_trades": strategy.total_trades,
-            "winning_trades": strategy.winning_trades,
-            "win_rate": round((strategy.winning_trades / strategy.total_trades * 100), 1) if strategy.total_trades else 0,
-            "equity_curve": strategy.equity_curve,
+            "id": strategy.get("strategy_id"), "name": strategy.get("name"),
+            "asset_class": strategy.get("asset_class"),
+            "is_active": strategy.get("status") == "ACTIVE",
+            "current_pnl": strategy.get("in_market_capital"),
+            "total_trades": strategy.get("trade_count_oos"),
+            "win_rate": round((strategy.get("win_rate_oos") or 0) * 100, 1),
         },
         "backtest": backtest.get("template_backtest") if backtest else {},
         "actual_performance": backtest.get("actual_performance") if backtest else {},
         "daily_pnl_summary": daily_pnl.get("summary") if daily_pnl else {},
-        "recent_trades": [{"timestamp": t.timestamp.isoformat(), "ticker": t.ticker, "side": t.side,
-                           "quantity": float(t.quantity), "price": float(t.price),
+        "recent_trades": [{"timestamp": t.executed_at.isoformat() if t.executed_at else None,
+                           "ticker": t.ticker, "side": t.side,
+                           "quantity": float(t.quantity) if t.quantity else 0,
+                           "price": float(t.price) if t.price else 0,
                            "pnl": float(t.pnl) if t.pnl else 0} for t in trades],
     }
 
@@ -305,7 +307,7 @@ def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail="Invalid mode")
 
     result = db.execute(text("""
-        UPDATE gold.strategy_definitions SET execution_mode = :mode, updated_at = NOW()
+        UPDATE gold.strategy_registry SET execution_mode = :mode, updated_at = NOW()
         WHERE strategy_id = :strategy_id RETURNING strategy_id, name, execution_mode
     """), {"strategy_id": strategy_id, "mode": mode}).fetchone()
     if not result:
@@ -317,7 +319,7 @@ def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(ge
 @router.get("/strategies/{strategy_id:path}/mode")
 def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
     result = db.execute(text("""
-        SELECT strategy_id, name, execution_mode, venue FROM gold.strategy_definitions WHERE strategy_id = :strategy_id
+        SELECT strategy_id, name, execution_mode, venue FROM gold.strategy_registry WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
     if not result:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -333,12 +335,12 @@ def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
 def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
     result = db.execute(text("""
         SELECT strategy_id, name, assigned_capital, in_market_capital, capacity_millions
-        FROM gold.strategy_definitions WHERE strategy_id = :strategy_id AND jt_ready = TRUE
+        FROM gold.strategy_registry WHERE strategy_id = :strategy_id 
     """), {"strategy_id": strategy_id}).fetchone()
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
     in_market = db.execute(text("""
-        SELECT COALESCE(SUM(invested_capital), 0) FROM gold.paper_strategies WHERE strategy_id = :strategy_id
+        SELECT COALESCE(SUM(invested_capital), 0) FROM consumption.portfolio_positions_current WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).scalar() or 0
     return {
         "strategy_id": result.strategy_id, "name": result.name,
@@ -355,12 +357,12 @@ def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depen
     if assigned_capital is None or assigned_capital < 0:
         raise HTTPException(status_code=400, detail="assigned_capital must be >= 0")
     result = db.execute(text("""
-        SELECT strategy_id FROM gold.strategy_definitions WHERE strategy_id = :strategy_id AND jt_ready = TRUE
+        SELECT strategy_id FROM gold.strategy_registry WHERE strategy_id = :strategy_id 
     """), {"strategy_id": strategy_id}).fetchone()
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
     db.execute(text("""
-        UPDATE gold.strategy_definitions SET assigned_capital = :capital, updated_at = NOW() WHERE strategy_id = :strategy_id
+        UPDATE gold.strategy_registry SET assigned_capital = :capital, updated_at = NOW() WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id, "capital": assigned_capital})
     db.commit()
     return {"success": True, "strategy_id": strategy_id, "assigned_capital": assigned_capital}
@@ -370,13 +372,13 @@ def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depen
 def can_strategy_buy(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     proposed = payload.get("amount", 0)
     result = db.execute(text(
-        "SELECT assigned_capital FROM gold.strategy_definitions WHERE strategy_id = :strategy_id"
+        "SELECT assigned_capital FROM gold.strategy_registry WHERE strategy_id = :strategy_id"
     ), {"strategy_id": strategy_id}).fetchone()
     if not result:
         raise HTTPException(status_code=404, detail="Strategy not found")
     assigned = float(result.assigned_capital or 100000)
     in_market = db.execute(text(
-        "SELECT COALESCE(SUM(invested_capital), 0) FROM gold.paper_strategies WHERE strategy_id = :strategy_id"
+        "SELECT COALESCE(SUM(invested_capital), 0) FROM consumption.portfolio_positions_current WHERE strategy_id = :strategy_id"
     ), {"strategy_id": strategy_id}).scalar() or 0
     available = assigned - in_market
     can_buy = available >= proposed
@@ -388,13 +390,13 @@ def can_strategy_buy(strategy_id: str, payload: dict, db: Session = Depends(get_
 @router.get("/strategies/{strategy_id:path}/capital-pool")
 def get_strategy_capital_pool(strategy_id: str, db: Session = Depends(get_db)):
     strategy = db.execute(text(
-        "SELECT strategy_id, name, assigned_capital FROM gold.strategy_definitions WHERE strategy_id = :strategy_id"
+        "SELECT strategy_id, name, assigned_capital FROM gold.strategy_registry WHERE strategy_id = :strategy_id"
     ), {"strategy_id": strategy_id}).fetchone()
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
     pool_usage = db.execute(text("""
         SELECT COALESCE(SUM(capital), 0) as used_capital, COUNT(*) as active_positions
-        FROM gold.paper_strategies WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
+        FROM consumption.portfolio_positions_current WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
     """), {"strategy_id": strategy_id}).fetchone()
     total = float(strategy.assigned_capital) if strategy.assigned_capital else 100000
     used = float(pool_usage.used_capital) if pool_usage else 0
@@ -412,7 +414,7 @@ def get_strategy_capital_pool(strategy_id: str, db: Session = Depends(get_db)):
 def update_strategy_capital_pool(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     new_total = payload.get("total_assigned", 100000)
     result = db.execute(text("""
-        UPDATE gold.strategy_definitions SET assigned_capital = :total, updated_at = NOW()
+        UPDATE gold.strategy_registry SET assigned_capital = :total, updated_at = NOW()
         WHERE strategy_id = :strategy_id RETURNING strategy_id, name, assigned_capital
     """), {"strategy_id": strategy_id, "total": new_total}).fetchone()
     if not result:
@@ -425,7 +427,7 @@ def update_strategy_capital_pool(strategy_id: str, payload: dict, db: Session = 
 def deactivate_strategy(strategy_id: str, payload: dict = None, db: Session = Depends(get_db)):
     action = (payload or {}).get("action", "keep")
     positions = db.execute(text("""
-        SELECT id, ticker, invested_capital, status FROM gold.paper_strategies WHERE strategy_id = :strategy_id
+        SELECT id, ticker, invested_capital, status FROM consumption.portfolio_positions_current WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchall()
     if not positions:
         raise HTTPException(status_code=404, detail=f"No positions found for {strategy_id}")
@@ -434,17 +436,17 @@ def deactivate_strategy(strategy_id: str, payload: dict = None, db: Session = De
     for pos in positions:
         if action == "close" and pos.invested_capital and pos.invested_capital > 0:
             db.execute(text("""
-                UPDATE gold.paper_strategies SET status = 'CLOSED',
+                UPDATE consumption.portfolio_positions_current SET status = 'CLOSED',
                     realized_pnl = realized_pnl + unrealized_pnl, unrealized_pnl = 0,
                     invested_capital = 0, available_capital = capital, updated_at = NOW()
                 WHERE id = :id
             """), {"id": pos.id})
             positions_closed += 1
         else:
-            db.execute(text("UPDATE gold.paper_strategies SET status = 'PAUSED', updated_at = NOW() WHERE id = :id"), {"id": pos.id})
+            db.execute(text("UPDATE consumption.portfolio_positions_current SET status = 'PAUSED', updated_at = NOW() WHERE id = :id"), {"id": pos.id})
 
     db.execute(text("""
-        UPDATE gold.strategy_definitions SET is_active = FALSE, updated_at = NOW() WHERE strategy_id = :strategy_id
+        UPDATE gold.strategy_registry SET is_active = FALSE, updated_at = NOW() WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id})
     db.commit()
     return {"success": True, "strategy_id": strategy_id, "action": action,
@@ -457,7 +459,7 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
         SELECT strategy_id as id, name, description, asset_class, direction, time_horizon,
                sharpe_ratio, max_drawdown, win_rate, avg_hold_days, universe_count,
                max_position_pct, venue, capacity_millions, backtest_period
-        FROM gold.strategy_definitions WHERE strategy_id = :sid AND jt_ready = TRUE
+        FROM gold.strategy_registry WHERE strategy_id = :sid 
     """), {"sid": strategy_id}).fetchone()
     if result:
         return {
@@ -479,7 +481,7 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
         SELECT strategy_id, name, description, asset_class, direction, time_horizon,
                sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct,
                venue, status, signal_logic, exit_logic, trigger_example, why_it_works, execution_mode
-        FROM gold.strategy_definitions WHERE strategy_id = :strategy_id
+        FROM gold.strategy_registry WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -515,7 +517,7 @@ def screen_stocks(strategy_id: str, min_win_rate: float = 0.5, min_sharpe: float
     if not strategy:
         strategy = db.execute(text("""
             SELECT strategy_id as id, name, description, asset_class
-            FROM gold.strategy_definitions WHERE strategy_id = :strategy_id AND jt_ready = TRUE
+            FROM gold.strategy_registry WHERE strategy_id = :strategy_id 
         """), {"strategy_id": strategy_id}).fetchone()
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -599,8 +601,8 @@ def get_strategy_stats(db: Session = Depends(get_db)):
                SUM(ps.capital) as total_allocated,
                COUNT(CASE WHEN (COALESCE(ps.realized_pnl, 0) + COALESCE(ps.unrealized_pnl, 0)) > 0 THEN 1 END) as winning_positions,
                SUM(ps.trades_count) as total_trades
-        FROM gold.paper_strategies ps
-        LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
+        FROM consumption.portfolio_positions_current ps
+        LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
         WHERE ps.status = 'ACTIVE' GROUP BY ps.strategy_id, sd.name
     """)).fetchall()
 
@@ -628,7 +630,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
     order_type = payload.get("order_type", "MKT")
 
     strategy = db.execute(text("""
-        SELECT strategy_id, name, execution_mode, venue FROM gold.strategy_definitions WHERE strategy_id = :strategy_id
+        SELECT strategy_id, name, execution_mode, venue FROM gold.strategy_registry WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -645,13 +647,13 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
         amount = quantity * 100
         if side == "BUY":
             db.execute(text("""
-                UPDATE gold.paper_strategies SET invested_capital = invested_capital + :amount,
+                UPDATE consumption.portfolio_positions_current SET invested_capital = invested_capital + :amount,
                     available_capital = available_capital - :amount, trades_count = trades_count + 1,
                     last_order_status = 'SIMULATED_BUY' WHERE strategy_id = :sid AND ticker = :ticker
             """), {"sid": strategy_id, "ticker": ticker, "amount": amount})
         else:
             db.execute(text("""
-                UPDATE gold.paper_strategies SET invested_capital = GREATEST(0, invested_capital - :amount),
+                UPDATE consumption.portfolio_positions_current SET invested_capital = GREATEST(0, invested_capital - :amount),
                     available_capital = available_capital + :amount, trades_count = trades_count + 1,
                     last_order_status = 'SIMULATED_SELL' WHERE strategy_id = :sid AND ticker = :ticker
             """), {"sid": strategy_id, "ticker": ticker, "amount": amount})

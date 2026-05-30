@@ -4,7 +4,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.dependencies import get_db, logger
-from app.db.session import ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto
+import math
+
+def clean_float(val):
+    if val is None or (isinstance(val, float) and math.isnan(val)) or (isinstance(val, float) and math.isinf(val)):
+        return None
+    return val
 
 router = APIRouter(prefix="/api", tags=["metadata"])
 
@@ -13,31 +18,111 @@ router = APIRouter(prefix="/api", tags=["metadata"])
 def get_signals_v1(db: Session = Depends(get_db)):
     """Get all asset signals from consumption layer — DB only."""
     try:
-        stocks = db.query(ConsumptionStock).all()
-        markets = db.query(ConsumptionMarket).all()
-        fx = db.query(ConsumptionFx).all()
-        commodities = db.query(ConsumptionCommodity).all()
-        cryptos = db.query(ConsumptionCrypto).all()
+        stocks = db.execute(text("""
+            SELECT ticker, name, price, change_pct, change_value, trend, rsi_14,
+                   distance_to_52w_high_pct, distance_to_52w_low_pct,
+                   market_cap, pe_ratio, forward_pe, pb_ratio, dividend_yield,
+                   strategy_signals, top_strategy_score, signal, signal_strength,
+                   updated_at
+            FROM consumption.stock
+        """)).fetchall()
 
-        def fmt(row, category):
+        markets = db.execute(text("""
+            SELECT region, index_name, index_ticker, current_value, change_pct,
+                   change_value, trend, sentiment_score, volatility_index, updated_at
+            FROM consumption.market
+        """)).fetchall()
+
+        fx = db.execute(text("""
+            SELECT ticker, close_price, log_return, interest_rate_diff,
+                   dxy_correlation, volatility_24h, rsi_14, macd_histogram,
+                   bollinger_width, prophet_forecast, market_regime,
+                   candlestick_pattern, candlestick_sentiment, date
+            FROM consumption.fx
+        """)).fetchall()
+
+        commodities = db.execute(text("""
+            SELECT * FROM consumption.commodity
+        """)).fetchall()
+
+        cryptos = db.execute(text("""
+            SELECT ticker, close_price, volume_24h, market_cap_usd,
+                   fear_greed_index, funding_rate, rsi_14, macd_histogram,
+                   bollinger_width, mvrv_z_score, nvt_ratio,
+                   candlestick_pattern, candlestick_sentiment, date
+            FROM consumption.crypto
+        """)).fetchall()
+
+        def fmt_stock(row):
             return {
-                "ticker": row.ticker, "asset": row.asset_name, "category": category,
-                "price": row.close_price, "change": row.daily_change,
-                "action": row.action, "total_confidence": row.total_confidence,
-                "trad_confidence": row.trad_confidence, "swarm_confidence": row.swarm_confidence,
-                "est_1d": row.est_1d, "est_7d": row.est_7d, "est_1m": row.est_1m,
-                "win_rate": row.win_rate, "rec_score": row.rec_score,
-                "candlestick_pattern": row.candlestick_pattern, "logic": row.logic,
-                "sparkline": row.sparkline,
-                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                "ticker": row.ticker, "asset": row.name, "category": "stock",
+                "price": row.price, "change": row.change_value,
+                "change_pct": row.change_pct,
+                "action": row.signal, "total_confidence": row.signal_strength,
+                "trend": row.trend, "rsi_14": row.rsi_14,
+                "market_cap": row.market_cap, "pe_ratio": row.pe_ratio,
+                "forward_pe": row.forward_pe, "pb_ratio": row.pb_ratio,
+                "dividend_yield": row.dividend_yield,
+                "strategy_signals": row.strategy_signals,
+                "top_strategy_score": row.top_strategy_score,
+                "timestamp": row.updated_at.isoformat() if row.updated_at else None,
+            }
+
+        def fmt_market(row):
+            return {
+                "ticker": row.index_ticker, "asset": row.index_name, "category": "market",
+                "price": row.current_value, "change": row.change_value,
+                "change_pct": row.change_pct,
+                "action": row.trend, "total_confidence": row.sentiment_score,
+                "region": row.region, "volatility_index": row.volatility_index,
+                "timestamp": row.updated_at.isoformat() if row.updated_at else None,
+            }
+
+        def fmt_fx(row):
+            return {
+                "ticker": row.ticker, "asset": row.ticker, "category": "fx",
+                "price": clean_float(row.close_price), "change": clean_float(row.log_return),
+                "action": row.market_regime, "total_confidence": clean_float(row.rsi_14),
+                "rsi_14": clean_float(row.rsi_14), "macd_histogram": clean_float(row.macd_histogram),
+                "bollinger_width": clean_float(row.bollinger_width),
+                "prophet_forecast": clean_float(row.prophet_forecast),
+                "candlestick_pattern": row.candlestick_pattern,
+                "candlestick_sentiment": row.candlestick_sentiment,
+                "timestamp": row.date.isoformat() if row.date else None,
+            }
+
+        def fmt_commodity(row):
+            return {
+                "ticker": getattr(row, 'ticker', None),
+                "asset": getattr(row, 'asset_name', getattr(row, 'name', None)),
+                "category": "commodity",
+                "price": getattr(row, 'close_price', getattr(row, 'price', None)),
+                "change": getattr(row, 'daily_change', getattr(row, 'change', None)),
+                "action": getattr(row, 'action', None),
+                "timestamp": getattr(row, 'timestamp', getattr(row, 'date', None)),
+            }
+
+        def fmt_crypto(row):
+            return {
+                "ticker": row.ticker, "asset": row.ticker, "category": "crypto",
+                "price": clean_float(row.close_price), "change": None,
+                "action": None, "total_confidence": clean_float(row.rsi_14),
+                "rsi_14": clean_float(row.rsi_14), "macd_histogram": clean_float(row.macd_histogram),
+                "bollinger_width": clean_float(row.bollinger_width),
+                "mvrv_z_score": clean_float(row.mvrv_z_score), "nvt_ratio": clean_float(row.nvt_ratio),
+                "fear_greed_index": clean_float(row.fear_greed_index),
+                "funding_rate": clean_float(row.funding_rate),
+                "candlestick_pattern": row.candlestick_pattern,
+                "candlestick_sentiment": row.candlestick_sentiment,
+                "timestamp": row.date.isoformat() if row.date else None,
             }
 
         return (
-            [fmt(s, "stock") for s in stocks] +
-            [fmt(m, "market") for m in markets] +
-            [fmt(f, "fx") for f in fx] +
-            [fmt(c, "commodity") for c in commodities] +
-            [fmt(c, "crypto") for c in cryptos]
+            [fmt_stock(s) for s in stocks] +
+            [fmt_market(m) for m in markets] +
+            [fmt_fx(f) for f in fx] +
+            [fmt_commodity(c) for c in commodities] +
+            [fmt_crypto(c) for c in cryptos]
         )
     except Exception as e:
         logger.error(f"Signals API Error: {e}")
@@ -48,17 +133,14 @@ def get_signals_v1(db: Session = Depends(get_db)):
 def get_all_commodities(db: Session = Depends(get_db)):
     """Get all commodity data from consumption layer."""
     try:
-        commodities = db.execute(text("SELECT * FROM consumption.commodity ORDER BY total_confidence DESC")).fetchall()
+        commodities = db.execute(text("SELECT * FROM consumption.commodity")).fetchall()
         return [{
-            "ticker": c.ticker, "asset": c.asset_name, "price": c.close_price,
-            "change": c.daily_change, "action": c.action,
-            "total_confidence": c.total_confidence, "trad_confidence": c.trad_confidence,
-            "swarm_confidence": c.swarm_confidence,
-            "est_1d": c.est_1d, "est_7d": c.est_7d, "est_1m": c.est_1m,
-            "win_rate": c.win_rate, "rec_score": c.rec_score,
-            "candlestick_pattern": c.candlestick_pattern, "logic": c.logic,
-            "sparkline": c.sparkline,
-            "timestamp": c.timestamp.isoformat() if c.timestamp else None,
+            "ticker": getattr(c, 'ticker', None),
+            "asset": getattr(c, 'asset_name', getattr(c, 'name', None)),
+            "price": getattr(c, 'close_price', getattr(c, 'price', None)),
+            "change": getattr(c, 'daily_change', getattr(c, 'change', None)),
+            "action": getattr(c, 'action', None),
+            "timestamp": getattr(c, 'timestamp', getattr(c, 'date', None)),
         } for c in commodities]
     except Exception as e:
         logger.error(f"Commodity API Error: {e}")

@@ -6,6 +6,7 @@ Data ingestion/refresh is handled by the DE agent.
 """
 import datetime
 import json
+import math
 import os
 import time
 from fastapi import FastAPI, Request, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -19,7 +20,7 @@ import logging
 
 # Route modules
 from app.routes import market, stocks, fx, crypto, strategies, positions
-from app.routes import performance, execution, ibkr, alerts, metadata, hkex
+from app.routes import performance, execution, ibkr, alerts, metadata, hkex, backtest, agents
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,7 +60,18 @@ from app.auth import (
 # JT Strategy Executor - initialized lazily
 jt_strategy_executor = None
 
-app = FastAPI()
+class NaNSafeJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return json.dumps(content, ensure_ascii=False, allow_nan=True, cls=CustomJSONEncoder).encode("utf-8")
+
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+        return super().default(obj)
+
+app = FastAPI(default_response_class=NaNSafeJSONResponse)
 
 # Include all routers
 app.include_router(market.router)
@@ -74,6 +86,8 @@ app.include_router(ibkr.router)
 app.include_router(alerts.router)
 app.include_router(metadata.router)
 app.include_router(hkex.router)
+app.include_router(backtest.router)
+app.include_router(agents.router)
 
 # Include stock detail router (conditional)
 if HAS_STOCK_DETAIL_API and stock_detail_router:
@@ -96,9 +110,44 @@ import asyncio
 
 @app.exception_handler(ProgrammingError)
 async def sqlalchemy_programming_error_handler(request: Request, exc: ProgrammingError):
-    """Handle missing tables/columns — return empty data instead of 500."""
+    """Handle missing tables/columns — return endpoint-appropriate empty shape instead of 500."""
     error_msg = str(exc.orig) if exc.orig else str(exc)
-    logger.warning(f"DB schema error on {request.url.path}: {error_msg}")
+    path = request.url.path
+    logger.warning(f"DB schema error on {path}: {error_msg}")
+
+    # Return shapes that match what the frontend expects for each endpoint
+    # so the UI renders gracefully instead of crashing or showing wrong empty states.
+    if path == "/api/paper-strategies":
+        return JSONResponse(status_code=200, content={
+            "strategies": [], "count": 0,
+            "execution_mode": "SIMULATION",
+            "message": "No paper strategies available yet."
+        })
+    if path == "/api/strategies/pipeline-summary":
+        return JSONResponse(status_code=200, content={
+            "experimental": 0, "near_golden": 0, "golden": 0,
+            "deployed": 0, "total": 0,
+            "message": "Pipeline data not yet available."
+        })
+    if path == "/api/portfolio/positions":
+        return JSONResponse(status_code=200, content={
+            "positions": [], "total_positions": 0,
+            "total_value": 0, "total_pnl": 0,
+            "message": "No positions recorded yet."
+        })
+    if path == "/api/performance/strategy":
+        return JSONResponse(status_code=200, content={
+            "strategies": [], "monthly_returns": [],
+            "summary": {"total_return": 0, "sharpe": 0, "max_drawdown": 0, "win_rate": 0},
+            "message": "Performance data not yet available."
+        })
+    if path == "/api/strategies/researcher":
+        return JSONResponse(status_code=200, content={
+            "strategies": [], "count": 0,
+            "message": "Researcher strategies not yet available."
+        })
+
+    # Generic fallback for any other endpoint
     return JSONResponse(status_code=200, content={
         "data": [], "count": 0,
         "error": "data_not_available",
@@ -407,8 +456,8 @@ def system_health(db: Session = Depends(get_db)):
     try:
         rows = safe_query(db, """
             SELECT
-                (SELECT COUNT(*) FROM gold.strategy_definitions WHERE jt_ready = TRUE) AS strategies,
-                (SELECT COUNT(*) FROM gold.paper_strategies WHERE status = 'ACTIVE') AS deployed,
+                (SELECT COUNT(*) FROM gold.strategy_registry ) AS strategies,
+                (SELECT COUNT(*) FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE') AS deployed,
                 (SELECT COUNT(*) FROM gold.asset_registry WHERE is_active = TRUE) AS assets
         """, label="health_counts")
         if rows:
@@ -514,85 +563,12 @@ def get_execution_status():
 
 
 # --- BACKTESTING APIS ---
-
-@app.post("/api/strategies/{strategy_id}/backtest")
-async def run_strategy_backtest(
-    strategy_id: int,
-    payload: dict,
-    bg: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    """
-    Run a backtest for a strategy
-
-    Payload: {
-        "start_date": "2024-01-01",
-        "end_date": "2024-12-31",
-        "initial_capital": 10000,
-        "commission_rate": 0.001
-    }
-    """
-    try:
-        from app.services.backtest_engine import backtest_engine
-
-        # Check if strategy exists
-        strategy = db.query(QuantStrategy).filter(QuantStrategy.id == strategy_id).first()
-        if not strategy:
-            raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-
-        # Queue backtest in background
-        bg.add_task(
-            backtest_engine.run_backtest,
-            strategy_id=strategy_id,
-            start_date=payload.get("start_date", "2024-01-01"),
-            end_date=payload.get("end_date", "2024-12-31"),
-            initial_capital=payload.get("initial_capital", 10000),
-            commission_rate=payload.get("commission_rate", 0.001)
-        )
-
-        return {
-            "status": "queued",
-            "strategy_id": strategy_id,
-            "strategy_name": strategy.name,
-            "message": "Backtest started in background. Check status in a few minutes."
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/strategies/{strategy_id}/backtest-history")
-def get_backtest_history(strategy_id: int, db: Session = Depends(get_db)):
-    """Get all backtest runs for a strategy"""
-    try:
-        from app.services.backtest_engine import backtest_engine
-        history = backtest_engine.get_backtest_history(strategy_id)
-        return {
-            "strategy_id": strategy_id,
-            "backtest_count": len(history),
-            "backtests": history
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/strategies/{strategy_id}/backtest-vs-live")
-def get_backtest_vs_live(strategy_id: int, db: Session = Depends(get_db)):
-    """Compare backtest results with live performance"""
-    try:
-        from app.services.backtest_engine import backtest_engine
-        comparison = backtest_engine.compare_backtest_vs_live(strategy_id)
-
-        if "error" in comparison:
-            raise HTTPException(status_code=404, detail=comparison["error"])
-
-        return comparison
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# NOTE: Backtest endpoints moved to app.routes.backtest
+#       POST /api/backtest/request
+#       GET  /api/backtest/{request_id}/status
+#       GET  /api/backtest/strategy/{strategy_id}/history
+#       GET  /api/backtest/strategy/{strategy_id}/vs-live
+#       POST /api/strategies/{strategy_id}/backtest
 
 
 # --- PORTFOLIO RISK DASHBOARD APIS ---
@@ -1685,54 +1661,78 @@ def get_market_breadth(db: Session = Depends(get_db)):
             "above50MA": None, "above200MA": None
         }
 
-@app.get("/api/market/sentiment")
-def get_market_sentiment(db: Session = Depends(get_db)):
-    """Get market sentiment indicators - returns null if VIX data unavailable"""
-    try:
-        # Try to fetch real VIX data
-        vix_row = db.execute(text("""
-            SELECT close FROM silver.unified_prices
-            WHERE ticker = '^VIX'
-            ORDER BY date DESC
-            LIMIT 1
-        """)).fetchone()
+from app.services.cnn_fear_greed import fetch_cnn_fear_greed, get_fear_greed_label
 
-        # Policy: Return null if no real data available (no mock data)
-        if not vix_row or not vix_row.close:
+@app.get("/api/market/sentiment")
+def get_market_sentiment(country: str = "US", db: Session = Depends(get_db)):
+    """Get market sentiment indicators — CNN Fear & Greed + CBOE VIX.
+    Supports country=US (live CNN + VIX), country=HK/CN (null — no equivalent feed)."""
+    try:
+        # Only US has CNN Fear & Greed + CBOE VIX. HK/CN have no equivalent live feed.
+        if country.upper() != "US":
             return {
                 "fearGreed": None,
+                "fearGreedLabel": None,
                 "vix": None,
                 "putCall": None,
-                "note": "VIX data unavailable"
+                "country": country.upper(),
+                "source": None,
+                "note": f"Market sentiment data unavailable for {country.upper()}"
             }
 
-        vix = float(vix_row.close)
-
-        # Calculate fear/greed index based on VIX
-        # VIX < 15 = Greed, VIX > 30 = Fear
-        if vix < 15:
-            fear_greed = 75  # Greed
-        elif vix < 20:
-            fear_greed = 55  # Neutral-Greed
-        elif vix < 25:
-            fear_greed = 50  # Neutral
-        elif vix < 30:
-            fear_greed = 35  # Fear
+        # 1. Try CNN Fear & Greed Index (live public feed)
+        cnn = fetch_cnn_fear_greed()
+        if cnn:
+            fear_greed = cnn["score"]
+            fear_greed_label = cnn["rating"] or get_fear_greed_label(fear_greed)
         else:
-            fear_greed = 20  # Extreme Fear
+            fear_greed = None
+            fear_greed_label = None
 
+        # 2. Try CBOE VIX from database (primary: silver.unified_prices, fallback: consumption view)
+        vix = None
+        try:
+            vix_row = db.execute(text("""
+                SELECT close FROM silver.unified_prices
+                WHERE ticker = '^VIX'
+                ORDER BY date DESC
+                LIMIT 1
+            """)).fetchone()
+            if vix_row and vix_row.close:
+                vix = float(vix_row.close)
+        except Exception:
+            # silver.unified_prices may not exist — try consumption view
+            try:
+                vix_row = db.execute(text("""
+                    SELECT price FROM consumption.markets_stocks_overview
+                    WHERE ticker = '^VIX'
+                    LIMIT 1
+                """)).fetchone()
+                if vix_row and vix_row.price:
+                    vix = float(vix_row.price)
+            except Exception:
+                pass
+
+        # 3. Build response — never derive synthetic fear/greed from VIX.
+        #    If CNN is unavailable, return None so the frontend shows "—".
         return {
             "fearGreed": fear_greed,
+            "fearGreedLabel": fear_greed_label,
             "vix": vix,
-            "putCall": None  # Would need options data
+            "putCall": None,
+            "country": "US",
+            "source": "cnn" if cnn else ("vix" if vix is not None else None),
+            "note": None if (fear_greed is not None or vix is not None) else "Market sentiment data unavailable"
         }
     except Exception as e:
         logger.error(f"Error in market sentiment: {e}")
-        # Return null rather than defaults
         return {
             "fearGreed": None,
+            "fearGreedLabel": None,
             "vix": None,
             "putCall": None,
+            "country": country.upper(),
+            "source": None,
             "error": str(e)
         }
 
@@ -1818,7 +1818,7 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
         position = db.execute(text("""
             SELECT id, ticker, strategy_id, quantity, entry_price,
                    invested_capital, realized_pnl, unrealized_pnl, trades_count
-            FROM gold.paper_strategies
+            FROM consumption.portfolio_positions_current
             WHERE id = :position_id
         """), {"position_id": position_id}).fetchone()
 
@@ -1884,7 +1884,7 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
 
         # Update the paper strategy position
         db.execute(text("""
-            UPDATE gold.paper_strategies
+            UPDATE consumption.portfolio_positions_current
             SET realized_pnl = COALESCE(realized_pnl, 0) + :trade_pnl,
                 unrealized_pnl = 0,
                 invested_capital = 0,
@@ -2164,7 +2164,7 @@ def get_velocity_summary(db: Session = Depends(get_db)):
     summary = db.execute(text("""
         SELECT
             COALESCE(SUM(realized_pnl) + SUM(unrealized_pnl), 0) as total_pnl
-        FROM gold.paper_strategies WHERE status = 'ACTIVE'
+        FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE'
     """)).fetchone()
     return {"total_trades": trades.cnt if trades else 0,
             "portfolio_value": 0,
@@ -2455,9 +2455,9 @@ def create_strategy(payload: dict, db: Session = Depends(get_db)):
 @app.post("/api/quant/strategies/clear-logs")
 def clear_trade_logs(db: Session = Depends(get_db)):
     try:
-        # Clear the consumption.trades table
+        # Clear the gold.trade_executions table
         # Using DELETE instead of TRUNCATE for safer permission handling
-        db.execute(text("DELETE FROM consumption.trades"))
+        db.execute(text("DELETE FROM gold.trade_executions"))
         db.commit()
         return {"status": "success", "message": "Simulation logs cleared from consumption layer."}
     except Exception as e:
@@ -2474,7 +2474,7 @@ def toggle_strategy(strat_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/api/quant/strategies/delete/{strat_id}")
 def delete_strategy(strat_id: int, db: Session = Depends(get_db)):
-    db.execute(text("DELETE FROM gold.quant_strategies WHERE id = :sid"), {"sid": strat_id})
+    db.execute(text("DELETE FROM gold.strategy_registry WHERE asset_class = 'quant' WHERE id = :sid"), {"sid": strat_id})
     db.commit()
     return {"status": "success"}
 
@@ -2743,7 +2743,7 @@ def get_strategy_performance(db: Session = Depends(get_db)):
         SELECT strategy_id,
                COUNT(*) as total_trades,
                SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE status = 'ACTIVE'
         GROUP BY strategy_id
     """, label="perf_live_stats")
@@ -3073,8 +3073,8 @@ def get_paper_strategies(db: Session = Depends(get_db)):
             ps.trades_count,
             ps.created_at,
             ps.execution_mode
-        FROM gold.paper_strategies ps
-        LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
+        FROM consumption.portfolio_positions_current ps
+        LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
         WHERE ps.execution_mode = :mode
         ORDER BY ps.created_at DESC
     """), {"mode": current_mode}).fetchall()
@@ -3113,7 +3113,7 @@ def delete_paper_strategy(id: int, db: Session = Depends(get_db)):
     try:
         # Delete the paper strategy
         result = db.execute(text("""
-            DELETE FROM gold.paper_strategies WHERE id = :id
+            DELETE FROM consumption.portfolio_positions_current WHERE id = :id
         """), {"id": id})
         
         if result.rowcount == 0:
@@ -3214,7 +3214,7 @@ def get_strategy_signals(strategy_id: str, db: Session = Depends(get_db)):
         # Get deployed tickers for this strategy
         positions = db.execute(text("""
             SELECT ticker, entry_price, current_price, unrealized_pnl, realized_pnl
-            FROM gold.paper_strategies
+            FROM consumption.portfolio_positions_current
             WHERE strategy_id = :sid AND status = 'ACTIVE'
         """), {"sid": strategy_id}).fetchall()
         
@@ -3483,7 +3483,7 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
     # Get all positions for this strategy
     positions = db.execute(text("""
         SELECT id, ticker, invested_capital, status, mode
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchall()
 
@@ -3496,7 +3496,7 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
         if action == 'close' and pos.invested_capital > 0:
             # Close the position - mark as closed
             db.execute(text("""
-                UPDATE gold.paper_strategies
+                UPDATE consumption.portfolio_positions_current
                 SET
                     status = 'CLOSED',
                     realized_pnl = realized_pnl + unrealized_pnl,
@@ -3522,7 +3522,7 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
         else:
             # Just mark as inactive/paused but keep position
             db.execute(text("""
-                UPDATE gold.paper_strategies
+                UPDATE consumption.portfolio_positions_current
                 SET
                     status = 'PAUSED',
                     updated_at = NOW()
@@ -3531,7 +3531,7 @@ def deactivate_strategy(strategy_id: str, request: Request, db: Session = Depend
 
     # Mark strategy as inactive in strategy_definitions
     db.execute(text("""
-        UPDATE gold.strategy_definitions
+        UPDATE gold.strategy_registry
         SET
             is_active = FALSE,
             updated_at = NOW()
@@ -3559,8 +3559,8 @@ def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
             assigned_capital,
             in_market_capital,
             capacity_millions
-        FROM gold.strategy_definitions
-        WHERE strategy_id = :strategy_id AND jt_ready = TRUE
+        FROM gold.strategy_registry
+        WHERE strategy_id = :strategy_id 
     """), {"strategy_id": strategy_id}).fetchone()
 
     if not result:
@@ -3569,7 +3569,7 @@ def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
     # Calculate total in-market across all positions
     in_market = db.execute(text("""
         SELECT COALESCE(SUM(invested_capital), 0)
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).scalar() or 0
 
@@ -3593,8 +3593,8 @@ def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depen
 
     # Check strategy exists
     result = db.execute(text("""
-        SELECT strategy_id FROM gold.strategy_definitions
-        WHERE strategy_id = :strategy_id AND jt_ready = TRUE
+        SELECT strategy_id FROM gold.strategy_registry
+        WHERE strategy_id = :strategy_id 
     """), {"strategy_id": strategy_id}).fetchone()
 
     if not result:
@@ -3602,7 +3602,7 @@ def update_strategy_capital(strategy_id: str, payload: dict, db: Session = Depen
 
     # Update assigned capital
     db.execute(text("""
-        UPDATE gold.strategy_definitions
+        UPDATE gold.strategy_registry
         SET assigned_capital = :capital,
             updated_at = NOW()
         WHERE strategy_id = :strategy_id
@@ -3625,7 +3625,7 @@ def can_strategy_buy(strategy_id: str, payload: dict, db: Session = Depends(get_
 
     # Get assigned capital
     result = db.execute(text("""
-        SELECT assigned_capital FROM gold.strategy_definitions
+        SELECT assigned_capital FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
 
@@ -3637,7 +3637,7 @@ def can_strategy_buy(strategy_id: str, payload: dict, db: Session = Depends(get_
     # Get current in-market
     in_market = db.execute(text("""
         SELECT COALESCE(SUM(invested_capital), 0)
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).scalar() or 0
 
@@ -3691,7 +3691,7 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
             SELECT
                 COALESCE(SUM(capital), 0) as total_allocated,
                 COUNT(*) as position_count
-            FROM gold.paper_strategies
+            FROM consumption.portfolio_positions_current
             WHERE status = 'ACTIVE'
         """)).fetchone()
         sim_used = float(sim_stats.total_allocated) if sim_stats else 0
@@ -3852,7 +3852,7 @@ def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
 
     # 1. Count and demote LIVE strategies
     affected = db.execute(text("""
-        UPDATE gold.strategy_definitions
+        UPDATE gold.strategy_registry
         SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
         WHERE execution_mode = 'LIVE_TRADING'
         RETURNING strategy_id
@@ -3925,7 +3925,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
         # Get current allocated capital
         sim_stats = db.execute(text("""
             SELECT COALESCE(SUM(capital), 0) as total_allocated
-            FROM gold.paper_strategies
+            FROM consumption.portfolio_positions_current
             WHERE status = 'ACTIVE'
         """)).fetchone()
         sim_used = float(sim_stats.total_allocated) if sim_stats else 0
@@ -4018,7 +4018,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
     # Get positions that need IBKR orders
     result = db.execute(text("""
         SELECT id, strategy_id, ticker, capital, entry_price, execution_mode
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE status = 'ACTIVE'
         AND invested_capital > 0
         AND (ibkr_order_id IS NULL OR ibkr_order_id = '')
@@ -4097,7 +4097,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
 
                 # Update database with IBKR golden source price
                 db.execute(text("""
-                    UPDATE gold.paper_strategies
+                    UPDATE consumption.portfolio_positions_current
                     SET ibkr_order_id = :order_id,
                         entry_price = :entry_price,
                         current_price = :entry_price,
@@ -4183,7 +4183,7 @@ def reset_simulation(db: Session = Depends(get_db)):
     try:
         # Count before deletion for reporting
         count_result = db.execute(text("""
-            SELECT COUNT(*) as cnt FROM gold.paper_strategies
+            SELECT COUNT(*) as cnt FROM consumption.portfolio_positions_current
         """)).fetchone()
         positions_count = count_result.cnt if count_result else 0
 
@@ -4194,7 +4194,7 @@ def reset_simulation(db: Session = Depends(get_db)):
 
         # Delete all paper strategies
         db.execute(text("""
-            DELETE FROM gold.paper_strategies
+            DELETE FROM consumption.portfolio_positions_current
         """))
 
         # Delete all trade executions
@@ -4220,7 +4220,7 @@ def reset_simulation(db: Session = Depends(get_db)):
 
         try:
             db.execute(text("""
-                DELETE FROM gold.trade_executions WHERE strategy_id IN (SELECT strategy_id FROM gold.paper_strategies)
+                DELETE FROM gold.trade_executions WHERE strategy_id IN (SELECT strategy_id FROM consumption.portfolio_positions_current)
             """))
         except Exception as e:
             logger.warning(f"Could not clear trade_executions: {e}")
@@ -4342,7 +4342,7 @@ def get_strategy_capital_pool(strategy_id: str, db: Session = Depends(get_db)):
     """Get capital pool status for a strategy - pool shared across universe assets"""
     strategy = db.execute(text("""
         SELECT strategy_id, name, assigned_capital
-        FROM gold.strategy_definitions WHERE strategy_id = :strategy_id
+        FROM gold.strategy_registry WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
 
     if not strategy:
@@ -4350,7 +4350,7 @@ def get_strategy_capital_pool(strategy_id: str, db: Session = Depends(get_db)):
 
     pool_usage = db.execute(text("""
         SELECT COALESCE(SUM(capital), 0) as used_capital, COUNT(*) as active_positions
-        FROM gold.paper_strategies WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
+        FROM consumption.portfolio_positions_current WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
     """), {"strategy_id": strategy_id}).fetchone()
 
     total_assigned = float(strategy.assigned_capital) if strategy.assigned_capital else 100000
@@ -4372,7 +4372,7 @@ def update_strategy_capital_pool(strategy_id: str, payload: dict, db: Session = 
     """Update the total capital pool for a strategy"""
     new_total = payload.get("total_assigned", 100000)
     result = db.execute(text("""
-        UPDATE gold.strategy_definitions SET assigned_capital = :total, updated_at = NOW()
+        UPDATE gold.strategy_registry SET assigned_capital = :total, updated_at = NOW()
         WHERE strategy_id = :strategy_id RETURNING strategy_id, name, assigned_capital
     """), {"strategy_id": strategy_id, "total": new_total}).fetchone()
 
@@ -4400,13 +4400,13 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
     """)).fetchone()
     current_mode = mode_result.value if mode_result else 'SIMULATION'
 
-    strategy = db.execute(text("SELECT * FROM gold.strategy_definitions WHERE strategy_id = :sid"),
+    strategy = db.execute(text("SELECT * FROM gold.strategy_registry WHERE strategy_id = :sid"),
                          {"sid": strategy_id}).fetchone()
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
     pool_status = db.execute(text("""
-        SELECT COALESCE(SUM(capital), 0) as used FROM gold.paper_strategies
+        SELECT COALESCE(SUM(capital), 0) as used FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
     """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
 
@@ -4423,7 +4423,7 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
             break
         try:
             db.execute(text("""
-                INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
+                INSERT INTO consumption.portfolio_positions_current (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', :mode, NOW(), NOW())
                 ON CONFLICT (strategy_id, ticker) DO UPDATE SET
                     status = 'ACTIVE',
@@ -4522,7 +4522,7 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
     # Check pool availability
     pool_status = db.execute(text("""
         SELECT COALESCE(SUM(capital), 0) as used, COUNT(*) as position_count
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
     """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
 
@@ -4554,7 +4554,7 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
 
         try:
             db.execute(text("""
-                INSERT INTO gold.paper_strategies (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
+                INSERT INTO consumption.portfolio_positions_current (strategy_id, ticker, capital, status, execution_mode, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', :mode, NOW(), NOW())
                 ON CONFLICT (strategy_id, ticker) DO UPDATE SET
                     status = 'ACTIVE',
@@ -4699,409 +4699,6 @@ def reject_strategy(strategy_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Agentic Research Endpoints (reads from openclaw_researcher schema) ───
-
-AGENT_REGISTRY = {
-    "qr_hub":            {"name": "Hub",            "icon": "🔀", "role": "Orchestrates research pipeline, routes tasks between agents", "order": 1},
-    "qr_idea_intake":    {"name": "Intake",         "icon": "📥", "role": "Receives new strategy ideas from Telegram and other sources", "order": 2},
-    "qr_researcher":     {"name": "Researcher",     "icon": "🔍", "role": "Deep-dives into market signals and academic research", "order": 3},
-    "qr_macro_sentinel": {"name": "MacroSentinel",  "icon": "🌍", "role": "Monitors macro-economic conditions and regime changes", "order": 4},
-    "qr_data_validator": {"name": "Validator",       "icon": "🔬", "role": "Validates data quality and checks for anomalies", "order": 5},
-    "qr_etl_manager":    {"name": "ETL",            "icon": "🏭", "role": "Manages data pipelines — ingestion, cleaning, enrichment", "order": 6},
-    "qr_algo":           {"name": "Algo",           "icon": "⚙️", "role": "Designs and codes quantitative trading algorithms", "order": 7},
-    "qr_exp_manager":    {"name": "ExpManager",     "icon": "🧬", "role": "Runs backtests and manages experiment lifecycle", "order": 8},
-    "qr_risk":           {"name": "Risk",           "icon": "🛡️", "role": "Evaluates risk metrics — drawdown, VaR, correlation", "order": 9},
-    "qr_debate":         {"name": "Debate",         "icon": "⚔️", "role": "Red-team / blue-team debate on strategy viability", "order": 10},
-    "qr_qa":             {"name": "QA",             "icon": "🚦", "role": "Quality assurance — tests strategy logic and validates results", "order": 11},
-    "qr_architect":      {"name": "Architect",      "icon": "🏗️", "role": "Designs system architecture and strategy frameworks", "order": 12},
-    "qr_monitor":        {"name": "Monitor",        "icon": "🔭", "role": "Watches market conditions and triggers alerts", "order": 13},
-}
-
-
-@app.get("/api/agents")
-def get_agents():
-    """Get the list of registered OpenClaw agents (excludes main & qr_frontend)"""
-    agents = []
-    for agent_id, info in sorted(AGENT_REGISTRY.items(), key=lambda x: x[1]["order"]):
-        agents.append({
-            "agent_id": agent_id,
-            "name": info["name"],
-            "icon": info["icon"],
-            "role": info["role"],
-            "order": info["order"],
-        })
-    return {"agents": agents}
-
-
-@app.get("/api/agents/workflow-summary")
-def get_workflow_summary_endpoint(db: Session = Depends(get_db)):
-    """Get workflow summary — counts by status, by agent, pending/golden/rejected"""
-    try:
-        result = db.execute(text(
-            "SELECT openclaw_researcher.get_workflow_summary() AS summary"
-        )).fetchone()
-        return result.summary if result and result.summary else {}
-    except Exception as e:
-        logger.error(f"Workflow summary error: {e}")
-        return {}
-
-
-@app.get("/api/agents/strategy-workflows")
-def get_strategy_workflows(status: str = None, limit: int = 50, db: Session = Depends(get_db)):
-    """Get strategy workflows with full state (event count, history, etc.)"""
-    try:
-        query = """
-            SELECT strategy_id, name, workflow_status, assigned_to,
-                   workflow_result, event_count, event_history,
-                   workflow_created, workflow_updated
-            FROM openclaw_researcher.v_strategy_full_state
-        """
-        params = {}
-        if status:
-            query += " WHERE workflow_status = :status"
-            params["status"] = status
-        query += " ORDER BY workflow_updated DESC LIMIT :limit"
-        params["limit"] = limit
-
-        rows = db.execute(text(query), params).fetchall()
-        strategies = []
-        for r in rows:
-            strategies.append({
-                "strategy_id": r.strategy_id,
-                "name": r.name,
-                "status": r.workflow_status,
-                "assigned_to": r.assigned_to,
-                "result": r.workflow_result,
-                "event_count": r.event_count,
-                "event_history": r.event_history,
-                "created_at": r.workflow_created.isoformat() if r.workflow_created else None,
-                "updated_at": r.workflow_updated.isoformat() if r.workflow_updated else None,
-            })
-        return {"strategies": strategies, "count": len(strategies)}
-    except Exception as e:
-        logger.error(f"Strategy workflows error: {e}")
-        return {"strategies": [], "count": 0}
-
-
-@app.get("/api/agents/events")
-def get_agent_events(
-    agent_id: str = None,
-    strategy_id: str = None,
-    domain: str = None,
-    limit: int = 50,
-    db: Session = Depends(get_db)
-):
-    """Get events from the openclaw_researcher event log with processing status"""
-    try:
-        query = """
-            SELECT e.id, e.event_type, e.strategy_id, e.domain,
-                   e.source_agent, e.payload_json, e.created_at, e.status,
-                   (SELECT string_agg(ep.agent_name, ', ' ORDER BY ep.processed_at)
-                    FROM openclaw_researcher.event_processing ep
-                    WHERE ep.event_id = e.id) AS processed_by
-            FROM openclaw_researcher.events e
-            WHERE 1=1
-        """
-        params = {}
-        if agent_id:
-            query += " AND e.source_agent = :agent_id"
-            params["agent_id"] = agent_id
-        if strategy_id:
-            query += " AND e.strategy_id = :strategy_id"
-            params["strategy_id"] = strategy_id
-        if domain:
-            query += " AND e.domain = :domain"
-            params["domain"] = domain
-        query += " ORDER BY e.created_at DESC LIMIT :limit"
-        params["limit"] = limit
-
-        rows = db.execute(text(query), params).fetchall()
-        events = []
-        for r in rows:
-            agent_info = AGENT_REGISTRY.get(r.source_agent, {"name": r.source_agent, "icon": "🤖"})
-            events.append({
-                "id": str(r.id),
-                "event_type": r.event_type,
-                "strategy_id": r.strategy_id,
-                "domain": r.domain,
-                "source_agent": r.source_agent,
-                "agent_name": agent_info["name"],
-                "agent_icon": agent_info["icon"],
-                "payload": r.payload_json,
-                "status": r.status,
-                "processed_by": r.processed_by,
-                "timestamp": r.created_at.isoformat() if r.created_at else None,
-            })
-        return {"events": events, "count": len(events)}
-    except Exception as e:
-        logger.error(f"Agent events error: {e}")
-        return {"events": [], "count": 0}
-
-
-@app.get("/api/agents/pending-work")
-def get_pending_work(agent_id: str = None, db: Session = Depends(get_db)):
-    """Get pending (unprocessed) work items per agent from routing rules"""
-    try:
-        query = """
-            SELECT domain, target_agent, event_id, event_type,
-                   strategy_id, emitted_by, created_at
-            FROM openclaw_researcher.v_pending_work
-        """
-        params = {}
-        if agent_id:
-            query += " WHERE target_agent = :agent_id"
-            params["agent_id"] = agent_id
-        query += " ORDER BY created_at"
-
-        rows = db.execute(text(query), params).fetchall()
-        work_items = []
-        for r in rows:
-            agent_info = AGENT_REGISTRY.get(r.target_agent, {"name": r.target_agent, "icon": "🤖"})
-            emitter_info = AGENT_REGISTRY.get(r.emitted_by, {"name": r.emitted_by, "icon": "🤖"})
-            work_items.append({
-                "domain": r.domain,
-                "target_agent": r.target_agent,
-                "target_agent_name": agent_info["name"],
-                "target_agent_icon": agent_info["icon"],
-                "event_id": str(r.event_id),
-                "event_type": r.event_type,
-                "strategy_id": r.strategy_id,
-                "emitted_by": r.emitted_by,
-                "emitter_name": emitter_info["name"],
-                "emitter_icon": emitter_info["icon"],
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            })
-
-        # Group by agent for summary
-        agent_counts = {}
-        for w in work_items:
-            key = w["target_agent"]
-            if key not in agent_counts:
-                agent_counts[key] = 0
-            agent_counts[key] += 1
-
-        return {"work_items": work_items, "count": len(work_items), "by_agent": agent_counts}
-    except Exception as e:
-        logger.error(f"Pending work error: {e}")
-        return {"work_items": [], "count": 0, "by_agent": {}}
-
-
-@app.get("/api/agents/completed-work")
-def get_completed_work(
-    agent_id: str = None,
-    date_from: str = None,
-    date_to: str = None,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
-    """Get completed (processed) work items with optional date filtering"""
-    try:
-        query = """
-            SELECT 
-                ep.event_id,
-                ep.agent_name as processed_by,
-                ep.processed_at,
-                ep.status as processing_status,
-                e.event_type,
-                e.strategy_id,
-                e.domain,
-                e.source_agent as emitted_by,
-                e.created_at as event_created_at
-            FROM openclaw_researcher.event_processing ep
-            JOIN openclaw_researcher.events e ON ep.event_id = e.id
-            WHERE 1=1
-        """
-        params = {}
-        if agent_id:
-            query += " AND ep.agent_name = :agent_id"
-            params["agent_id"] = agent_id
-        if date_from:
-            query += " AND ep.processed_at >= :date_from"
-            params["date_from"] = date_from
-        if date_to:
-            query += " AND ep.processed_at < :date_to"
-            params["date_to"] = date_to
-        query += " ORDER BY ep.processed_at DESC LIMIT :limit"
-        params["limit"] = limit
-
-        rows = db.execute(text(query), params).fetchall()
-        completed_items = []
-        for r in rows:
-            agent_info = AGENT_REGISTRY.get(r.processed_by, {"name": r.processed_by, "icon": "🤖"})
-            emitter_info = AGENT_REGISTRY.get(r.emitted_by, {"name": r.emitted_by, "icon": "🤖"})
-            completed_items.append({
-                "event_id": str(r.event_id),
-                "event_type": r.event_type,
-                "strategy_id": r.strategy_id,
-                "domain": r.domain,
-                "processed_by": r.processed_by,
-                "processor_name": agent_info["name"],
-                "processor_icon": agent_info["icon"],
-                "emitted_by": r.emitted_by,
-                "emitter_name": emitter_info["name"],
-                "emitter_icon": emitter_info["icon"],
-                "processing_status": r.processing_status,
-                "event_created_at": r.event_created_at.isoformat() if r.event_created_at else None,
-                "processed_at": r.processed_at.isoformat() if r.processed_at else None,
-            })
-
-        return {"completed_items": completed_items, "count": len(completed_items)}
-    except Exception as e:
-        logger.error(f"Completed work error: {e}")
-        return {"completed_items": [], "count": 0}
-
-
-@app.get("/api/agents/routing-rules")
-def get_routing_rules(db: Session = Depends(get_db)):
-    """Get event routing configuration — which events get routed to which agents"""
-    try:
-        rows = db.execute(text("""
-            SELECT event_type, target_agent, enabled, domain
-            FROM openclaw_researcher.routing_rules
-            WHERE enabled = true
-            ORDER BY domain, event_type, target_agent
-        """)).fetchall()
-
-        rules = []
-        for r in rows:
-            agent_info = AGENT_REGISTRY.get(r.target_agent, {"name": r.target_agent, "icon": "🤖"})
-            rules.append({
-                "event_type": r.event_type,
-                "target_agent": r.target_agent,
-                "target_agent_name": agent_info["name"],
-                "target_agent_icon": agent_info["icon"],
-                "domain": r.domain,
-            })
-        return {"rules": rules, "count": len(rules)}
-    except Exception as e:
-        logger.error(f"Routing rules error: {e}")
-        return {"rules": [], "count": 0}
-
-
-@app.get("/api/agents/strategy/{strategy_id}")
-def get_strategy_agent_detail(strategy_id: str, db: Session = Depends(get_db)):
-    """Get full agent activity for a specific strategy — workflow + events + lineage"""
-    try:
-        # Workflow state
-        wf = db.execute(text("""
-            SELECT strategy_id, name, status, assigned_to, assigned_at,
-                   progress_percent, progress_note, result, result_data,
-                   risk_score, risk_flags, risk_approved, risk_notes,
-                   conviction_score, debate_summary, frequency,
-                   strategy_description, created_at, updated_at
-            FROM openclaw_researcher.strategy_workflow
-            WHERE strategy_id = :sid
-        """), {"sid": strategy_id}).fetchone()
-
-        # Events for this strategy
-        events = db.execute(text("""
-            SELECT e.id, e.event_type, e.source_agent, e.domain,
-                   e.payload_json, e.created_at, e.status
-            FROM openclaw_researcher.events e
-            WHERE e.strategy_id = :sid
-            ORDER BY e.created_at
-        """), {"sid": strategy_id}).fetchall()
-
-        # Lineage for this strategy
-        lineage = db.execute(text("""
-            SELECT strategy_id, dataset_version, backtest_engine_version,
-                   strategy_parameters, result_metrics, experiment_id,
-                   sharpe_oos, max_drawdown, trade_count_oos, created_at
-            FROM openclaw_researcher.strategy_lineage
-            WHERE strategy_id = :sid
-            ORDER BY created_at DESC
-        """), {"sid": strategy_id}).fetchall()
-
-        if not wf:
-            raise HTTPException(status_code=404, detail="Strategy not found in workflow")
-
-        event_list = []
-        for e in events:
-            agent_info = AGENT_REGISTRY.get(e.source_agent, {"name": e.source_agent, "icon": "🤖"})
-            event_list.append({
-                "id": str(e.id),
-                "event_type": e.event_type,
-                "source_agent": e.source_agent,
-                "agent_name": agent_info["name"],
-                "agent_icon": agent_info["icon"],
-                "domain": e.domain,
-                "payload": e.payload_json,
-                "status": e.status,
-                "timestamp": e.created_at.isoformat() if e.created_at else None,
-            })
-
-        lineage_list = []
-        for l in lineage:
-            lineage_list.append({
-                "experiment_id": l.experiment_id,
-                "dataset_version": l.dataset_version,
-                "engine_version": l.backtest_engine_version,
-                "parameters": l.strategy_parameters,
-                "metrics": l.result_metrics,
-                "sharpe_oos": float(l.sharpe_oos) if l.sharpe_oos else None,
-                "max_drawdown": float(l.max_drawdown) if l.max_drawdown else None,
-                "trade_count_oos": l.trade_count_oos,
-                "created_at": l.created_at.isoformat() if l.created_at else None,
-            })
-
-        return {
-            "workflow": {
-                "strategy_id": wf.strategy_id,
-                "name": wf.name,
-                "status": wf.status,
-                "assigned_to": wf.assigned_to,
-                "assigned_at": wf.assigned_at.isoformat() if wf.assigned_at else None,
-                "progress_percent": wf.progress_percent,
-                "progress_note": wf.progress_note,
-                "result": wf.result,
-                "result_data": wf.result_data,
-                "risk_score": float(wf.risk_score) if wf.risk_score else None,
-                "risk_flags": wf.risk_flags,
-                "risk_approved": wf.risk_approved,
-                "risk_notes": wf.risk_notes,
-                "conviction_score": float(wf.conviction_score) if wf.conviction_score else None,
-                "debate_summary": wf.debate_summary,
-                "frequency": wf.frequency,
-                "description": wf.strategy_description,
-                "created_at": wf.created_at.isoformat() if wf.created_at else None,
-                "updated_at": wf.updated_at.isoformat() if wf.updated_at else None,
-            },
-            "events": event_list,
-            "lineage": lineage_list,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Strategy agent detail error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/agents/gold-layer-status")
-def get_gold_layer_status(db: Session = Depends(get_db)):
-    """Get current gold layer data refresh state"""
-    try:
-        row = db.execute(text("""
-            SELECT state, refreshed_at, hours_since_refresh,
-                   sources_ok, sources_failed, locked_since, notes, updated_at
-            FROM openclaw_researcher.v_gold_layer_status
-            LIMIT 1
-        """)).fetchone()
-        if not row:
-            return {"state": "unknown"}
-        return {
-            "state": row.state,
-            "refreshed_at": row.refreshed_at.isoformat() if row.refreshed_at else None,
-            "hours_since_refresh": float(row.hours_since_refresh) if row.hours_since_refresh else None,
-            "sources_ok": row.sources_ok,
-            "sources_failed": row.sources_failed,
-            "locked_since": row.locked_since.isoformat() if row.locked_since else None,
-            "notes": row.notes,
-        }
-    except Exception as e:
-        logger.error(f"Gold layer status error: {e}")
-        return {"state": "error", "error": str(e)}
-
-
 @app.get("/api/strategies/pipeline-summary")
 def get_strategy_pipeline_summary(db: Session = Depends(get_db)):
     """Get counts of strategies at each pipeline stage"""
@@ -5120,12 +4717,19 @@ def get_strategy_pipeline_summary(db: Session = Depends(get_db)):
                 summary[key] = row.cnt
             summary["total"] += row.cnt
 
-        # Count deployed strategies from paper_strategies
-        deployed = db.execute(text("""
-            SELECT COUNT(DISTINCT strategy_id) as cnt
-            FROM gold.paper_strategies
-        """)).fetchone()
-        summary["deployed"] = deployed.cnt if deployed else 0
+        # Count deployed strategies from portfolio_positions_current (paper_strategies may not exist)
+        try:
+            deployed = db.execute(text("""
+                SELECT COUNT(DISTINCT strategy_id) as cnt
+                FROM consumption.portfolio_positions_current
+                WHERE status = 'ACTIVE' AND quantity > 0
+            """)).fetchone()
+            summary["deployed"] = deployed.cnt if deployed else 0
+        except Exception:
+            summary["deployed"] = 0
+
+        # Add last_update timestamp
+        summary["last_update"] = datetime.datetime.utcnow().isoformat() + "Z"
 
         return summary
     except Exception as e:
@@ -5187,26 +4791,36 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
             # Get backtest data for this strategy
             bt = backtest_data.get(s.strategy_id, {})
 
+            # Compute win_rate from registry or backtest
+            win_rate = bt.get('win_rate') or (float(s.win_rate) / 100 if s.win_rate else None)
+            total_return = bt.get('total_return')
+            total_trades = bt.get('total_trades')
+
             result.append({
-                "id": s.strategy_id,
-                "name": s.strategy_name,
+                "strategy_id": s.strategy_id,
+                "strategy_name": s.strategy_name or s.strategy_id,
+                "name": s.strategy_name or s.strategy_id,
                 "description": f"{s.priority} strategy v{s.version}",
-                "asset_class": "STOCK",  # TODO: DE to add asset_class column
-                "direction": "LONG",  # TODO: DE to add direction column
-                "time_horizon": None,  # TODO: DE to add time_horizon column
-                # Real backtest data from consumption (null if not available)
-                "win_rate": bt.get('win_rate') or (float(s.win_rate) / 100 if s.win_rate else None),
+                "asset_class": "STOCK",
+                "direction": "LONG",
+                "time_horizon": None,
+                "win_rate": win_rate,
+                "returns": total_return,
+                "live_trades": total_trades,
+                "backtest_win_rate": round((bt.get('win_rate') or 0) * 100, 1) if bt.get('win_rate') else None,
+                "live_win_rate": round(win_rate * 100, 1) if win_rate else None,
                 "profit_factor": bt.get('profit_factor'),
                 "max_drawdown": bt.get('max_drawdown'),
                 "sharpe_ratio": bt.get('sharpe'),
-                "backtest_trades": bt.get('total_trades'),
-                "backtest_return": bt.get('total_return'),
+                "backtest_trades": total_trades,
+                "backtest_return": total_return,
                 "universe": tickers,
                 "universe_count": len(tickers),
-                "max_position_pct": 0.05,  # TODO: DE to add to registry
+                "max_position_pct": 0.05,
                 "venue": "IBKR",
                 "status": s.status,
                 "priority": s.priority,
+                "tier": s.priority,
                 "version": s.version,
                 "entry_logic": s.entry_logic,
                 "exit_logic": s.exit_logic,
@@ -5237,8 +4851,8 @@ def _get_strategies_from_definitions(db: Session, asset_class: str = None):
             max_position_pct,
             venue,
             status
-        FROM gold.strategy_definitions
-        WHERE jt_ready = TRUE
+        FROM gold.strategy_registry
+        
     """
     if asset_class:
         query += " AND asset_class = :asset_class"
@@ -5292,7 +4906,7 @@ def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
         """, {"sid": sid}, label="cmp_registry")
         definitions = safe_query_one(db, """
             SELECT strategy_id, name, asset_class, direction, execution_mode
-            FROM gold.strategy_definitions WHERE strategy_id = :sid
+            FROM gold.strategy_registry WHERE strategy_id = :sid
         """, {"sid": sid}, label="cmp_definitions")
 
         if not registry and not definitions:
@@ -5400,7 +5014,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
         SELECT strategy_id, name, description, asset_class, direction, time_horizon,
                sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct,
                venue, status, signal_logic, exit_logic, execution_mode
-        FROM gold.strategy_definitions
+        FROM gold.strategy_registry
         WHERE strategy_id = :sid
     """, {"sid": strategy_id}, label="eval_definitions")
 
@@ -5612,7 +5226,7 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
             trigger_example,
             why_it_works,
             execution_mode
-        FROM gold.strategy_definitions
+        FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
 
@@ -5837,7 +5451,7 @@ def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)
 
     strat = db.execute(text("""
         SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_definitions WHERE strategy_id = :sid
+        FROM gold.strategy_registry WHERE strategy_id = :sid
     """), {"sid": strategy_id}).fetchone()
     if not strat:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -5881,7 +5495,7 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
 
     strat = db.execute(text("""
         SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_definitions WHERE strategy_id = :sid
+        FROM gold.strategy_registry WHERE strategy_id = :sid
     """), {"sid": strategy_id}).fetchone()
     if not strat:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -5918,7 +5532,7 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
 
     # Apply mode change
     db.execute(text("""
-        UPDATE gold.strategy_definitions
+        UPDATE gold.strategy_registry
         SET execution_mode = :mode, updated_at = NOW()
         WHERE strategy_id = :sid
     """), {"sid": strategy_id, "mode": target})
@@ -5992,7 +5606,7 @@ def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
     # Pool size to compute pct losses
     pool = safe_query_one(db, """
         SELECT assigned_capital
-        FROM gold.strategy_definitions
+        FROM gold.strategy_registry
         WHERE strategy_id = :sid
     """, {"sid": strategy_id}, label="demote_pool")
     pool_size = float(pool.assigned_capital) if pool and pool.assigned_capital else 100_000.0
@@ -6078,7 +5692,7 @@ def get_risk_status(strategy_id: str, db: Session = Depends(get_db)):
     """Return the demote-rule status for a strategy without taking action."""
     strat = db.execute(text("""
         SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_definitions WHERE strategy_id = :sid
+        FROM gold.strategy_registry WHERE strategy_id = :sid
     """), {"sid": strategy_id}).fetchone()
     if not strat:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -6095,13 +5709,13 @@ def _demote_strategy(db: Session, strategy_id: str, breaches: list, source: str 
     """Demote a LIVE strategy to PAPER. Audits + emits WS event."""
     strat = db.execute(text("""
         SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_definitions WHERE strategy_id = :sid
+        FROM gold.strategy_registry WHERE strategy_id = :sid
     """), {"sid": strategy_id}).fetchone()
     if not strat or strat.execution_mode != "LIVE_TRADING":
         return False
 
     db.execute(text("""
-        UPDATE gold.strategy_definitions
+        UPDATE gold.strategy_registry
         SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
         WHERE strategy_id = :sid
     """), {"sid": strategy_id})
@@ -6135,7 +5749,7 @@ async def _demote_scanner_loop():
             db = SessionLocal()
             try:
                 live = db.execute(text("""
-                    SELECT strategy_id FROM gold.strategy_definitions
+                    SELECT strategy_id FROM gold.strategy_registry
                     WHERE execution_mode = 'LIVE_TRADING'
                 """)).fetchall()
                 for row in live:
@@ -6160,7 +5774,7 @@ def force_demote_check(strategy_id: str, db: Session = Depends(get_db)):
     """Manually trigger an auto-demote check for one strategy (for testing/UI)."""
     strat = db.execute(text("""
         SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_definitions WHERE strategy_id = :sid
+        FROM gold.strategy_registry WHERE strategy_id = :sid
     """), {"sid": strategy_id}).fetchone()
     if not strat:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -6182,7 +5796,7 @@ def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail="Invalid mode. Use SIMULATION, PAPER_TRADING, or LIVE_TRADING")
 
     result = db.execute(text("""
-        UPDATE gold.strategy_definitions
+        UPDATE gold.strategy_registry
         SET execution_mode = :mode,
             updated_at = NOW()
         WHERE strategy_id = :strategy_id
@@ -6220,7 +5834,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
     # Get strategy execution mode
     strategy = db.execute(text("""
         SELECT strategy_id, name, execution_mode, venue
-        FROM gold.strategy_definitions
+        FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
 
@@ -6254,7 +5868,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
         # Simulation mode - just update database
         if side == "BUY":
             db.execute(text("""
-                UPDATE gold.paper_strategies
+                UPDATE consumption.portfolio_positions_current
                 SET invested_capital = invested_capital + :amount,
                     available_capital = available_capital - :amount,
                     trades_count = trades_count + 1,
@@ -6263,7 +5877,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
             """), {"strategy_id": strategy_id, "ticker": ticker, "amount": quantity * 100})
         else:
             db.execute(text("""
-                UPDATE gold.paper_strategies
+                UPDATE consumption.portfolio_positions_current
                 SET invested_capital = GREATEST(0, invested_capital - :amount),
                     available_capital = available_capital + :amount,
                     trades_count = trades_count + 1,
@@ -6331,7 +5945,7 @@ def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
     """Get current execution mode for a strategy"""
     result = db.execute(text("""
         SELECT strategy_id, name, execution_mode, venue
-        FROM gold.strategy_definitions
+        FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
 
@@ -6340,7 +5954,7 @@ def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
 
     # Count positions by mode
     sim_count = db.execute(text("""
-        SELECT COUNT(*) FROM gold.paper_strategies
+        SELECT COUNT(*) FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id AND execution_mode = 'SIMULATION'
     """), {"strategy_id": strategy_id}).scalar() or 0
 
@@ -6378,8 +5992,8 @@ def add_stocks_to_paper_trading(payload: dict, db: Session = Depends(get_db)):
 
     # Get strategy definition
     strategy = db.execute(text("""
-        SELECT * FROM gold.strategy_definitions
-        WHERE strategy_id = :sid AND jt_ready = TRUE
+        SELECT * FROM gold.strategy_registry
+        WHERE strategy_id = :sid 
     """), {"sid": strategy_id}).fetchone()
 
     if not strategy:
@@ -6399,7 +6013,7 @@ def add_stocks_to_paper_trading(payload: dict, db: Session = Depends(get_db)):
         try:
             # Create paper trading strategy instance
             db.execute(text("""
-                INSERT INTO gold.paper_strategies
+                INSERT INTO consumption.portfolio_positions_current
                 (strategy_id, ticker, capital, status, created_at, updated_at)
                 VALUES (:strategy_id, :ticker, :capital, 'ACTIVE', NOW(), NOW())
                 ON CONFLICT (strategy_id, ticker) DO UPDATE SET
@@ -6447,8 +6061,8 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
             venue,
             capacity_millions,
             backtest_period
-        FROM gold.strategy_definitions
-        WHERE strategy_id = :sid AND jt_ready = TRUE
+        FROM gold.strategy_registry
+        WHERE strategy_id = :sid 
     """), {"sid": strategy_id}).fetchone()
 
     if result:
@@ -6545,8 +6159,8 @@ def screen_stocks(strategy_id: str,
     if not strategy:
         strategy = db.execute(text("""
             SELECT strategy_id as id, name, description, asset_class
-            FROM gold.strategy_definitions
-            WHERE strategy_id = :strategy_id AND jt_ready = TRUE
+            FROM gold.strategy_registry
+            WHERE strategy_id = :strategy_id 
         """), {"strategy_id": strategy_id}).fetchone()
 
     if not strategy:
@@ -6942,8 +6556,8 @@ def get_strategy_stats_endpoint(db: Session = Depends(get_db)):
             SUM(ps.capital) as total_allocated,
             COUNT(CASE WHEN (COALESCE(ps.realized_pnl, 0) + COALESCE(ps.unrealized_pnl, 0)) > 0 THEN 1 END) as winning_positions,
             SUM(ps.trades_count) as total_trades
-        FROM gold.paper_strategies ps
-        LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
+        FROM consumption.portfolio_positions_current ps
+        LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
         WHERE ps.status = 'ACTIVE'
         GROUP BY ps.strategy_id, sd.name
     """)).fetchall()

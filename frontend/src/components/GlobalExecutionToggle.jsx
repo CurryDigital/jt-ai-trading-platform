@@ -3,9 +3,13 @@ import React, { useState, useEffect, useRef } from 'react';
 /**
  * Global Execution Mode Toggle
  * Platform-wide setting for SIMULATION / PAPER_TRADING / LIVE_TRADING
+ *
+ * Props:
+ *   - mode: string — current execution mode from parent (e.g. App.jsx)
+ *   - onModeChange: (newMode: string) => void — callback when mode changes
  */
-export const GlobalExecutionToggle = () => {
-  const [mode, setMode] = useState('SIMULATION');
+export const GlobalExecutionToggle = ({ mode: externalMode, onModeChange }) => {
+  const [mode, setMode] = useState(externalMode || 'SIMULATION');
   const [simCapital, setSimCapital] = useState(100000);
   const [simUsed, setSimUsed] = useState(0);
   const [simAvailable, setSimAvailable] = useState(100000);
@@ -18,6 +22,13 @@ export const GlobalExecutionToggle = () => {
   const [showConfig, setShowConfig] = useState(false);
   const [message, setMessage] = useState(null);
   const configRef = useRef(null);
+
+  // Sync with external mode prop when it changes
+  useEffect(() => {
+    if (externalMode && externalMode !== mode) {
+      setMode(externalMode);
+    }
+  }, [externalMode]);
 
   useEffect(() => {
     fetchGlobalMode();
@@ -111,6 +122,8 @@ export const GlobalExecutionToggle = () => {
         }
         setIbkrConnected(data.ibkr_connected || false);
         setMessage(`Switched to ${newMode.replace('_', ' ')}`);
+        // Notify parent so App.jsx state stays in sync
+        onModeChange?.(data.execution_mode || newMode);
         // Don't close config panel immediately so user sees the change
         setTimeout(() => setShowConfig(false), 800);
       } else {

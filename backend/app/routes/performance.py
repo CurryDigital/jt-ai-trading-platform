@@ -22,6 +22,7 @@ _EMPTY_PERF = {
 def get_strategy_performance(db: Session = Depends(get_db)):
     """Strategy performance with backtest vs actual win rates + current signal."""
     try:
+        # Try primary attribution view first
         attribution = safe_query(db, """
             SELECT strategy_id, strategy_name, allocated_capital_pct as allocation,
                    contribution_pct as contribution, return_pct as returns, num_trades,
@@ -30,8 +31,22 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             WHERE portfolio_type = 'PAPER' ORDER BY return_pct DESC
         """, label="perf_attribution")
 
+        # Fallback: build attribution from strategy_registry + portfolio_positions_current
         if not attribution:
-            return _EMPTY_PERF
+            attribution = safe_query(db, """
+                SELECT
+                    sr.strategy_id,
+                    sr.strategy_name,
+                    0 as allocated_capital_pct,
+                    0 as contribution_pct,
+                    0 as return_pct,
+                    0 as num_trades,
+                    sr.win_rate,
+                    0 as sharpe_ratio
+                FROM gold.strategy_registry sr
+                WHERE sr.status IN ('ACTIVE', 'TESTING')
+                ORDER BY sr.win_rate DESC
+            """, label="perf_attribution_fallback")
 
         backtests = safe_query(db, """
             SELECT strategy_id, AVG(win_rate) as backtest_win_rate,
@@ -39,12 +54,12 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             FROM consumption.Strategies_Backtest_Results GROUP BY strategy_id
         """, label="perf_backtests")
 
-        # NOTE: Performance_Trades_History dropped - using paper_strategies for live stats
+        # Live stats from portfolio_positions_current (paper_strategies may not exist)
         live_stats = safe_query(db, """
-            SELECT strategy_id, COUNT(*) as total_trades,
-                   SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) as winning_trades
-            FROM gold.paper_strategies
-            WHERE status = 'ACTIVE' GROUP BY strategy_id
+            SELECT strategy_id, COUNT(*) as total_positions,
+                   SUM(CASE WHEN unrealized_pnl > 0 THEN 1 ELSE 0 END) as winning_positions
+            FROM consumption.portfolio_positions_current
+            WHERE status = 'ACTIVE' AND quantity > 0 GROUP BY strategy_id
         """, label="perf_live_stats")
 
         current_signals = safe_query(db, """
@@ -63,14 +78,14 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             bt = backtest_data.get(a.strategy_id)
             live = live_data.get(a.strategy_id)
             sig = signal_data.get(a.strategy_id)
-            live_win_rate = round((live.winning_trades / live.total_trades) * 100, 1) if live and live.total_trades > 0 else None
+            live_win_rate = round((live.winning_positions / live.total_positions) * 100, 1) if live and live.total_positions > 0 else None
 
             strategies.append({
                 "strategy_id": a.strategy_id, "strategy_name": a.strategy_name,
                 "allocation": float(a.allocation or 0), "contribution": float(a.contribution or 0),
                 "returns": float(a.returns or 0), "num_trades": a.num_trades or 0,
                 "sharpe_ratio": float(a.sharpe_ratio or 0),
-                "live_win_rate": live_win_rate, "live_trades": live.total_trades if live else 0,
+                "live_win_rate": live_win_rate, "live_trades": live.total_positions if live else 0,
                 "backtest_win_rate": round((bt.backtest_win_rate or 0) * 100, 1) if bt and bt.backtest_win_rate else None,
                 "backtest_return": round(bt.backtest_return or 0, 2) if bt else None,
                 "backtest_trades": bt.backtest_total_trades if bt else 0,
@@ -87,12 +102,12 @@ def get_strategy_performance(db: Session = Depends(get_db)):
             WHERE portfolio_type = 'PAPER' ORDER BY year DESC, month DESC LIMIT 12
         """, label="perf_monthly")
 
-        # NOTE: Performance_Portfolio_Summary dropped - using gold.paper_strategies for summary
+        # Summary from portfolio_positions_current
         summary = safe_query_one(db, """
             SELECT
                 COALESCE(SUM(realized_pnl), 0) as total_pnl,
                 COALESCE(SUM(unrealized_pnl), 0) as unrealized_pnl
-            FROM gold.paper_strategies WHERE status = 'ACTIVE'
+            FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE' AND quantity > 0
         """, label="perf_summary")
 
         return {
@@ -128,7 +143,7 @@ def get_daily_pnl(days: int = 7, db: Session = Depends(get_db)):
         # NOTE: Using paper_strategies with available columns
         open_positions = safe_query(db, """
             SELECT strategy_id, SUM(unrealized_pnl) as day_pnl, COUNT(*) as position_count
-            FROM gold.paper_strategies WHERE status = 'ACTIVE'
+            FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE'
             GROUP BY strategy_id
         """, label="daily_pnl_open")
 
@@ -190,7 +205,7 @@ def get_velocity_summary(db: Session = Depends(get_db)):
         summary = safe_query_one(db, """
             SELECT
                 COALESCE(SUM(realized_pnl) + SUM(unrealized_pnl), 0) as total_pnl
-            FROM gold.paper_strategies WHERE status = 'ACTIVE'
+            FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE'
         """, label="velocity_summary")
         return {
             "total_trades": trades.cnt if trades else 0,

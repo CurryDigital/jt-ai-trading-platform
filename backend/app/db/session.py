@@ -265,7 +265,7 @@ class AgentActivity(Base):
     __tablename__ = "agent_activity"
     __table_args__ = {"schema": "gold"}
     id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_id = Column(String(50), index=True)  # e.g. qr_hub, qr_algo
+    agent_id = Column(String(50), index=True)  # e.g. qr_research, qr_etl, qr_qa, scrum_master
     strategy_id = Column(String(10), nullable=True)  # FK to strategy_registry
     action = Column(String(50))  # e.g. REVIEW, APPROVE, COMMENT, SIGNAL, VALIDATE
     message = Column(Text)

@@ -20,41 +20,95 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     """Get current portfolio positions from consumption layer."""
     try:
         positions = db.execute(text("""
-            SELECT ticker, market_value, weight_pct
-            FROM consumption.Portfolio_Positions_Current ORDER BY market_value DESC
+            SELECT
+                id, strategy_id, ticker, side, entry_date, entry_price,
+                current_price, quantity, market_value, weight_pct,
+                unrealized_pnl, realized_pnl, status, updated_at
+            FROM consumption.portfolio_positions_current
+            WHERE status = 'ACTIVE' AND quantity > 0
+            ORDER BY market_value DESC
         """)).fetchall()
-        return [{"ticker": p.ticker, "market_value": float(p.market_value or 0), 
-                 "weight_pct": float(p.weight_pct or 0)} for p in positions]
+
+        result = []
+        total_value = 0.0
+        total_pnl = 0.0
+        for p in positions:
+            mv = float(p.market_value or 0)
+            upnl = float(p.unrealized_pnl or 0)
+            total_value += mv
+            total_pnl += upnl
+            result.append({
+                "id": p.id,
+                "strategy_id": p.strategy_id,
+                "ticker": p.ticker,
+                "name": p.ticker,
+                "asset_class": "STOCK",
+                "side": p.side or "LONG",
+                "entry_date": p.entry_date.isoformat() if p.entry_date else None,
+                "entry_price": float(p.entry_price or 0),
+                "current_price": float(p.current_price or 0),
+                "quantity": float(p.quantity or 0),
+                "market_value": mv,
+                "weight_pct": float(p.weight_pct or 0),
+                "unrealized_pnl": upnl,
+                "realized_pnl": float(p.realized_pnl or 0),
+                "status": p.status or "ACTIVE",
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            })
+
+        return {
+            "positions": result,
+            "total_positions": len(result),
+            "total_value": round(total_value, 2),
+            "total_pnl": round(total_pnl, 2),
+        }
     except Exception as e:
         logger.error(f"Portfolio Positions Error: {e}")
-        return []
+        return {"positions": [], "total_positions": 0, "total_value": 0, "total_pnl": 0}
 
 
 @router.get("/portfolio/dashboard")
 def get_portfolio_dashboard(db: Session = Depends(get_db)):
     """Portfolio risk dashboard."""
     try:
-        # NOTE: Performance_Portfolio_Summary dropped - calculating summary manually
+        # Calculate summary from consumption.portfolio_positions_current
         summary = db.execute(text("""
-            SELECT 
-                COALESCE(SUM(realized_pnl) + SUM(unrealized_pnl), 0) as total_pnl
-            FROM gold.paper_strategies
-            WHERE status = 'ACTIVE'
+            SELECT
+                COALESCE(SUM(market_value), 0) as total_value,
+                COALESCE(SUM(unrealized_pnl), 0) as total_pnl,
+                COALESCE(SUM(realized_pnl), 0) as total_realized_pnl,
+                COUNT(*) as total_positions
+            FROM consumption.portfolio_positions_current
+            WHERE status = 'ACTIVE' AND quantity > 0
         """)).fetchone()
+
         positions = db.execute(text("""
-            SELECT ticker, market_value, weight_pct FROM consumption.Portfolio_Positions_Current
+            SELECT
+                id, strategy_id, ticker, side, entry_date, entry_price,
+                current_price, quantity, market_value, weight_pct,
+                unrealized_pnl, realized_pnl, status
+            FROM consumption.portfolio_positions_current
+            WHERE status = 'ACTIVE' AND quantity > 0
+            ORDER BY market_value DESC
         """)).fetchall()
+
+        total_value = float(summary.total_value or 0) if summary else 0
+        total_pnl = float(summary.total_pnl or 0) if summary else 0
+        total_pnl_pct = ((total_pnl / total_value) * 100) if total_value > 0 else 0
+
         return {
             "summary": {
-                "total_value": float(summary.total_value or 0) if summary else 0,
-                "total_pnl": float(summary.total_pnl or 0) if summary else 0,
-                "total_pnl_pct": float(summary.total_pnl_pct or 0) if summary else 0,
-                "win_rate": float(summary.win_rate or 0) * 100 if summary else 0,
-                "sharpe_ratio": float(summary.sharpe_ratio or 0) if summary else 0,
-                "max_drawdown": float(summary.max_drawdown_pct or 0) if summary else 0,
-            } if summary else {},
-            "positions": [{"ticker": p.ticker, "value": float(p.market_value or 0),
-                           "weight": float(p.weight_pct or 0)} for p in positions],
+                "total_value": round(total_value, 2),
+                "total_pnl": round(total_pnl, 2),
+                "total_pnl_pct": round(total_pnl_pct, 2),
+                "win_rate": 0,
+                "sharpe_ratio": 0,
+                "max_drawdown": 0,
+            },
+            "positions": [{"id": p.id, "ticker": p.ticker, "value": float(p.market_value or 0),
+                           "weight": float(p.weight_pct or 0), "side": p.side or "LONG",
+                           "quantity": float(p.quantity or 0), "unrealized_pnl": float(p.unrealized_pnl or 0),
+                           "entry_price": float(p.entry_price or 0), "current_price": float(p.current_price or 0)} for p in positions],
             "position_count": len(positions),
         }
     except Exception as e:
@@ -74,15 +128,47 @@ def get_paper_strategies(db: Session = Depends(get_db)):
     )).fetchone()
     current_mode = mode_result.value if mode_result else "SIMULATION"
 
-    result = db.execute(text("""
-        SELECT ps.id, ps.strategy_id, sd.name as strategy_name, ps.ticker, ps.capital,
-               ps.invested_capital, ps.available_capital, ps.status, ps.entry_price,
-               ps.current_price, ps.unrealized_pnl, ps.realized_pnl, ps.trades_count,
-               ps.created_at, ps.execution_mode
-        FROM gold.paper_strategies ps
-        LEFT JOIN gold.strategy_definitions sd ON ps.strategy_id = sd.strategy_id
-        WHERE ps.execution_mode = :mode ORDER BY ps.created_at DESC
-    """), {"mode": current_mode}).fetchall()
+    # Try primary table first
+    try:
+        result = db.execute(text("""
+            SELECT ps.id, ps.strategy_id, sd.name as strategy_name, ps.ticker, ps.capital,
+                   ps.invested_capital, ps.available_capital, ps.status, ps.entry_price,
+                   ps.current_price, ps.unrealized_pnl, ps.realized_pnl, ps.trades_count,
+                   ps.created_at, ps.execution_mode
+            FROM consumption.portfolio_positions_current ps
+            LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
+            WHERE ps.execution_mode = :mode ORDER BY ps.created_at DESC
+        """), {"mode": current_mode}).fetchall()
+    except Exception:
+        # Rollback aborted transaction before fallback
+        db.rollback()
+        # Fallback: synthesize from portfolio_positions_current + strategy_registry
+        try:
+            result = db.execute(text("""
+                SELECT
+                    ppc.id,
+                    ppc.strategy_id,
+                    sr.strategy_name,
+                    ppc.ticker,
+                    10000 as capital,
+                    COALESCE(ppc.market_value, 0) as invested_capital,
+                    10000 - COALESCE(ppc.market_value, 0) as available_capital,
+                    ppc.status,
+                    ppc.entry_price,
+                    ppc.current_price,
+                    ppc.unrealized_pnl,
+                    ppc.realized_pnl,
+                    0 as trades_count,
+                    ppc.entry_date as created_at,
+                    :mode as execution_mode
+                FROM consumption.portfolio_positions_current ppc
+                LEFT JOIN gold.strategy_registry sr ON ppc.strategy_id = sr.strategy_id
+                WHERE ppc.status = 'ACTIVE' AND ppc.quantity > 0
+                ORDER BY ppc.market_value DESC
+            """), {"mode": current_mode}).fetchall()
+        except Exception:
+            db.rollback()
+            result = []
 
     strategies = [{
         "id": r.id, "strategy_id": r.strategy_id, "strategy_name": r.strategy_name or r.strategy_id,
@@ -224,7 +310,7 @@ def evaluate_inventory(db: Session = Depends(get_db)):
 def close_position(position_id: int, db: Session = Depends(get_db)):
     """Close a position — uses DB price or IBKR, no yfinance."""
     pos = db.execute(text("""
-        SELECT id, ticker, entry_price, invested_capital FROM gold.paper_strategies WHERE id = :id
+        SELECT id, ticker, entry_price, invested_capital FROM consumption.portfolio_positions_current WHERE id = :id
     """), {"id": position_id}).fetchone()
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -238,7 +324,7 @@ def close_position(position_id: int, db: Session = Depends(get_db)):
     pnl = (current_price - entry_price) / entry_price * float(pos.invested_capital or 0) if entry_price > 0 else 0
 
     db.execute(text("""
-        UPDATE gold.paper_strategies SET status = 'CLOSED',
+        UPDATE consumption.portfolio_positions_current SET status = 'CLOSED',
             realized_pnl = COALESCE(realized_pnl, 0) + :pnl, unrealized_pnl = 0,
             invested_capital = 0, current_price = :price, updated_at = NOW()
         WHERE id = :id

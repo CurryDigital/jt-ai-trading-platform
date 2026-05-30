@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/ubuntu/.openclaw/workspace/platform/jt-ai-trading-platform/backend
+cd /home/ubuntu/.hermes/profiles/qr_frontend/workspace/jt-ai-trading-platform/backend
 
 # Load environment variables from .env file
 export $(grep -v '^#' .env | xargs)

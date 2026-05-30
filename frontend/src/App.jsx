@@ -196,6 +196,25 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
 };
 
 // =================================================================
+// Pill badge — compact colored label
+// =================================================================
+const Pill = ({ c, children }) => {
+  const colorMap = {
+    emerald: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+    rose: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
+    blue: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    amber: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    slate: 'bg-slate-500/15 text-slate-400 border-slate-500/20',
+    violet: 'bg-violet-500/15 text-violet-400 border-violet-500/20',
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${colorMap[c] || colorMap.slate}`}>
+      {children}
+    </span>
+  );
+};
+
+// =================================================================
 // Tiny KPI tile — denser than the previous one
 // =================================================================
 const KPI = ({ l, v, sub, pos, hint }) => (
@@ -479,6 +498,39 @@ const PortfolioTab = ({ data }) => {
         </div>
       )}
     </div>
+  );
+};
+
+// =================================================================
+// Sortable table helpers
+// =================================================================
+const useSort = (defaultKey) => {
+  const [sort, setSort] = useState({ key: defaultKey, dir: 'desc' });
+  const onSort = (key) => {
+    setSort(prev => ({ key, dir: prev.key === key && prev.dir === 'desc' ? 'asc' : 'desc' }));
+  };
+  const sorter = (a, b) => {
+    const { key, dir } = sort;
+    const av = a[key] ?? -Infinity;
+    const bv = b[key] ?? -Infinity;
+    if (typeof av === 'string' && typeof bv === 'string') {
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    }
+    return dir === 'asc' ? (av > bv ? 1 : -1) : (bv > av ? 1 : -1);
+  };
+  return { sort, onSort, sorter };
+};
+
+const SortableHeader = ({ label, sortKey, current, onSort, align = 'right' }) => {
+  const active = current.key === sortKey;
+  const arrow = active ? (current.dir === 'desc' ? ' ↓' : ' ↑') : '';
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className={`qr-label py-1.5 px-2 cursor-pointer select-none ${align === 'left' ? 'text-left' : 'text-right'}`}
+    >
+      {label}{arrow}
+    </th>
   );
 };
 
@@ -1013,7 +1065,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <GlobalExecutionToggle />
+            <GlobalExecutionToggle mode={executionMode} onModeChange={(m) => setExecutionMode(m)} />
             <div className="hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded">
               <span className={`qr-dot ${ibkrConnected ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
               <span className="text-[9px] text-slate-500 uppercase tracking-wider">IBKR</span>
@@ -1070,7 +1122,7 @@ export default function App() {
         {currentTab === 'lab'              && <StrategyLab />}
         {currentTab === 'strategies'       && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'agentic_research' && <AgenticResearch />}
-        {currentTab === 'research'         && <ResearchTab onTickerClick={() => {}} />}
+        {currentTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
         {currentTab === 'strategy_detail'  && (
           selectedStrategyId
             ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />

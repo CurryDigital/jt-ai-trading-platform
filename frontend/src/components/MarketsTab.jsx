@@ -35,10 +35,37 @@ export const MarketsTab = ({ onTickerClick }) => {
     newHighs: 0,
     newLows: 0
   });
+  const [marketBreadthHK, setMarketBreadthHK] = useState({
+    advancing: 0,
+    declining: 0,
+    unchanged: 0,
+    newHighs: 0,
+    newLows: 0
+  });
+  const [marketBreadthCN, setMarketBreadthCN] = useState({
+    advancing: 0,
+    declining: 0,
+    unchanged: 0,
+    newHighs: 0,
+    newLows: 0
+  });
   const [sentiment, setSentiment] = useState({
-    fearGreed: 50,
-    vix: 20,
-    putCall: 1.0
+    fearGreed: null,
+    fearGreedLabel: null,
+    vix: null,
+    putCall: null
+  });
+  const [sentimentHK, setSentimentHK] = useState({
+    fearGreed: null,
+    fearGreedLabel: null,
+    vix: null,
+    putCall: null
+  });
+  const [sentimentCN, setSentimentCN] = useState({
+    fearGreed: null,
+    fearGreedLabel: null,
+    vix: null,
+    putCall: null
   });
   const [loading, setLoading] = useState(true);
   const [selectedTimeframe, setSelectedTimeframe] = useState('1D');
@@ -88,9 +115,24 @@ export const MarketsTab = ({ onTickerClick }) => {
       const indicesRes = await fetch(`/api/market/indices?timeframe=${selectedTimeframe}`);
       const indices = indicesRes.ok ? await indicesRes.json() : [];
 
-      // Fetch movers
-      const moversRes = await fetch(`/api/market/movers?timeframe=${selectedTimeframe}`);
-      const movers = moversRes.ok ? await moversRes.json() : { gainers: [], losers: [] };
+      // Fetch movers per market (US, HK, CN) to ensure each region has its own gainers/losers
+      const [usMovers, hkMovers, cnMovers] = await Promise.all([
+        fetch(`/api/market/movers?timeframe=${selectedTimeframe}&market=US`).then(r => r.ok ? r.json() : { gainers: [], losers: [] }),
+        fetch(`/api/market/movers?timeframe=${selectedTimeframe}&market=HK`).then(r => r.ok ? r.json() : { gainers: [], losers: [] }),
+        fetch(`/api/market/movers?timeframe=${selectedTimeframe}&market=CN`).then(r => r.ok ? r.json() : { gainers: [], losers: [] }),
+      ]);
+
+      // Combine all gainers and losers for the movers view
+      const allGainers = [
+        ...(usMovers.gainers || []),
+        ...(hkMovers.gainers || []),
+        ...(cnMovers.gainers || []),
+      ];
+      const allLosers = [
+        ...(usMovers.losers || []),
+        ...(hkMovers.losers || []),
+        ...(cnMovers.losers || []),
+      ];
 
       // Fetch sectors
       const sectorsRes = await fetch('/api/market/sectors');
@@ -106,24 +148,32 @@ export const MarketsTab = ({ onTickerClick }) => {
 
       setMarketData({
         indices: indices.data || [],
-        gainers: movers.gainers || [],
-        losers: movers.losers || [],
+        gainers: allGainers,
+        losers: allLosers,
         volumeLeaders: volumeLeaders.data || [],
         sectors: sectors.data || [],
         global: global.data || []
       });
 
-      // Fetch US market breadth (default)
-      const breadthRes = await fetch('/api/market/breadth?country=US');
-      if (breadthRes.ok) {
-        setMarketBreadth(await breadthRes.json());
-      }
+      // Fetch market breadth for US, HK, CN in parallel
+      const [breadthUSRes, breadthHKRes, breadthCNRes] = await Promise.all([
+        fetch('/api/market/breadth?country=US'),
+        fetch('/api/market/breadth?country=HK'),
+        fetch('/api/market/breadth?country=CN')
+      ]);
+      if (breadthUSRes.ok) setMarketBreadth(await breadthUSRes.json());
+      if (breadthHKRes.ok) setMarketBreadthHK(await breadthHKRes.json());
+      if (breadthCNRes.ok) setMarketBreadthCN(await breadthCNRes.json());
 
-      // Fetch US sentiment (default)
-      const sentimentRes = await fetch('/api/market/sentiment?country=US');
-      if (sentimentRes.ok) {
-        setSentiment(await sentimentRes.json());
-      }
+      // Fetch sentiment for US, HK, CN in parallel
+      const [sentimentUSRes, sentimentHKRes, sentimentCNRes] = await Promise.all([
+        fetch('/api/market/sentiment?country=US'),
+        fetch('/api/market/sentiment?country=HK'),
+        fetch('/api/market/sentiment?country=CN')
+      ]);
+      if (sentimentUSRes.ok) setSentiment(await sentimentUSRes.json());
+      if (sentimentHKRes.ok) setSentimentHK(await sentimentHKRes.json());
+      if (sentimentCNRes.ok) setSentimentCN(await sentimentCNRes.json());
 
       setLoading(false);
     } catch (e) {
@@ -272,26 +322,34 @@ export const MarketsTab = ({ onTickerClick }) => {
                 {/* Fear & Greed */}
                 <div className="p-2 bg-slate-800/50 rounded-lg">
                   <div className="text-[9px] text-slate-500 uppercase mb-1">Fear & Greed</div>
-                  <div className="text-lg font-bold text-white">{sentiment.fearGreed}</div>
-                  <div className={`text-[10px] ${sentiment.fearGreed > 55 ? 'text-emerald-400' : sentiment.fearGreed > 45 ? 'text-blue-400' : 'text-rose-400'}`}>
-                    {sentiment.fearGreed > 75 ? 'Extreme Greed' : sentiment.fearGreed > 55 ? 'Greed' : sentiment.fearGreed > 45 ? 'Neutral' : sentiment.fearGreed > 25 ? 'Fear' : 'Extreme Fear'}
+                  <div className={`text-lg font-bold ${sentiment.fearGreed != null ? 'text-white' : 'text-slate-600'}`}>
+                    {sentiment.fearGreed != null ? sentiment.fearGreed : '—'}
+                  </div>
+                  <div className={`text-[10px] ${sentiment.fearGreedLabel ? (sentiment.fearGreed >= 75 ? 'text-emerald-400' : sentiment.fearGreed >= 55 ? 'text-emerald-300' : sentiment.fearGreed >= 45 ? 'text-blue-400' : sentiment.fearGreed >= 25 ? 'text-rose-400' : 'text-rose-500') : 'text-slate-600'}`}>
+                    {sentiment.fearGreedLabel || (sentiment.fearGreed != null ? (sentiment.fearGreed >= 75 ? 'Extreme Greed' : sentiment.fearGreed >= 55 ? 'Greed' : sentiment.fearGreed >= 45 ? 'Neutral' : sentiment.fearGreed >= 25 ? 'Fear' : 'Extreme Fear') : 'Loading…')}
                   </div>
                 </div>
                 {/* VIX */}
                 <div className="p-2 bg-slate-800/50 rounded-lg">
                   <div className="text-[9px] text-slate-500 uppercase mb-1">VIX</div>
-                  <div className={`text-lg font-bold ${sentiment.vix > 30 ? 'text-rose-400' : sentiment.vix > 20 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {sentiment.vix?.toFixed(2) || '--'}
+                  <div className={`text-lg font-bold ${sentiment.vix != null ? (sentiment.vix > 30 ? 'text-rose-400' : sentiment.vix > 20 ? 'text-amber-400' : 'text-emerald-400') : 'text-slate-600'}`}>
+                    {sentiment.vix != null ? sentiment.vix.toFixed(2) : '—'}
                   </div>
-                  <div className="text-[10px] text-slate-500">{sentiment.vix > 30 ? 'High Fear' : sentiment.vix > 20 ? 'Elevated' : 'Low Vol'}</div>
+                  <div className={`text-[10px] ${sentiment.vix != null ? 'text-slate-500' : 'text-slate-600'}`}>
+                    {sentiment.vix != null ? (sentiment.vix > 30 ? 'High Fear' : sentiment.vix > 20 ? 'Elevated' : 'Low Vol') : 'Loading…'}
+                  </div>
                 </div>
                 {/* 52W Highs/Lows */}
                 <div className="p-2 bg-slate-800/50 rounded-lg">
                   <div className="text-[9px] text-slate-500 uppercase mb-1">52W Extremes</div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-emerald-400">{marketBreadth.newHighs}</span>
+                    <span className="text-sm font-bold text-emerald-400">
+                      {marketBreadth.newHighs != null ? marketBreadth.newHighs : 'N/A'}
+                    </span>
                     <span className="text-slate-500">/</span>
-                    <span className="text-sm font-bold text-rose-400">{marketBreadth.newLows}</span>
+                    <span className="text-sm font-bold text-rose-400">
+                      {marketBreadth.newLows != null ? marketBreadth.newLows : 'N/A'}
+                    </span>
                   </div>
                   <div className="text-[10px] text-slate-500">Highs / Lows</div>
                 </div>
@@ -299,9 +357,13 @@ export const MarketsTab = ({ onTickerClick }) => {
                 <div className="p-2 bg-slate-800/50 rounded-lg">
                   <div className="text-[9px] text-slate-500 uppercase mb-1">Above MA</div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-blue-400">{marketBreadth.above50MA || '--'}%</span>
+                    <span className="text-sm font-bold text-blue-400">
+                      {marketBreadth.above50MA != null ? `${marketBreadth.above50MA}%` : 'N/A'}
+                    </span>
                     <span className="text-slate-500">/</span>
-                    <span className="text-sm font-bold text-indigo-400">{marketBreadth.above200MA || '--'}%</span>
+                    <span className="text-sm font-bold text-indigo-400">
+                      {marketBreadth.above200MA != null ? `${marketBreadth.above200MA}%` : 'N/A'}
+                    </span>
                   </div>
                   <div className="text-[10px] text-slate-500">50d / 200d</div>
                 </div>
@@ -319,11 +381,15 @@ export const MarketsTab = ({ onTickerClick }) => {
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] text-slate-500">F&G Index</span>
-                    <span className="text-[11px] font-bold text-white">--</span>
+                    <span className={`text-[11px] font-bold ${sentimentHK.fearGreed != null ? (sentimentHK.fearGreed >= 55 ? 'text-emerald-400' : sentimentHK.fearGreed >= 45 ? 'text-blue-400' : 'text-rose-400') : 'text-slate-600'}`}>
+                      {sentimentHK.fearGreed != null ? sentimentHK.fearGreed : '—'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] text-slate-500">Adv/Dec</span>
-                    <span className="text-[10px] text-emerald-400">--</span>
+                    <span className="text-[10px] text-emerald-400">
+                      {marketBreadthHK.advancing}/{marketBreadthHK.declining}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -337,11 +403,15 @@ export const MarketsTab = ({ onTickerClick }) => {
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] text-slate-500">F&G Index</span>
-                    <span className="text-[11px] font-bold text-white">--</span>
+                    <span className={`text-[11px] font-bold ${sentimentCN.fearGreed != null ? (sentimentCN.fearGreed >= 55 ? 'text-emerald-400' : sentimentCN.fearGreed >= 45 ? 'text-blue-400' : 'text-rose-400') : 'text-slate-600'}`}>
+                      {sentimentCN.fearGreed != null ? sentimentCN.fearGreed : '—'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] text-slate-500">Adv/Dec</span>
-                    <span className="text-[10px] text-emerald-400">--</span>
+                    <span className="text-[10px] text-emerald-400">
+                      {marketBreadthCN.advancing}/{marketBreadthCN.declining}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -381,7 +451,7 @@ export const MarketsTab = ({ onTickerClick }) => {
                         <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
                         <p className="text-[7px] text-slate-500 truncate">{stock.name}</p>
                       </div>
-                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(1)}%</span>
+                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(2)}%</span>
                     </div>
                   ))}
                   {(groupByMarket(marketData.losers)['US'] || []).length === 0 && <p className="text-[8px] text-slate-500 py-1">No losers</p>}
@@ -402,13 +472,13 @@ export const MarketsTab = ({ onTickerClick }) => {
                   {(groupByMarket(marketData.gainers)['HK'] || []).slice(0, 2).map((stock) => (
                     <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-emerald-500/5 rounded cursor-pointer hover:bg-emerald-500/10">
                       <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
-                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(1)}%</span>
+                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(2)}%</span>
                     </div>
                   ))}
                   {(groupByMarket(marketData.losers)['HK'] || []).slice(0, 2).map((stock) => (
                     <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-rose-500/5 rounded cursor-pointer hover:bg-rose-500/10">
                       <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
-                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(1)}%</span>
+                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(2)}%</span>
                     </div>
                   ))}
                   {(groupByMarket(marketData.gainers)['HK'] || []).length === 0 && (groupByMarket(marketData.losers)['HK'] || []).length === 0 && (
@@ -428,13 +498,13 @@ export const MarketsTab = ({ onTickerClick }) => {
                   {(groupByMarket(marketData.gainers)['CN'] || []).slice(0, 2).map((stock) => (
                     <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-emerald-500/5 rounded cursor-pointer hover:bg-emerald-500/10">
                       <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
-                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(1)}%</span>
+                      <span className="text-[9px] font-bold text-emerald-400">+{stock.change_percent?.toFixed(2)}%</span>
                     </div>
                   ))}
                   {(groupByMarket(marketData.losers)['CN'] || []).slice(0, 2).map((stock) => (
                     <div key={stock.ticker} onClick={() => onTickerClick?.(stock.ticker)} className="flex items-center justify-between px-2 py-1 bg-rose-500/5 rounded cursor-pointer hover:bg-rose-500/10">
                       <span className="text-[10px] font-bold text-white">{stock.ticker}</span>
-                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(1)}%</span>
+                      <span className="text-[9px] font-bold text-rose-400">{stock.change_percent?.toFixed(2)}%</span>
                     </div>
                   ))}
                   {(groupByMarket(marketData.gainers)['CN'] || []).length === 0 && (groupByMarket(marketData.losers)['CN'] || []).length === 0 && (

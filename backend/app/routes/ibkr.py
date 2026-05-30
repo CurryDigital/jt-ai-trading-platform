@@ -75,7 +75,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
         sim_amount = float(sim_capital.value) if sim_capital else 100000
 
         sim_stats = db.execute(text(
-            "SELECT COALESCE(SUM(capital), 0) as total_allocated FROM gold.paper_strategies WHERE status = 'ACTIVE'"
+            "SELECT COALESCE(SUM(capital), 0) as total_allocated FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE'"
         )).fetchone()
         sim_used = float(sim_stats.total_allocated) if sim_stats else 0
 
@@ -198,7 +198,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
 
     result = db.execute(text("""
         SELECT id, strategy_id, ticker, capital, entry_price, execution_mode
-        FROM gold.paper_strategies
+        FROM consumption.portfolio_positions_current
         WHERE status = 'ACTIVE' AND invested_capital > 0
         AND (ibkr_order_id IS NULL OR ibkr_order_id = '')
         AND execution_mode = 'PAPER_TRADING'
@@ -239,7 +239,7 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
                 entry_price = fill_price if fill_price else (pos["entry_price"] or 0)
 
                 db.execute(text("""
-                    UPDATE gold.paper_strategies
+                    UPDATE consumption.portfolio_positions_current
                     SET ibkr_order_id = :order_id, entry_price = :entry_price, current_price = :entry_price,
                         invested_capital = :capital, last_order_status = 'BUY_FILLED_IBKR', updated_at = NOW()
                     WHERE id = :id

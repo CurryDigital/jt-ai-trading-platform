@@ -29,7 +29,7 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
     if current_mode == "SIMULATION":
         sim_stats = db.execute(text("""
             SELECT COALESCE(SUM(capital), 0) as total_allocated, COUNT(*) as position_count
-            FROM gold.paper_strategies WHERE status = 'ACTIVE'
+            FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE'
         """)).fetchone()
         sim_used = float(sim_stats.total_allocated) if sim_stats else 0
         sim_positions = int(sim_stats.position_count) if sim_stats else 0
@@ -131,12 +131,12 @@ def reset_simulation(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"Cannot reset in {current_mode} mode")
 
     try:
-        count = db.execute(text("SELECT COUNT(*) as cnt FROM gold.paper_strategies")).fetchone()
+        count = db.execute(text("SELECT COUNT(*) as cnt FROM consumption.portfolio_positions_current")).fetchone()
         trades = db.execute(text("SELECT COUNT(*) as cnt FROM gold.trade_executions")).fetchone()
         positions_count = count.cnt if count else 0
         trades_count = trades.cnt if trades else 0
 
-        db.execute(text("DELETE FROM gold.paper_strategies"))
+        db.execute(text("DELETE FROM consumption.portfolio_positions_current"))
         db.execute(text("DELETE FROM gold.trade_executions"))
         try: db.execute(text("DELETE FROM consumption.Portfolio_Positions_Current"))
         except: pass

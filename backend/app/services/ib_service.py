@@ -6,7 +6,6 @@ import threading
 import asyncio
 import logging
 from queue import Queue
-from ib_insync import IB, Forex, Stock, MarketOrder
 
 import os
 from dotenv import load_dotenv
@@ -15,6 +14,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Lazy import of ib_insync to avoid asyncio event loop conflicts at import time
+IB = None
+Forex = None
+Stock = None
+MarketOrder = None
+
+def _ensure_ib_insync():
+    """Lazy-load ib_insync classes only when needed (inside a running thread)."""
+    global IB, Forex, Stock, MarketOrder
+    if IB is None:
+        from ib_insync import IB, Forex, Stock, MarketOrder
 
 class IBKRThreadedService:
     """
@@ -39,6 +50,7 @@ class IBKRThreadedService:
         
     def _run_in_thread(self):
         """Run the IBKR event loop in a separate thread"""
+        _ensure_ib_insync()
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         
@@ -173,6 +185,7 @@ class IBKRThreadedService:
             
             if order_type == "MKT":
                 order = MarketOrder(action, quantity)
+                order.tif = 'GTC'
             else:
                 self._results[request_id] = {"success": False, "error": f"Order type {order_type} not implemented"}
                 return

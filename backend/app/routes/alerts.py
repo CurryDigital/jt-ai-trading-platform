@@ -51,7 +51,7 @@ def send_daily_summary(db: Session = Depends(get_db)):
         ta = TelegramAlerts()
 
         strategies = db.execute(text("""
-            SELECT name, current_pnl FROM gold.quant_strategies WHERE is_active = TRUE
+            SELECT name, conviction_score as current_pnl FROM gold.strategy_registry WHERE status = 'ACTIVE' AND asset_class = 'quant'
         """)).fetchall()
 
         total_pnl = sum(s.current_pnl or 0 for s in strategies)
