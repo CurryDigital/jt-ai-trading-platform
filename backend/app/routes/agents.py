@@ -488,3 +488,405 @@ def create_agent_event(
         return {"success": True, "message": "Event logged"}
     db.rollback()
     raise HTTPException(status_code=500, detail="Failed to log event")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PAPER TRADING ENDPOINTS — Section A-D + Gateway + Cron
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── GET /api/paper/system-status ─────────────────────────────────────────
+
+@router.get("/paper/system-status")
+def get_paper_system_status(db: Session = Depends(get_db)):
+    """Section A status bar — regime, last run, NAV."""
+    try:
+        row = db.execute(text("SELECT * FROM gold.v_paper_system_status LIMIT 1")).fetchone()
+        if not row:
+            return {"state": "unknown"}
+        return {
+            "regime_label": row.regime_label,
+            "regime_confidence": float(row.regime_confidence) if row.regime_confidence else None,
+            "regime_override": row.regime_override,
+            "regime_date": row.regime_date.isoformat() if row.regime_date else None,
+            "regime_staleness_days": row.regime_staleness_days,
+            "last_run_date": row.last_run_date.isoformat() if row.last_run_date else None,
+            "last_run_type": row.last_run_type,
+            "last_run_status": row.last_run_status,
+            "last_orders_placed": row.last_orders_placed,
+            "last_orders_skipped": row.last_orders_skipped,
+            "paper_nav_usd": row.paper_nav_usd,
+            "paper_nav_hkd": row.paper_nav_hkd,
+        }
+    except Exception as e:
+        logger.error(f"Paper system status error: {e}")
+        return {"state": "error", "error": str(e)}
+
+
+# ── GET /api/paper/open-positions ────────────────────────────────────────
+
+@router.get("/paper/open-positions")
+def get_paper_open_positions(db: Session = Depends(get_db)):
+    """Section B — current open positions with unrealised PnL."""
+    try:
+        rows = db.execute(text("SELECT * FROM gold.v_paper_open_positions")).fetchall()
+        positions = []
+        for r in rows:
+            positions.append({
+                "id": str(r.id),
+                "strategy_id": r.strategy_id,
+                "instrument": r.instrument,
+                "ticker": r.ticker,
+                "direction": r.direction,
+                "contracts": float(r.contracts) if r.contracts else None,
+                "shares": float(r.shares) if r.shares else None,
+                "entry_price": float(r.entry_price) if r.entry_price else None,
+                "current_price": float(r.current_price) if r.current_price else None,
+                "unrealised_pnl": float(r.unrealised_pnl) if r.unrealised_pnl else None,
+                "regime_at_entry": r.regime_at_entry,
+                "ic_at_entry": float(r.ic_at_entry) if r.ic_at_entry else None,
+                "confidence_at_entry": float(r.confidence_at_entry) if r.confidence_at_entry else None,
+                "opened_at": r.opened_at.isoformat() if r.opened_at else None,
+                "hold_duration": str(r.hold_duration) if r.hold_duration else None,
+            })
+        return {"positions": positions, "count": len(positions)}
+    except Exception as e:
+        logger.error(f"Paper open positions error: {e}")
+        return {"positions": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/daily-runs ────────────────────────────────────────────
+
+@router.get("/paper/daily-runs")
+def get_paper_daily_runs(db: Session = Depends(get_db)):
+    """Section C — today's run cards."""
+    try:
+        rows = db.execute(text("SELECT * FROM gold.v_paper_daily_runs")).fetchall()
+        runs = []
+        for r in rows:
+            runs.append({
+                "run_date": r.run_date.isoformat() if r.run_date else None,
+                "run_type": r.run_type,
+                "signals_eval": r.signals_eval,
+                "orders_placed": r.orders_placed,
+                "orders_skipped": r.orders_skipped,
+                "gate_reasons": r.gate_reasons,
+                "total_pnl": float(r.total_pnl) if r.total_pnl else None,
+                "drawdown_pct": float(r.drawdown_pct) if r.drawdown_pct else None,
+                "status": r.status,
+                "duration_ms": r.duration_ms,
+            })
+        return {"runs": runs, "count": len(runs)}
+    except Exception as e:
+        logger.error(f"Paper daily runs error: {e}")
+        return {"runs": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/trade-history ─────────────────────────────────────────
+
+@router.get("/paper/trade-history")
+def get_paper_trade_history(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """Section D — closed trade history (last 30 days)."""
+    try:
+        rows = db.execute(
+            text("SELECT * FROM gold.v_paper_trade_history LIMIT :limit"),
+            {"limit": limit}
+        ).fetchall()
+        trades = []
+        for r in rows:
+            trades.append({
+                "id": str(r.id),
+                "strategy_id": r.strategy_id,
+                "instrument": r.instrument,
+                "ticker": r.ticker,
+                "direction": r.direction,
+                "contracts": float(r.contracts) if r.contracts else None,
+                "shares": float(r.shares) if r.shares else None,
+                "entry_price": float(r.entry_price) if r.entry_price else None,
+                "exit_price": float(r.exit_price) if r.exit_price else None,
+                "pnl": float(r.pnl) if r.pnl else None,
+                "pnl_pct": float(r.pnl_pct) if r.pnl_pct else None,
+                "regime": r.regime,
+                "ic_at_entry": float(r.ic_at_entry) if r.ic_at_entry else None,
+                "opened_at": r.opened_at.isoformat() if r.opened_at else None,
+                "closed_at": r.closed_at.isoformat() if r.closed_at else None,
+                "hold_days": r.hold_days,
+            })
+        return {"trades": trades, "count": len(trades)}
+    except Exception as e:
+        logger.error(f"Paper trade history error: {e}")
+        return {"trades": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/trade-summary ─────────────────────────────────────────
+
+@router.get("/paper/trade-summary")
+def get_paper_trade_summary(db: Session = Depends(get_db)):
+    """Summary row above trade history."""
+    try:
+        row = db.execute(text("SELECT * FROM gold.v_paper_trade_summary LIMIT 1")).fetchone()
+        if not row:
+            return {}
+        return {
+            "total_trades": row.total_trades,
+            "win_rate_pct": float(row.win_rate_pct) if row.win_rate_pct else None,
+            "total_pnl": float(row.total_pnl) if row.total_pnl else None,
+            "avg_pnl": float(row.avg_pnl) if row.avg_pnl else None,
+            "max_loss": float(row.max_loss) if row.max_loss else None,
+            "max_win": float(row.max_win) if row.max_win else None,
+            "max_drawdown_pct": float(row.max_drawdown_pct) if row.max_drawdown_pct else None,
+        }
+    except Exception as e:
+        logger.error(f"Paper trade summary error: {e}")
+        return {"error": str(e)}
+
+
+# ── GET /api/paper/strategy-book ─────────────────────────────────────────
+
+@router.get("/paper/strategy-book")
+def get_paper_strategy_book(db: Session = Depends(get_db)):
+    """Section A on agentic_research — strategy book."""
+    try:
+        rows = db.execute(text("SELECT * FROM gold.v_strategy_book")).fetchall()
+        strategies = []
+        for r in rows:
+            strategies.append({
+                "strategy_id": r.strategy_id,
+                "name": r.name,
+                "status": r.status,
+                "asset_class": r.asset_class,
+                "entry_logic": r.entry_logic,
+                "exit_logic": r.exit_logic,
+                "agent_source": r.agent_source,
+                "sharpe_ratio": float(r.sharpe_ratio) if r.sharpe_ratio else None,
+                "win_rate": float(r.win_rate) if r.win_rate else None,
+                "backtest_date": r.backtest_date.isoformat() if r.backtest_date else None,
+                "sort_order": r.sort_order,
+                "last_entry_price": float(r.last_entry_price) if r.last_entry_price else None,
+                "last_traded_at": r.last_traded_at.isoformat() if r.last_traded_at else None,
+                "last_direction": r.last_direction,
+            })
+        return {"strategies": strategies, "count": len(strategies)}
+    except Exception as e:
+        logger.error(f"Strategy book error: {e}")
+        return {"strategies": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/agent-activity ────────────────────────────────────────
+
+@router.get("/paper/agent-activity")
+def get_paper_agent_activity(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """Section B — agent activity feed."""
+    try:
+        rows = db.execute(
+            text("SELECT * FROM gold.v_agent_activity_feed LIMIT :limit"),
+            {"limit": limit}
+        ).fetchall()
+        events = []
+        for r in rows:
+            events.append({
+                "agent_name": r.agent_name,
+                "event_type": r.event_type,
+                "payload": r.payload,
+                "detail": r.detail,
+                "strategy_id": r.strategy_id,
+                "instrument": r.instrument,
+                "ts": r.ts.isoformat() if r.ts else None,
+            })
+        return {"events": events, "count": len(events)}
+    except Exception as e:
+        logger.error(f"Agent activity error: {e}")
+        return {"events": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/upcoming-events ───────────────────────────────────────
+
+@router.get("/paper/upcoming-events")
+def get_paper_upcoming_events(db: Session = Depends(get_db)):
+    """Section C — earnings + macro calendar."""
+    try:
+        rows = db.execute(text("SELECT * FROM gold.v_upcoming_events")).fetchall()
+        events = []
+        for r in rows:
+            events.append({
+                "event_category": r.event_category,
+                "event_date": r.event_date.isoformat() if r.event_date else None,
+                "event_label": r.event_label,
+                "description": r.description,
+                "related_strategy": r.related_strategy,
+                "days_away": r.days_away,
+            })
+        return {"events": events, "count": len(events)}
+    except Exception as e:
+        logger.error(f"Upcoming events error: {e}")
+        return {"events": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/strategy-book-extended ────────────────────────────────
+
+@router.get("/paper/strategy-book-extended")
+def get_paper_strategy_book_extended(db: Session = Depends(get_db)):
+    """Extended strategy book with backtest metrics + last trade."""
+    try:
+        rows = db.execute(text("SELECT * FROM gold.v_strategy_book_extended")).fetchall()
+        strategies = []
+        for r in rows:
+            strategies.append({
+                "strategy_id": r.strategy_id,
+                "name": r.name,
+                "display_name": r.display_name,
+                "instrument": r.instrument,
+                "regime_scope": r.regime_scope,
+                "status": r.status,
+                "asset_class": r.asset_class,
+                "entry_logic": r.entry_logic,
+                "exit_logic": r.exit_logic,
+                "source": r.source,
+                "sharpe_ratio": float(r.sharpe_ratio) if r.sharpe_ratio else None,
+                "win_rate": float(r.win_rate) if r.win_rate else None,
+                "backtest_date": r.backtest_date.isoformat() if r.backtest_date else None,
+                "last_direction": r.last_direction,
+                "last_entry_price": float(r.last_entry_price) if r.last_entry_price else None,
+                "last_traded_at": r.last_traded_at.isoformat() if r.last_traded_at else None,
+                "min_nav_usd": r.min_nav_usd,
+                # annual_pnl values are decimal fractions (e.g. 0.0934 = 9.34% return)
+                "annual_pnl_2024": float(r.annual_pnl_2024) if r.annual_pnl_2024 else None,
+                "annual_pnl_2025": float(r.annual_pnl_2025) if r.annual_pnl_2025 else None,
+                "annual_pnl_2026": float(r.annual_pnl_2026) if r.annual_pnl_2026 else None,
+            })
+        return {"strategies": strategies, "count": len(strategies)}
+    except Exception as e:
+        logger.error(f"Strategy book extended error: {e}")
+        return {"strategies": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/gateway-status ────────────────────────────────────────
+
+@router.get("/paper/gateway-status")
+def get_paper_gateway_status():
+    """IBKR gateway connection check."""
+    try:
+        # Try to import IBKR client; fallback if not available
+        try:
+            from app.services.ib_service import IBKRClient
+            client = IBKRClient()
+            connected = client.is_connected()
+        except Exception:
+            connected = False
+        return {
+            "connected": connected,
+            "host": "127.0.0.1:14002",
+            "ts": datetime.datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Gateway status error: {e}")
+        return {"connected": False, "host": "127.0.0.1:14002", "error": str(e)}
+
+
+# ── GET /api/agents/paper/signal-proximity ───────────────────────────────
+
+@router.get("/paper/signal-proximity")
+def get_paper_signal_proximity(db: Session = Depends(get_db)):
+    """Signal proximity to threshold — ordered by distance_pct DESC."""
+    try:
+        rows = db.execute(text("""
+            SELECT strategy_id, instrument_or_ticker, signal_type,
+                   current_value, threshold, distance_to_threshold,
+                   distance_pct, signal_active, days_until_relevant, last_updated
+            FROM gold.v_signal_proximity
+            ORDER BY distance_pct DESC
+        """)).fetchall()
+        signals = []
+        for r in rows:
+            signals.append({
+                "strategy_id": r.strategy_id,
+                "instrument_or_ticker": r.instrument_or_ticker,
+                "signal_type": r.signal_type,
+                "current_value": float(r.current_value) if r.current_value is not None else None,
+                "threshold": float(r.threshold) if r.threshold is not None else None,
+                "distance_to_threshold": float(r.distance_to_threshold) if r.distance_to_threshold is not None else None,
+                "distance_pct": float(r.distance_pct) if r.distance_pct is not None else None,
+                "signal_active": bool(r.signal_active) if r.signal_active is not None else False,
+                "days_until_relevant": r.days_until_relevant,
+                "last_updated": r.last_updated.isoformat() if r.last_updated else None,
+            })
+        return {"signals": signals, "count": len(signals)}
+    except Exception as e:
+        logger.error(f"Signal proximity error: {e}")
+        return {"signals": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/agents/paper/open-positions-pnl ─────────────────────────────
+
+@router.get("/paper/open-positions-pnl")
+def get_paper_open_positions_pnl(db: Session = Depends(get_db)):
+    """Open positions with unrealised PnL from gold.v_paper_open_positions."""
+    try:
+        rows = db.execute(text("""
+            SELECT strategy_id, instrument, ticker, direction,
+                   entry_price, current_price, unrealised_pnl_pct,
+                   unrealised_pnl_usd, days_held, price_source
+            FROM gold.v_paper_open_positions
+            ORDER BY unrealised_pnl_pct DESC
+        """)).fetchall()
+        positions = []
+        for r in rows:
+            positions.append({
+                "strategy_id": r.strategy_id,
+                "instrument": r.instrument,
+                "ticker": r.ticker,
+                "direction": r.direction,
+                "entry_price": float(r.entry_price) if r.entry_price is not None else None,
+                "current_price": float(r.current_price) if r.current_price is not None else None,
+                "unrealised_pnl_pct": float(r.unrealised_pnl_pct) if r.unrealised_pnl_pct is not None else None,
+                "unrealised_pnl_usd": float(r.unrealised_pnl_usd) if r.unrealised_pnl_usd is not None else None,
+                "days_held": r.days_held,
+                "price_source": r.price_source,
+            })
+        return {"positions": positions, "count": len(positions)}
+    except Exception as e:
+        logger.error(f"Open positions PnL error: {e}")
+        return {"positions": [], "count": 0, "error": str(e)}
+
+
+# ── GET /api/paper/cron-status ───────────────────────────────────────────
+
+@router.get("/paper/cron-status")
+def get_paper_cron_status():
+    """Hermes cron job status — parsed from `hermes cron list`."""
+    try:
+        import subprocess, json as _json
+        result = subprocess.run(
+            ["hermes", "cron", "list"],
+            capture_output=True, text=True, timeout=10
+        )
+        jobs = []
+        # hermes cron list outputs JSON-like lines; try JSON first
+        try:
+            data = _json.loads(result.stdout)
+            if isinstance(data, list):
+                jobs = data
+            elif isinstance(data, dict) and "jobs" in data:
+                jobs = data["jobs"]
+        except _json.JSONDecodeError:
+            # Fallback: parse plain text
+            for line in result.stdout.strip().split("\n"):
+                if line.strip() and not line.startswith("-"):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        jobs.append({
+                            "job_id": parts[0],
+                            "name": parts[1] if len(parts) > 1 else "",
+                            "status": parts[2] if len(parts) > 2 else "unknown",
+                            "next_run": None,
+                            "last_run": None,
+                        })
+        return {"jobs": jobs, "count": len(jobs)}
+    except Exception as e:
+        logger.error(f"Cron status error: {e}")
+        return {"jobs": [], "count": 0, "error": str(e)}

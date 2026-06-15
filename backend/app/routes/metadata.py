@@ -6,8 +6,14 @@ from sqlalchemy import text
 from app.dependencies import get_db, logger
 import math
 
+from decimal import Decimal
+
 def clean_float(val):
-    if val is None or (isinstance(val, float) and math.isnan(val)) or (isinstance(val, float) and math.isinf(val)):
+    if val is None:
+        return None
+    if isinstance(val, Decimal):
+        return float(val)
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
         return None
     return val
 
@@ -16,65 +22,81 @@ router = APIRouter(prefix="/api", tags=["metadata"])
 
 @router.get("/signals/1")
 def get_signals_v1(db: Session = Depends(get_db)):
-    """Get all asset signals from consumption layer — DB only."""
+    """Get all asset signals from consumption layer — DB only.
+    
+    NOTE: Uses DISTINCT ON + LIMIT to avoid duplicate historical rows
+    that bloat the response. ETL manager should deduplicate source tables.
+    """
     try:
         stocks = db.execute(text("""
-            SELECT ticker, name, price, change_pct, change_value, trend, rsi_14,
+            SELECT DISTINCT ON (ticker)
+                   ticker, name, price, change_pct, change_value, trend, rsi_14,
                    distance_to_52w_high_pct, distance_to_52w_low_pct,
                    market_cap, pe_ratio, forward_pe, pb_ratio, dividend_yield,
                    strategy_signals, top_strategy_score, signal, signal_strength,
                    updated_at
             FROM consumption.stock
+            ORDER BY ticker, updated_at DESC NULLS LAST
         """)).fetchall()
 
         markets = db.execute(text("""
-            SELECT region, index_name, index_ticker, current_value, change_pct,
+            SELECT DISTINCT ON (index_ticker)
+                   region, index_name, index_ticker, current_value, change_pct,
                    change_value, trend, sentiment_score, volatility_index, updated_at
             FROM consumption.market
+            WHERE index_ticker IS NOT NULL
+            ORDER BY index_ticker, updated_at DESC NULLS LAST
         """)).fetchall()
 
         fx = db.execute(text("""
-            SELECT ticker, close_price, log_return, interest_rate_diff,
+            SELECT DISTINCT ON (ticker)
+                   ticker, close_price, log_return, interest_rate_diff,
                    dxy_correlation, volatility_24h, rsi_14, macd_histogram,
                    bollinger_width, prophet_forecast, market_regime,
                    candlestick_pattern, candlestick_sentiment, date
             FROM consumption.fx
+            ORDER BY ticker, date DESC NULLS LAST
         """)).fetchall()
 
         commodities = db.execute(text("""
-            SELECT * FROM consumption.commodity
+            SELECT DISTINCT ON (ticker)
+                   *
+            FROM consumption.commodity
+            ORDER BY ticker, updated_at DESC NULLS LAST
         """)).fetchall()
 
         cryptos = db.execute(text("""
-            SELECT ticker, close_price, volume_24h, market_cap_usd,
+            SELECT DISTINCT ON (ticker)
+                   ticker, close_price, volume_24h, market_cap_usd,
                    fear_greed_index, funding_rate, rsi_14, macd_histogram,
                    bollinger_width, mvrv_z_score, nvt_ratio,
                    candlestick_pattern, candlestick_sentiment, date
             FROM consumption.crypto
+            ORDER BY ticker, date DESC NULLS LAST
         """)).fetchall()
 
         def fmt_stock(row):
             return {
                 "ticker": row.ticker, "asset": row.name, "category": "stock",
-                "price": row.price, "change": row.change_value,
-                "change_pct": row.change_pct,
-                "action": row.signal, "total_confidence": row.signal_strength,
-                "trend": row.trend, "rsi_14": row.rsi_14,
-                "market_cap": row.market_cap, "pe_ratio": row.pe_ratio,
-                "forward_pe": row.forward_pe, "pb_ratio": row.pb_ratio,
-                "dividend_yield": row.dividend_yield,
+                "price": clean_float(row.price), "change": clean_float(row.change_value),
+                "change_pct": clean_float(row.change_pct),
+                "action": row.signal, "total_confidence": clean_float(row.signal_strength),
+                "trend": row.trend, "rsi_14": clean_float(row.rsi_14),
+                "market_cap": clean_float(row.market_cap), "pe_ratio": clean_float(row.pe_ratio),
+                "forward_pe": clean_float(row.forward_pe), "pb_ratio": clean_float(row.pb_ratio),
+                "dividend_yield": clean_float(row.dividend_yield),
                 "strategy_signals": row.strategy_signals,
-                "top_strategy_score": row.top_strategy_score,
+                "top_strategy_score": clean_float(row.top_strategy_score),
                 "timestamp": row.updated_at.isoformat() if row.updated_at else None,
             }
 
         def fmt_market(row):
             return {
                 "ticker": row.index_ticker, "asset": row.index_name, "category": "market",
-                "price": row.current_value, "change": row.change_value,
-                "change_pct": row.change_pct,
-                "action": row.trend, "total_confidence": row.sentiment_score,
-                "region": row.region, "volatility_index": row.volatility_index,
+                "price": clean_float(row.current_value), "change": clean_float(row.change_value),
+                "change_pct": clean_float(row.change_pct),
+                "action": row.trend, "total_confidence": clean_float(row.sentiment_score),
+                "region": row.region, "volatility_index": clean_float(row.volatility_index),
                 "timestamp": row.updated_at.isoformat() if row.updated_at else None,
             }
 

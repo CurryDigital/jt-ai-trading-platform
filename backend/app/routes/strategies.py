@@ -83,36 +83,206 @@ def delete_strategy(strat_id: int, db: Session = Depends(get_db)):
 # =============================================================================
 
 @router.get("/strategies/researcher")
-def get_researcher_strategies(asset_class: str = None, db: Session = Depends(get_db)):
-    """Get JT Researcher strategies from strategy_definitions."""
+def get_researcher_strategies(asset_class: str = None, priority: str = None, status: str = None, db: Session = Depends(get_db)):
+    """Get JT Researcher strategies from strategy_registry with backtest data and top signals."""
     try:
+        # Build query with all columns - safe_query handles errors gracefully
         query = """
-            SELECT strategy_id as id, name, description, asset_class, direction, time_horizon,
-                   sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct, venue, status
-            FROM gold.strategy_registry 
+            SELECT strategy_id as id, name, asset_class, universe_tickers,
+                   execution_mode, status, sharpe_oos, max_drawdown_oos,
+                   trade_count_oos, win_rate_oos, conviction_score,
+                   assigned_capital, in_market_capital, signal_logic, exit_logic
+            FROM gold.strategy_registry
+            WHERE status != 'DEPRECATED'
         """
         params = {}
         if asset_class:
             query += " AND asset_class = :asset_class"
             params["asset_class"] = asset_class
-        query += " ORDER BY sharpe_ratio DESC"
+        if status and status != 'ALL':
+            query += " AND status = :status"
+            params["status"] = status
+        query += " ORDER BY sharpe_oos DESC NULLS LAST"
 
         result = safe_query(db, query, params, label="route_researcher_strategies")
+        
+        # Fetch yearly backtest data from gold.strategy_backtest_runs
+        yearly_backtest_data = {}
+        try:
+            yearly_bt = safe_query(db, """
+                SELECT strategy_id,
+                       annual_pnl_2024 as pnl_2024,
+                       annual_pnl_2025 as pnl_2025,
+                       annual_pnl_2026 as pnl_2026,
+                       trade_count_oos,
+                       sharpe_oos,
+                       max_drawdown_oos,
+                       win_rate_oos
+                FROM gold.strategy_backtest_runs
+                WHERE strategy_id IS NOT NULL
+            """, {}, label="route_yearly_bt")
+            for yb in yearly_bt:
+                sid = yb.strategy_id
+                if sid:
+                    if sid not in yearly_backtest_data:
+                        yearly_backtest_data[sid] = {}
+                    if yb.pnl_2024 is not None:
+                        yearly_backtest_data[sid]['2024'] = {
+                            'return_pct': float(yb.pnl_2024),
+                            'trades': int(yb.trade_count_oos) if yb.trade_count_oos else 0,
+                            'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos else None,
+                            'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos else None,
+                            'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos else None
+                        }
+                    if yb.pnl_2025 is not None:
+                        yearly_backtest_data[sid]['2025'] = {
+                            'return_pct': float(yb.pnl_2025),
+                            'trades': int(yb.trade_count_oos) if yb.trade_count_oos else 0,
+                            'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos else None,
+                            'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos else None,
+                            'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos else None
+                        }
+                    if yb.pnl_2026 is not None:
+                        yearly_backtest_data[sid]['2026'] = {
+                            'return_pct': float(yb.pnl_2026),
+                            'trades': int(yb.trade_count_oos) if yb.trade_count_oos else 0,
+                            'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos else None,
+                            'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos else None,
+                            'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos else None
+                        }
+        except Exception as e:
+            logger.error(f"Yearly backtest fetch error: {e}")
+        
+        # Fetch top 5 signals by confidence from gold.strategy_signals
+        top_signals_data = {}
+        try:
+            top_signals = safe_query(db, """
+                SELECT DISTINCT ON (strategy_id, strategy_name)
+                    strategy_id, strategy_name, signal, confidence, regime
+                FROM gold.strategy_signals
+                WHERE active = TRUE
+                ORDER BY strategy_id, strategy_name, confidence DESC NULLS LAST
+            """, {}, label="route_top_signals")
+            for sig in top_signals:
+                if sig.strategy_id not in top_signals_data:
+                    top_signals_data[sig.strategy_id] = []
+                if len(top_signals_data[sig.strategy_id]) < 5:
+                    top_signals_data[sig.strategy_id].append({
+                        'ticker': sig.strategy_name,
+                        'signal': 'BUY' if sig.signal == 1 else 'SELL' if sig.signal == -1 else 'HOLD',
+                        'confidence': float(sig.confidence) if sig.confidence else None,
+                        'strength': sig.regime
+                    })
+        except Exception as e:
+            logger.error(f"Top signals fetch error: {e}")
+        
         strategies = []
         for row in result:
-            tickers = row.universe_tickers.split(",") if row.universe_tickers else []
+            tickers = row.universe_tickers
+            if isinstance(tickers, str):
+                tickers = tickers.split(",") if tickers else []
+            elif tickers is None:
+                tickers = []
+            
+            sid = row.id
+            strategy_signals = top_signals_data.get(sid, [])
+            top_tickers = strategy_signals if strategy_signals else [
+                {'ticker': t, 'signal': 'HOLD', 'confidence': None, 'strength': None} for t in tickers[:5]
+            ]
+            yearly_data = yearly_backtest_data.get(sid, {})
+            
             strategies.append({
-                "id": row.id, "name": row.name, "description": row.description,
-                "asset_class": row.asset_class, "direction": row.direction,
-                "time_horizon": row.time_horizon,
-                "sharpe_ratio": float(row.sharpe_ratio) if row.sharpe_ratio else 0,
-                "max_drawdown": float(row.max_drawdown) if row.max_drawdown else 0,
-                "win_rate": float(row.win_rate) if row.win_rate else 0,
+                "id": sid, "name": row.name,
+                "asset_class": row.asset_class,
+                "sharpe_ratio": float(row.sharpe_oos) if row.sharpe_oos else 0,
+                "max_drawdown": float(row.max_drawdown_oos) if row.max_drawdown_oos else 0,
+                "win_rate": float(row.win_rate_oos) if row.win_rate_oos else 0,
                 "universe": tickers, "universe_count": len(tickers),
-                "max_position_pct": float(row.max_position_pct) if row.max_position_pct else 0.05,
-                "venue": row.venue, "status": row.status, "source": "trade_algo_researcher",
+                "status": row.status, "source": "trade_algo_researcher",
+                "execution_mode": row.execution_mode,
+                "conviction_score": float(row.conviction_score) if row.conviction_score else None,
+                "assigned_capital": float(row.assigned_capital) if row.assigned_capital else None,
+                "in_market_capital": float(row.in_market_capital) if row.in_market_capital else None,
+                "signal_logic": row.signal_logic,
+                "exit_logic": row.exit_logic,
+                "entry_logic": row.signal_logic,
+                "priority": None,
+                "version": None,
+                "top_tickers": top_tickers,
+                "yearly_backtest": yearly_data,
             })
-        return {"strategies": strategies, "count": len(strategies)}
+        # Also fetch from strategy_templates if they have different strategies
+        template_strategies = []
+        try:
+            templates = safe_query(db, """
+                SELECT id, name, description, asset_class, min_win_rate, min_sharpe, max_holding_days
+                FROM gold.strategy_templates
+                WHERE id NOT IN (SELECT strategy_id FROM gold.strategy_registry)
+            """, {}, label="route_templates")
+            for t in templates:
+                template_strategies.append({
+                    "id": t.id, "name": t.name,
+                    "asset_class": t.asset_class,
+                    "sharpe_ratio": float(t.min_sharpe) if t.min_sharpe else 0,
+                    "max_drawdown": 0,
+                    "win_rate": float(t.min_win_rate) if t.min_win_rate else 0,
+                    "universe": [], "universe_count": 0,
+                    "status": "template", "source": "template",
+                    "execution_mode": "SIMULATION",
+                    "conviction_score": None,
+                    "assigned_capital": None,
+                    "in_market_capital": None,
+                    "signal_logic": t.description,
+                    "exit_logic": None,
+                    "entry_logic": t.description,
+                    "priority": None,
+                    "version": None,
+                    "top_tickers": [],
+                    "yearly_backtest": {},
+                })
+        except Exception as e:
+            logger.error(f"Template fetch error: {e}")
+        
+        # Also fetch from quant_strategies if they have different strategies
+        quant_strategies = []
+        try:
+            quant = safe_query(db, """
+                SELECT strategy_id, name, asset_class, status, execution_mode,
+                       sharpe_oos, max_drawdown_oos, trade_count_oos, win_rate_oos,
+                       conviction_score, assigned_capital, in_market_capital,
+                       signal_logic, exit_logic
+                FROM gold.strategy_registry
+                WHERE asset_class = 'quant'
+            """, {}, label="route_quant")
+            for q in quant:
+                if q.strategy_id not in [s["id"] for s in strategies]:
+                    quant_strategies.append({
+                        "id": q.strategy_id, "name": q.name,
+                        "asset_class": q.asset_class,
+                        "sharpe_ratio": float(q.sharpe_oos) if q.sharpe_oos else 0,
+                        "max_drawdown": float(q.max_drawdown_oos) if q.max_drawdown_oos else 0,
+                        "win_rate": float(q.win_rate_oos) if q.win_rate_oos else 0,
+                        "universe": [], "universe_count": 0,
+                        "status": q.status, "source": "quant",
+                        "execution_mode": q.execution_mode,
+                        "conviction_score": float(q.conviction_score) if q.conviction_score else None,
+                        "assigned_capital": float(q.assigned_capital) if q.assigned_capital else None,
+                        "in_market_capital": float(q.in_market_capital) if q.in_market_capital else None,
+                        "signal_logic": q.signal_logic,
+                        "exit_logic": q.exit_logic,
+                        "entry_logic": q.signal_logic,
+                        "priority": None,
+                        "version": None,
+                        "top_tickers": [],
+                        "yearly_backtest": {},
+                    })
+        except Exception as e:
+            logger.error(f"Quant fetch error: {e}")
+        
+        # Combine all strategies
+        all_strategies = strategies + template_strategies + quant_strategies
+        
+        return {"strategies": all_strategies, "count": len(all_strategies)}
     except Exception as e:
         logger.error(f"Route researcher strategies error: {e}")
         return {"strategies": [], "count": 0}

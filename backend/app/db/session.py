@@ -57,20 +57,22 @@ if DB_PASSWORD:
     # Direct connection with password
     engine = create_engine(
         connection_string,
-        pool_size=50,
-        max_overflow=20,
+        pool_size=5,
+        max_overflow=2,
         pool_timeout=30,
-        pool_recycle=1800
+        pool_recycle=1800,
+        pool_pre_ping=True
     )
 else:
     # IAM auth with creator function
     engine = create_engine(
         connection_string,
         creator=get_connection,
-        pool_size=50,
-        max_overflow=20,
+        pool_size=5,
+        max_overflow=2,
         pool_timeout=30,
-        pool_recycle=1800
+        pool_recycle=1800,
+        pool_pre_ping=True
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -251,15 +253,31 @@ class QuantStrategy(Base):
 class StrategyRegistry(Base):
     __tablename__ = "strategy_registry"
     __table_args__ = {"schema": "gold"}
-    strategy_id = Column(String(10), primary_key=True)  # S001, S002, etc.
-    strategy_name = Column(String(100))
-    version = Column(String(10))
-    status = Column(String(20))  # ACTIVE/DEPRECATED/TESTING
-    priority = Column(String(20))  # GOLDEN/NEAR_GOLDEN/EXPERIMENTAL
-    win_rate = Column(DECIMAL(5,2))
-    entry_logic = Column(Text)
+    strategy_id = Column(String(100), primary_key=True)
+    name = Column(String(200))
+    asset_class = Column(String(50))
+    universe_tickers = Column(ARRAY(String))
+    frequency = Column(String(50))
+    execution_mode = Column(String(50))
+    status = Column(String(50))
+    sharpe_oos = Column(DECIMAL(10,4))
+    max_drawdown_oos = Column(DECIMAL(10,4))
+    trade_count_oos = Column(Integer)
+    win_rate_oos = Column(DECIMAL(10,4))
+    conviction_score = Column(DECIMAL(10,2))
+    assigned_capital = Column(DECIMAL(15,2))
+    in_market_capital = Column(DECIMAL(15,2))
+    approved_by = Column(String(100))
+    approved_at = Column(DateTime)
+    deployed_at = Column(DateTime)
+    last_signal_at = Column(DateTime)
+    retired_at = Column(DateTime)
+    retirement_reason = Column(Text)
+    signal_logic = Column(Text)
     exit_logic = Column(Text)
-    target_assets = Column(Text)  # Ticker list
+    signal_file_path = Column(String(500))
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
 
 class AgentActivity(Base):
     __tablename__ = "agent_activity"

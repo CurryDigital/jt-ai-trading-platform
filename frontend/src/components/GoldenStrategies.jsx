@@ -1,4 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import {
+  usePaperOpenPositionsPnl,
+  usePaperSignalProximity,
+} from './paper/usePaperData';
+import {
+  OpenPositionsPnlPanel,
+  SignalProximityPanel,
+} from './paper';
+import SignalProximitySection from './SignalProximitySection';
 
 // Strategy Capital Pool Component with Enhanced UI
 const StrategyCapitalPool = ({ strategyId, strategyName, onUpdate }) => {
@@ -693,6 +702,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPriority, setFilterPriority] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterAssetClass, setFilterAssetClass] = useState('ALL');
   const [filterMarket, setFilterMarket] = useState('ALL');
   const [filterMinWinRate, setFilterMinWinRate] = useState(0);
@@ -723,6 +733,10 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
     return 100000;
   });
 
+  // Paper data hooks for new sections
+  const { data: openPositionsPnl } = usePaperOpenPositionsPnl();
+  const { data: signalProximity } = usePaperSignalProximity();
+
   // Persist selections to localStorage
   useEffect(() => {
     localStorage.setItem('goldenStrategies_selected', JSON.stringify([...selectedStrategies]));
@@ -752,19 +766,39 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
   }, []);
 
   const fetchStrategies = () => {
-    fetch('/api/strategies/researcher?priority=ALL')
+    fetch('/api/agents/paper/strategy-book-extended')
       .then(r => r.json())
       .then(data => {
         if (data.strategies) {
           const enriched = data.strategies.map(s => ({
             ...s,
-            sharpe: s.sharpe_ratio || 1.0,
-            win_rate: s.win_rate || 55,
+            id: s.strategy_id,
+            name: s.display_name || s.name,
+            sharpe: s.sharpe_ratio != null ? s.sharpe_ratio : null,
+            win_rate: s.win_rate != null ? s.win_rate : null,
             avg_hold_days: parseInt(s.time_horizon) || 5,
             capacity: '$50M',
-            max_dd: s.max_drawdown ? `${s.max_drawdown}%` : '-10%',
-            assetCount: s.universe?.length || 0,
-            tradeSize: Math.floor((customPools[s.id] || defaultPoolSize) * 0.25)
+            max_dd: s.max_drawdown ? `${(s.max_drawdown * 100).toFixed(1)}%` : '-10%',
+            assetCount: s.universe_count || 0,
+            tradeSize: Math.floor((customPools[s.strategy_id] || defaultPoolSize) * 0.25),
+            // Convert annual_pnl to yearly_backtest format for the renderer
+            yearly_backtest: (() => {
+              const yb = {};
+              if (s.annual_pnl_2024 != null) {
+                yb['2024'] = { return_pct: s.annual_pnl_2024 * 100, trades: 0 };
+              }
+              if (s.annual_pnl_2025 != null) {
+                yb['2025'] = { return_pct: s.annual_pnl_2025 * 100, trades: 0 };
+              }
+              if (s.annual_pnl_2026 != null) {
+                yb['2026'] = { return_pct: s.annual_pnl_2026 * 100, trades: 0 };
+              }
+              return Object.keys(yb).length > 0 ? yb : null;
+            })(),
+            // Extract universe from entry_logic if available
+            universe: s.entry_logic && s.entry_logic.includes('Universe:')
+              ? s.entry_logic.split('Universe:')[1].split('.')[0].split(',').map(t => t.trim())
+              : []
           }));
           setStrategies(enriched);
         }
@@ -1161,6 +1195,43 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
               );
             })}
           </div>
+
+          {/* Status Filter Pills */}
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-[10px] text-slate-500 uppercase mr-1">Status:</span>
+            {[
+              { key: 'ALL', label: 'All', color: 'slate' },
+              { key: 'approved', label: 'Active', color: 'emerald' },
+              { key: 'backtesting', label: 'Paper', color: 'blue' },
+              { key: 'paused', label: 'Paused', color: 'amber' },
+              { key: 'rejected', label: 'Retired', color: 'rose' },
+              { key: 'retired', label: 'Retired', color: 'slate' },
+            ].map(s => {
+              const count = s.key === 'ALL'
+                ? strategies.length
+                : strategies.filter(strat => strat.status === s.key).length;
+              const colorClasses = {
+                slate: 'bg-slate-700/50 text-slate-300',
+                emerald: 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30',
+                blue: 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30',
+                rose: 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30',
+                amber: 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30',
+              };
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => setFilterStatus(s.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    filterStatus === s.key
+                      ? colorClasses[s.color]
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {s.label} ({count})
+                </button>
+              );
+            })}
+          </div>
           
           {/* Default Capital Setting */}
           <CapitalAllocationSlider 
@@ -1250,12 +1321,13 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
             </div>
             
             {/* Clear Filters */}
-            {(searchQuery || filterPriority !== 'ALL' || filterAssetClass !== 'ALL' || filterMarket !== 'ALL' || filterMinWinRate > 0 || filterSignalType !== 'ALL') && (
+            {(searchQuery || filterPriority !== 'ALL' || filterStatus !== 'ALL' || filterAssetClass !== 'ALL' || filterMarket !== 'ALL' || filterMinWinRate > 0 || filterSignalType !== 'ALL') && (
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => {
                     setSearchQuery('');
                     setFilterPriority('ALL');
+                    setFilterStatus('ALL');
                     setFilterAssetClass('ALL');
                     setFilterMarket('ALL');
                     setFilterMinWinRate(0);
@@ -1276,7 +1348,8 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                     const matchesAsset = filterAssetClass === 'ALL' || s.asset_class === filterAssetClass;
                     const matchesMarket = filterMarket === 'ALL' || s.market === filterMarket;
                     const matchesWinRate = (s.win_rate || 0) >= filterMinWinRate;
-                    return matchesSearch && matchesAsset && matchesMarket && matchesWinRate;
+                    const matchesStatus = filterStatus === 'ALL' || s.status === filterStatus;
+                    return matchesSearch && matchesAsset && matchesMarket && matchesWinRate && matchesStatus;
                   }).length} of {strategies.length} strategies
                 </span>
               </div>
@@ -1309,7 +1382,10 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
               // Priority filter
               const matchesPriority = filterPriority === 'ALL' || strategy.priority === filterPriority;
 
-              return matchesSearch && matchesAsset && matchesMarket && matchesWinRate && matchesSignal && matchesPriority;
+              // Status filter
+              const matchesStatus = filterStatus === 'ALL' || strategy.status === filterStatus;
+
+              return matchesSearch && matchesAsset && matchesMarket && matchesWinRate && matchesSignal && matchesPriority && matchesStatus;
             }).map(strategy => {
               const isSelected = selectedStrategies.has(strategy.id);
               const isExpanded = expandedStrategy === strategy.id;
@@ -1343,15 +1419,64 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                             }`}>
                               {strategy.priority === 'NEAR_GOLDEN' ? 'Near Golden' : strategy.priority?.toLowerCase() || 'experimental'}
                             </span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider ${
+                              strategy.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30' :
+                              strategy.status === 'backtesting' ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/30' :
+                              strategy.status === 'paused' ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/30' :
+                              strategy.status === 'rejected' ? 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30' :
+                              strategy.status === 'retired' ? 'bg-slate-600/30 text-slate-400 ring-1 ring-slate-500/30' :
+                              'bg-slate-600/30 text-slate-400 ring-1 ring-slate-500/30'
+                            }`}>
+                              {strategy.status === 'approved' ? 'Active' :
+                               strategy.status === 'backtesting' ? 'Paper' :
+                               strategy.status === 'paused' ? 'Paused' :
+                               strategy.status === 'rejected' ? 'Retired' :
+                               strategy.status === 'retired' ? 'Retired' :
+                               strategy.status?.toLowerCase() || 'unknown'}
+                            </span>
                           </div>
                           <p className="text-xs text-slate-400 mt-1 line-clamp-2">{strategy.description}</p>
 
+                          {/* Top 5 Tickers */}
+                          {strategy.top_tickers && strategy.top_tickers.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              <span className="text-[10px] text-slate-500 mr-1">Top picks:</span>
+                              {strategy.top_tickers.map((t, idx) => (
+                                <span key={idx} className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                  t.signal === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' :
+                                  t.signal === 'SELL' ? 'bg-rose-500/20 text-rose-400' :
+                                  'bg-slate-700/50 text-slate-400'
+                                }`}>
+                                  {t.ticker}
+                                  {t.confidence && <span className="opacity-70 ml-0.5">{t.confidence.toFixed(0)}%</span>}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Yearly Backtest PNL */}
+                          {strategy.yearly_backtest && Object.keys(strategy.yearly_backtest).length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              <span className="text-[10px] text-slate-500">Backtest PNL:</span>
+                              {Object.entries(strategy.yearly_backtest)
+                                .sort(([a], [b]) => Number(b) - Number(a))
+                                .slice(0, 3)
+                                .map(([year, data]) => (
+                                  <span key={year} className={`text-[10px] px-2 py-0.5 rounded ${
+                                    data.return_pct >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                                  }`}>
+                                    {year}: {data.return_pct >= 0 ? '+' : ''}{data.return_pct.toFixed(1)}%
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+
                           <div className="flex flex-wrap gap-2 mt-2">
                             <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
-                              {strategy.sharpe?.toFixed(2)} Sharpe
+                              {strategy.sharpe != null ? strategy.sharpe.toFixed(2) : '—'} Sharpe
                             </span>
                             <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-400">
-                              {strategy.assetCount} assets
+                              {strategy.assetCount != null ? strategy.assetCount : '—'} assets
                             </span>
                             {actualStats ? (
                               <span className={`text-[10px] px-2 py-0.5 rounded ${
@@ -1415,8 +1540,8 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                           <div className="flex items-center justify-between mb-2">
                             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Backtest Win Rate</h4>
                             <span className={`text-lg font-black font-mono ${
-                              strategy.win_rate >= 60 ? 'text-emerald-400' : strategy.win_rate >= 50 ? 'text-amber-400' : 'text-rose-400'
-                            }`}>{typeof strategy.win_rate === 'number' ? strategy.win_rate.toFixed(1) : strategy.win_rate}%</span>
+                              (strategy.win_rate || 0) >= 60 ? 'text-emerald-400' : (strategy.win_rate || 0) >= 50 ? 'text-amber-400' : 'text-rose-400'
+                            }`}>{strategy.win_rate != null ? `${(strategy.win_rate * 100).toFixed(1)}%` : '—'}</span>
                           </div>
                           <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
                             <div
@@ -1429,27 +1554,82 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                         </div>
                       )}
 
+                      {/* Strategy Summary Card */}
+                      <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-white/5">
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                          📈 Strategy Performance Summary
+                        </h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="bg-slate-900/50 rounded p-2 text-center">
+                            <span className="text-[10px] text-slate-500 block">Win Rate</span>
+                            <span className={`text-sm font-bold ${(strategy.win_rate || 0) >= 0.6 ? 'text-emerald-400' : (strategy.win_rate || 0) >= 0.5 ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {strategy.win_rate != null ? `${(strategy.win_rate * 100).toFixed(1)}%` : '—'}
+                            </span>
+                          </div>
+                          <div className="bg-slate-900/50 rounded p-2 text-center">
+                            <span className="text-[10px] text-slate-500 block">Sharpe Ratio</span>
+                            <span className={`text-sm font-bold ${(strategy.sharpe_ratio || 0) >= 2 ? 'text-emerald-400' : (strategy.sharpe_ratio || 0) >= 1 ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {strategy.sharpe_ratio != null ? strategy.sharpe_ratio.toFixed(2) : '—'}
+                            </span>
+                          </div>
+                          <div className="bg-slate-900/50 rounded p-2 text-center">
+                            <span className="text-[10px] text-slate-500 block">Max Drawdown</span>
+                            <span className="text-sm font-bold text-rose-400">
+                              -{((strategy.max_drawdown || 0) * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className="bg-slate-900/50 rounded p-2 text-center">
+                            <span className="text-[10px] text-slate-500 block">Universe</span>
+                            <span className="text-sm font-bold text-blue-400">
+                              {strategy.universe_count || strategy.universe?.length || 0} tickers
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Entry & Exit Logic */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                         <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
                           <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                            Entry Logic
+                            🟢 Buy Strategy (Entry)
                           </h4>
                           <p className="text-sm text-slate-300 whitespace-pre-wrap">{strategy.entry_logic || strategy.signal_logic || 'See strategy description'}</p>
                         </div>
 
                         <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">
                           <h4 className="text-xs font-bold text-rose-400 uppercase tracking-wider mb-2 flex items-center gap-1">
-                            Exit Logic
+                            🔴 Exit Strategy
                           </h4>
                           <p className="text-sm text-slate-300 whitespace-pre-wrap">{strategy.exit_logic || 'Take profit or stop loss hit'}</p>
                         </div>
                       </div>
 
+                      {/* Yearly Backtest Results */}
+                      {strategy.yearly_backtest && Object.keys(strategy.yearly_backtest).length > 0 && (
+                        <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-white/5">
+                          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                            📊 Backtest Results by Year
+                          </h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            {Object.entries(strategy.yearly_backtest)
+                              .sort(([a], [b]) => Number(b) - Number(a))
+                              .map(([year, data]) => (
+                                <div key={year} className="bg-slate-900/50 rounded p-2 text-center">
+                                  <span className="text-[10px] text-slate-500 block">{year}</span>
+                                  <span className={`text-sm font-bold ${data.return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {data.return_pct >= 0 ? '+' : ''}{data.return_pct.toFixed(1)}%
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 block">{data.trades} trades</span>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Universe */}
                       <div className="mb-4">
                         <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                          Asset Universe ({strategy.assetCount})
+                          Asset Universe ({strategy.universe_count || strategy.universe?.length || 0})
                         </h4>
                         <div className="flex flex-wrap gap-1">
                           {strategy.universe?.slice(0, 20).map(t => (
@@ -1464,7 +1644,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                       </div>
 
                       {/* Approve / Reject Actions */}
-                      {strategy.status === 'TESTING' && (
+                      {strategy.status === 'backtesting' && (
                         <div className="flex items-center gap-3 pt-3 border-t border-white/5">
                           <button
                             onClick={async () => {
@@ -1482,7 +1662,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                           </button>
                           <button
                             onClick={async () => {
-                              if (!confirm('Reject this strategy? It will be marked as DEPRECATED.')) return;
+                              if (!confirm('Reject this strategy? It will be marked as rejected.')) return;
                               try {
                                 const res = await fetch(`/api/strategies/${encodeURIComponent(strategy.id)}/reject`, { method: 'POST' });
                                 if (res.ok) {
@@ -1505,8 +1685,15 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
           </div>
         </>
       )}
+
+      {/* Section 1 — Open positions (if any) */}
+      <OpenPositionsPnlPanel data={openPositionsPnl} />
+
+      {/* Section 2 — Signal proximity watchlist */}
+      <SignalProximityPanel data={signalProximity} />
+
+      {/* Section 3 — New combined Signal Proximity Section */}
+      <SignalProximitySection />
     </div>
   );
 };
-
-export default GoldenStrategies;

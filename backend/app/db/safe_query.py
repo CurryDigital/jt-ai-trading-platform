@@ -43,7 +43,7 @@ def safe_query(db: Session, sql: str, params: dict = None, fallback=None, label:
         return result.fetchall()
     except ProgrammingError as e:
         error_str = str(e.orig) if e.orig else str(e)
-        if "does not exist" in error_str:
+        if "does not exist" in error_str and "column" not in error_str.lower():
             match = re.search(r'relation "([^"]+)" does not exist', error_str)
             if match:
                 _missing_tables.add(match.group(1))
@@ -75,7 +75,7 @@ def safe_query_one(db: Session, sql: str, params: dict = None, fallback=None, la
         return result.fetchone() or fallback
     except ProgrammingError as e:
         error_str = str(e.orig) if e.orig else str(e)
-        if "does not exist" in error_str:
+        if "does not exist" in error_str and "column" not in error_str.lower():
             match = re.search(r'relation "([^"]+)" does not exist', error_str)
             if match:
                 _missing_tables.add(match.group(1))

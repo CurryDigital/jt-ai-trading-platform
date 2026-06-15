@@ -60,15 +60,32 @@ from app.auth import (
 # JT Strategy Executor - initialized lazily
 jt_strategy_executor = None
 
+def _sanitize_nan(obj):
+    """Recursively replace float NaN/Inf with None."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_nan(v) for v in obj]
+    return obj
+
 class NaNSafeJSONResponse(JSONResponse):
     def render(self, content) -> bytes:
-        return json.dumps(content, ensure_ascii=False, allow_nan=True, cls=CustomJSONEncoder).encode("utf-8")
+        safe_content = _sanitize_nan(content)
+        return json.dumps(safe_content, ensure_ascii=False, allow_nan=False, cls=CustomJSONEncoder).encode("utf-8")
 
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, float):
             if math.isnan(obj) or math.isinf(obj):
                 return None
+        if isinstance(obj, datetime.datetime):
+            return obj.isoformat()
+        if isinstance(obj, datetime.date):
+            return obj.isoformat()
         return super().default(obj)
 
 app = FastAPI(default_response_class=NaNSafeJSONResponse)
@@ -472,8 +489,8 @@ def system_health(db: Session = Depends(get_db)):
 
     # Optional pipeline summary
     try:
-        rs = safe_query(db, "SELECT priority, COUNT(*) c FROM gold.strategy_registry GROUP BY priority", label="health_pipeline")
-        pipeline = {row.priority.lower(): int(row.c) for row in rs} if rs else {}
+        rs = safe_query(db, "SELECT status, COUNT(*) c FROM gold.strategy_registry GROUP BY status", label="health_pipeline")
+        pipeline = {row.status.lower(): int(row.c) for row in rs} if rs else {}
     except Exception:
         pipeline = {}
 
@@ -4704,15 +4721,14 @@ def get_strategy_pipeline_summary(db: Session = Depends(get_db)):
     """Get counts of strategies at each pipeline stage"""
     try:
         counts = db.execute(text("""
-            SELECT priority, COUNT(*) as cnt
+            SELECT status, COUNT(*) as cnt
             FROM gold.strategy_registry
-            WHERE status IN ('ACTIVE', 'TESTING')
-            GROUP BY priority
+            GROUP BY status
         """)).fetchall()
 
-        summary = {"experimental": 0, "near_golden": 0, "golden": 0, "total": 0}
+        summary = {"active": 0, "testing": 0, "paper": 0, "paused": 0, "retired": 0, "total": 0}
         for row in counts:
-            key = row.priority.lower() if row.priority else "experimental"
+            key = row.status.lower() if row.status else "experimental"
             if key in summary:
                 summary[key] = row.cnt
             summary["total"] += row.cnt
@@ -4734,7 +4750,7 @@ def get_strategy_pipeline_summary(db: Session = Depends(get_db)):
         return summary
     except Exception as e:
         logger.error(f"Pipeline summary error: {e}")
-        return {"experimental": 0, "near_golden": 0, "golden": 0, "deployed": 0, "total": 0}
+        return {"active": 0, "testing": 0, "paper": 0, "paused": 0, "retired": 0, "deployed": 0, "total": 0}
 
 
 @app.get("/api/strategies/researcher")
@@ -4744,8 +4760,10 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
         # Query from StrategyRegistry (canonical source of truth from DE)
         query = db.query(StrategyRegistry)
 
-        # Filter by status - only active strategies
-        query = query.filter(StrategyRegistry.status.in_(['ACTIVE', 'TESTING']))
+        # Filter by status - include all statuses for full visibility
+        # Allow filtering by specific status if requested
+        # Default: show all non-DEPRECATED strategies
+        query = query.filter(StrategyRegistry.status != 'DEPRECATED')
 
         # Filter by priority - default to GOLDEN + NEAR_GOLDEN, or allow all
         if priority and priority != 'ALL':
@@ -4783,6 +4801,60 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
         except Exception as e:
             logger.error(f"Error fetching backtest data: {e}")
 
+        # Fetch yearly backtest returns by strategy
+        yearly_backtest_data = {}
+        try:
+            yearly_bt = db.execute(text("""
+                SELECT
+                    strategy_id,
+                    EXTRACT(YEAR FROM backtest_date) as year,
+                    AVG(total_return_pct) as avg_return,
+                    SUM(total_trades) as total_trades
+                FROM consumption.Strategies_Backtest_Results
+                WHERE backtest_date IS NOT NULL
+                GROUP BY strategy_id, EXTRACT(YEAR FROM backtest_date)
+                ORDER BY strategy_id, year DESC
+            """)).fetchall()
+
+            for yb in yearly_bt:
+                sid = yb.strategy_id
+                year = int(yb.year) if yb.year else None
+                if sid and year:
+                    if sid not in yearly_backtest_data:
+                        yearly_backtest_data[sid] = {}
+                    yearly_backtest_data[sid][str(year)] = {
+                        'return_pct': float(yb.avg_return) if yb.avg_return else 0,
+                        'trades': int(yb.total_trades) if yb.total_trades else 0
+                    }
+        except Exception as e:
+            logger.error(f"Error fetching yearly backtest data: {e}")
+
+        # Fetch top 5 signals by confidence for each strategy
+        top_signals_data = {}
+        try:
+            top_signals = db.execute(text("""
+                SELECT DISTINCT ON (strategy_id)
+                    strategy_id,
+                    ticker,
+                    signal,
+                    confidence_score,
+                    signal_strength
+                FROM consumption.Strategies_Signals_Current
+                ORDER BY strategy_id, confidence_score DESC NULLS LAST
+            """)).fetchall()
+
+            for sig in top_signals:
+                if sig.strategy_id not in top_signals_data:
+                    top_signals_data[sig.strategy_id] = []
+                top_signals_data[sig.strategy_id].append({
+                    'ticker': sig.ticker,
+                    'signal': sig.signal,
+                    'confidence': float(sig.confidence_score) if sig.confidence_score else None,
+                    'strength': float(sig.signal_strength) if sig.signal_strength else None
+                })
+        except Exception as e:
+            logger.error(f"Error fetching top signals: {e}")
+
         result = []
         for s in strategies:
             # Parse target_assets into universe array
@@ -4795,6 +4867,20 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
             win_rate = bt.get('win_rate') or (float(s.win_rate) / 100 if s.win_rate else None)
             total_return = bt.get('total_return')
             total_trades = bt.get('total_trades')
+
+            # Get top 5 tickers for this strategy
+            strategy_signals = top_signals_data.get(s.strategy_id, [])
+            # If no signals, use universe tickers as fallback
+            top_tickers = []
+            if strategy_signals:
+                top_tickers = strategy_signals[:5]
+            else:
+                top_tickers = [{'ticker': t, 'signal': 'HOLD', 'confidence': None, 'strength': None} for t in tickers[:5]]
+
+            # Get yearly backtest data for this strategy
+            yearly_data = yearly_backtest_data.get(s.strategy_id, {})
+            # Get current year
+            current_year = 2026  # Hardcoded for now, can be dynamic
 
             result.append({
                 "strategy_id": s.strategy_id,
@@ -4824,6 +4910,8 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
                 "version": s.version,
                 "entry_logic": s.entry_logic,
                 "exit_logic": s.exit_logic,
+                "top_tickers": top_tickers,
+                "yearly_backtest": yearly_data,
                 "source": "strategy_registry"
             })
 

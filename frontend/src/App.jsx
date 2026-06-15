@@ -7,11 +7,12 @@ import { ResearchTab } from './components/ResearchTab';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
-import { AgenticResearch } from './components/AgenticResearch';
 import { StrategyDetail } from './components/StrategyDetail';
 import { StrategyCompare } from './components/StrategyCompare';
 import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
+import PaperStrategiesPage from './components/PaperStrategiesPage';
+import AgenticResearchPage from './components/AgenticResearchPage';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
@@ -913,6 +914,7 @@ export default function App() {
     { id: 'lab',              label: 'Lab',      short: 'Lab',     IconComponent: Icon.Lab,         key: '2' },
     { id: 'strategies',       label: 'Strategies', short: 'Strat', IconComponent: Icon.Strategies,  key: '3' },
     { id: 'agentic_research', label: 'Agents',   short: 'Agt',     IconComponent: Icon.Agents,      key: '4' },
+    { id: 'paper_strategies', label: 'Paper',    short: 'Ppr',     IconComponent: Icon.Portfolio,   key: '0' },
     { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance, key: '5' },
     { id: 'research',         label: 'Research', short: 'Res',     IconComponent: Icon.Research,    key: '6' },
     { id: 'portfolio',        label: 'Portfolio', short: 'Port',   IconComponent: Icon.Portfolio,   key: '7' },
@@ -1121,7 +1123,8 @@ export default function App() {
         {currentTab === 'settings'         && <SettingsTab />}
         {currentTab === 'lab'              && <StrategyLab />}
         {currentTab === 'strategies'       && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
-        {currentTab === 'agentic_research' && <AgenticResearch />}
+        {currentTab === 'agentic_research' && <AgenticResearchPage />}
+        {currentTab === 'paper_strategies' && <PaperStrategiesPage />}
         {currentTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
         {currentTab === 'strategy_detail'  && (
           selectedStrategyId
