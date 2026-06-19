@@ -76,11 +76,16 @@ const _authHeaders = () => {
   return t ? { Authorization: `Bearer ${t}` } : {};
 };
 
-// API helpers with error handling
+// API helpers with error handling and timeout
+const API_TIMEOUT_MS = 10000;
+
 export const api = {
   get: async (url) => {
     try {
-      const res = await fetch(url, { headers: _authHeaders() });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+      const res = await fetch(url, { headers: _authHeaders(), signal: controller.signal });
+      clearTimeout(timeoutId);
       if (res.status === 401) { _onUnauthorized.fn(); return null; }
       return res.ok ? await res.json() : null;
     } catch {
@@ -89,11 +94,15 @@ export const api = {
   },
   post: async (url, body) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ..._authHeaders() },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (res.status === 401) { _onUnauthorized.fn(); return null; }
       return res.ok ? await res.json() : null;
     } catch {

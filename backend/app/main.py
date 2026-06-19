@@ -452,52 +452,59 @@ def get_live_operations(db: Session = Depends(get_db)):
 
 
 @app.get("/api/system/health")
-def system_health(db: Session = Depends(get_db)):
+def system_health():
     """Return a small, fast health/status summary for the workspace ribbon.
 
-    Latency-sensitive: avoid heavy joins. Each sub-query is wrapped in
-    safe_query so a missing table degrades gracefully.
+    Latency-sensitive: uses a 2-second hard timeout on the DB ping so
+    the frontend never freezes when RDS is unreachable.
     """
     started = time.perf_counter()
-    status = "healthy"
+    db_status = "unreachable"
+    counts = {}
+    pipeline = {}
 
-    # Quick DB ping
+    # Hard 2-second timeout on DB ping
     try:
-        db.execute(text("SELECT 1")).scalar()
+        with engine.connect().execution_options(timeout=2) as conn:
+            conn.execute(text("SELECT 1"))
+        db_status = "connected"
     except Exception as e:
         logger.error(f"DB ping failed: {e}")
-        status = "degraded"
 
-    # Lightweight counts (cached on the SQL side via index)
-    counts = {}
-    try:
-        rows = safe_query(db, """
-            SELECT
-                (SELECT COUNT(*) FROM gold.strategy_registry ) AS strategies,
-                (SELECT COUNT(*) FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE') AS deployed,
-                (SELECT COUNT(*) FROM gold.asset_registry WHERE is_active = TRUE) AS assets
-        """, label="health_counts")
-        if rows:
-            r = rows[0]
-            counts = {
-                "strategies": int(r.strategies or 0),
-                "deployed":   int(r.deployed or 0),
-                "assets":     int(r.assets or 0),
-            }
-    except Exception:
-        pass
-
-    # Optional pipeline summary
-    try:
-        rs = safe_query(db, "SELECT status, COUNT(*) c FROM gold.strategy_registry GROUP BY status", label="health_pipeline")
-        pipeline = {row.status.lower(): int(row.c) for row in rs} if rs else {}
-    except Exception:
-        pipeline = {}
+    # Only query data if DB is reachable
+    if db_status == "connected":
+        db = None
+        try:
+            db = SessionLocal()
+            # Lightweight counts
+            rows = safe_query(db, """
+                SELECT
+                    (SELECT COUNT(*) FROM gold.strategy_registry ) AS strategies,
+                    (SELECT COUNT(*) FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE') AS deployed,
+                    (SELECT COUNT(*) FROM gold.asset_registry WHERE is_active = TRUE) AS assets
+            """, label="health_counts")
+            if rows:
+                r = rows[0]
+                counts = {
+                    "strategies": int(r.strategies or 0),
+                    "deployed":   int(r.deployed or 0),
+                    "assets":     int(r.assets or 0),
+                }
+            # Pipeline summary
+            rs = safe_query(db, "SELECT status, COUNT(*) c FROM gold.strategy_registry GROUP BY status", label="health_pipeline")
+            pipeline = {row.status.lower(): int(row.c) for row in rs} if rs else {}
+        except Exception:
+            db_status = "degraded"
+        finally:
+            if db is not None:
+                db.close()
 
     latency_ms = int((time.perf_counter() - started) * 1000)
 
     return {
-        "status": status,
+        "status": "ok" if db_status == "connected" else "degraded",
+        "db": db_status,
+        "backend": "ok",
         "latency_ms": latency_ms,
         "ts": datetime.datetime.utcnow().isoformat() + "Z",
         "counts": counts,
@@ -4411,21 +4418,22 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="strategy_id and tickers required")
 
     # Get current execution mode
-    mode_result = db.execute(text("""
+    mode_result = safe_query_one(db, """
         SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
-    """)).fetchone()
+    """, label="deploy_pool_mode")
     current_mode = mode_result.value if mode_result else 'SIMULATION'
 
-    strategy = db.execute(text("SELECT * FROM gold.strategy_registry WHERE strategy_id = :sid"),
-                         {"sid": strategy_id}).fetchone()
+    strategy = safe_query_one(db, """
+        SELECT strategy_id, name FROM gold.strategy_registry WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="deploy_pool_strategy")
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
-    pool_status = db.execute(text("""
+    pool_status = safe_query_one(db, """
         SELECT COALESCE(SUM(capital), 0) as used FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
-    """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
+    """, {"strategy_id": strategy_id, "mode": current_mode}, label="deploy_pool_status")
 
     current_used = float(pool_status.used) if pool_status else 0
     available = total_pool - current_used
@@ -4479,10 +4487,10 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="strategy_id required")
 
     # Get current execution mode
-    mode_result = db.execute(text("""
+    mode_result = safe_query_one(db, """
         SELECT value FROM gold.platform_settings
         WHERE key = 'global_execution_mode'
-    """)).fetchone()
+    """, label="deploy_mode")
     current_mode = mode_result.value if mode_result else 'SIMULATION'
 
     # Get strategy from registry
@@ -4505,43 +4513,24 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
         }
 
     # Check which tickers in universe have BUY signals
-    # Query consumption signals view
-    placeholders = ','.join([f':t{i}' for i in range(len(universe))])
-    params = {f't{i}': t for i, t in enumerate(universe)}
-    params['strategy_id'] = strategy_id
-
-    try:
-        signals_result = db.execute(text(f"""
-            SELECT ticker, signal, confidence_score, signal_strength
-            FROM consumption.Strategies_Signals_Current
-            WHERE strategy_id = :strategy_id
-            AND ticker IN ({placeholders})
-            AND signal = 'BUY'
-            ORDER BY confidence_score DESC
-            LIMIT :max_pos
-        """), {**params, "max_pos": max_positions}).fetchall()
-    except Exception as e:
-        logger.warning(f"Signals query failed (table may not exist): {e}")
-        db.rollback()
-        signals_result = []
-
-    tickers_with_buy = [s.ticker for s in signals_result]
+    # NOTE: consumption.Strategies_Signals_Current does not exist — deploy from universe directly
+    tickers_with_buy = universe[:max_positions]  # Deploy top N tickers from universe
 
     if not tickers_with_buy:
         return {
             "success": False,
-            "error": "No tickers in universe have BUY signals currently",
+            "error": "No tickers in universe to deploy",
             "strategy_id": strategy_id,
             "universe_checked": universe,
             "universe_size": len(universe)
         }
 
     # Check pool availability
-    pool_status = db.execute(text("""
+    pool_status = safe_query_one(db, """
         SELECT COALESCE(SUM(capital), 0) as used, COUNT(*) as position_count
         FROM consumption.portfolio_positions_current
         WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
-    """), {"strategy_id": strategy_id, "mode": current_mode}).fetchone()
+    """, {"strategy_id": strategy_id, "mode": current_mode}, label="deploy_pool")
 
     current_used = float(pool_status.used) if pool_status else 0
     current_positions = int(pool_status.position_count) if pool_status else 0
@@ -5119,32 +5108,22 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
         universe = [t.strip() for t in definitions.universe_tickers.split(',') if t.strip()]
 
     # ---- Backtest metrics --------------------------------------------------
-    bt = safe_query_one(db, """
-        SELECT AVG(win_rate) AS win_rate,
-               AVG(profit_factor) AS profit_factor,
-               AVG(sharpe_ratio) AS sharpe,
-               AVG(max_drawdown_pct) AS max_drawdown,
-               SUM(total_trades) AS total_trades,
-               AVG(total_return_pct) AS total_return
-        FROM consumption.Strategies_Backtest_Results
-        WHERE strategy_id = :sid
-    """, {"sid": strategy_id}, label="eval_backtest")
-
+    # NOTE: consumption.Strategies_Backtest_Results does not exist — skip query
     backtest_metrics = {
-        "win_rate": float(bt.win_rate) if bt and bt.win_rate is not None else None,
-        "profit_factor": float(bt.profit_factor) if bt and bt.profit_factor is not None else None,
-        "sharpe": float(bt.sharpe) if bt and bt.sharpe is not None else None,
-        "max_drawdown": float(bt.max_drawdown) if bt and bt.max_drawdown is not None else None,
-        "total_trades": int(bt.total_trades) if bt and bt.total_trades is not None else None,
-        "total_return": float(bt.total_return) if bt and bt.total_return is not None else None,
+        "win_rate": None,
+        "profit_factor": None,
+        "sharpe": None,
+        "max_drawdown": None,
+        "total_trades": None,
+        "total_return": None,
     }
 
     # Fallback to definitions if no backtest results view
-    if backtest_metrics["win_rate"] is None and definitions and definitions.win_rate is not None:
+    if definitions and definitions.win_rate is not None:
         backtest_metrics["win_rate"] = float(definitions.win_rate) / 100
-    if backtest_metrics["sharpe"] is None and definitions and definitions.sharpe_ratio is not None:
+    if definitions and definitions.sharpe_ratio is not None:
         backtest_metrics["sharpe"] = float(definitions.sharpe_ratio)
-    if backtest_metrics["max_drawdown"] is None and definitions and definitions.max_drawdown is not None:
+    if definitions and definitions.max_drawdown is not None:
         backtest_metrics["max_drawdown"] = float(definitions.max_drawdown)
 
     # ---- Live metrics (from gold.trade_executions) -------------------------
@@ -5192,15 +5171,8 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
         equity_curve.append({"date": r.d.isoformat(), "pnl": float(r.day_pnl or 0), "cum_pnl": round(cum, 2)})
 
     # ---- Monthly returns ---------------------------------------------------
-    monthly = safe_query(db, """
-        SELECT year, month, return_pct
-        FROM consumption.Performance_Monthly_Returns
-        WHERE strategy_id = :sid
-        ORDER BY year DESC, month DESC LIMIT 24
-    """, {"sid": strategy_id}, label="eval_monthly")
-
-    monthly_returns = [{"year": int(r.year), "month": int(r.month),
-                        "return": float(r.return_pct or 0)} for r in monthly]
+    # NOTE: consumption.Performance_Monthly_Returns does not exist — skip query
+    monthly_returns = []
 
     # ---- Recent trades (last 50) ------------------------------------------
     trades = safe_query(db, """
@@ -5222,22 +5194,8 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
     } for t in trades]
 
     # ---- Recent signals ----------------------------------------------------
-    signals = safe_query(db, """
-        SELECT ticker, signal, signal_strength, confidence_score, current_price, generated_at
-        FROM consumption.Strategies_Signals_Current
-        WHERE strategy_id = :sid
-        ORDER BY confidence_score DESC NULLS LAST
-        LIMIT 25
-    """, {"sid": strategy_id}, label="eval_signals")
-
-    recent_signals = [{
-        "ticker": s.ticker,
-        "signal": s.signal,
-        "strength": float(s.signal_strength) if s.signal_strength is not None else None,
-        "confidence": float(s.confidence_score) if s.confidence_score is not None else None,
-        "price": float(s.current_price) if s.current_price is not None else None,
-        "ts": s.generated_at.isoformat() if getattr(s, "generated_at", None) else None,
-    } for s in signals]
+    # NOTE: consumption.Strategies_Signals_Current does not exist — skip query
+    recent_signals = []
 
     # ---- Divergence verdict ------------------------------------------------
     bt_wr = backtest_metrics["win_rate"]

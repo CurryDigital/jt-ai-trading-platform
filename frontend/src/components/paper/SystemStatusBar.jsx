@@ -1,6 +1,25 @@
 import React from 'react';
 
-export default function SystemStatusBar({ data }) {
+export default function SystemStatusBar({ data, degraded, error }) {
+  // Degraded mode — DB unreachable
+  if (degraded || (data && data.db === 'unreachable')) {
+    return (
+      <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-4 mb-6">
+        <div className="flex items-center gap-3">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <p className="text-amber-400 text-sm font-semibold">
+            System degraded — database unreachable
+          </p>
+          {error && error.retryAfter && (
+            <span className="text-amber-500/70 text-xs">
+              Retrying in {Math.round(error.retryAfter / 1000)}s
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (!data || data.state === 'error') {
     return (
       <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 p-4 mb-6">

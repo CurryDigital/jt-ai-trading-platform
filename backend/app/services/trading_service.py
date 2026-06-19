@@ -25,8 +25,22 @@ class AutomatedTradeService:
     """
     
     def __init__(self, db: Session = None):
-        self.db = db or SessionLocal()
+        self._db = db
+        self._session = None
         self.execution_mode = "TWS_API"  # TWS_API | WEB_API | SIMULATION
+
+    @property
+    def db(self):
+        if self._db is not None:
+            return self._db
+        if self._session is None:
+            self._session = SessionLocal()
+        return self._session
+
+    def close(self):
+        if self._session is not None:
+            self._session.close()
+            self._session = None
 
     def get_automation_policy(self):
         """

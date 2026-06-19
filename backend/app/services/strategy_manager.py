@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 class StrategyManager:
     def __init__(self, db: Session = None):
-        self.db = db or SessionLocal()
-        
+        self._db = db
+        self._session = None
         self.templates = {
             # FX Strategies
             "MR_FX": {
@@ -177,6 +177,21 @@ class StrategyManager:
                 }
             }
         }
+
+    @property
+    def db(self):
+        if self._db is not None:
+            return self._db
+        if self._session is None:
+            self._session = SessionLocal()
+        return self._session
+    
+    def close(self, db=None):
+        if db is not None and db is not self._db:
+            db.close()
+        if self._session is not None:
+            self._session.close()
+            self._session = None
 
     def get_templates(self):
         return self.templates

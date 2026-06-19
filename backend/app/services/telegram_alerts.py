@@ -19,11 +19,25 @@ class TelegramAlertService:
     """Service for sending Telegram alerts"""
     
     def __init__(self, db: Session = None):
-        self.db = db or SessionLocal()
+        self._db = db
+        self._session = None
         self.bot_token = None
         self.chat_id = None
         self.enabled = False
         self._load_config()
+    
+    @property
+    def db(self):
+        if self._db is not None:
+            return self._db
+        if self._session is None:
+            self._session = SessionLocal()
+        return self._session
+    
+    def close(self):
+        if self._session is not None:
+            self._session.close()
+            self._session = None
     
     def _load_config(self):
         """Load Telegram configuration from database or environment"""

@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY, DECIMAL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 import datetime
 import os
 import boto3
@@ -8,7 +9,7 @@ import psycopg2
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 def get_hkt_now():
     return datetime.datetime.utcnow() + datetime.timedelta(hours=8)
@@ -40,39 +41,37 @@ def get_connection():
     
     return psycopg2.connect(
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=password,
-        database=DB_NAME, sslmode='require',
+        database=DB_NAME, sslmode='require', connect_timeout=5,
         options='-c search_path=aitrading_schema,bronze,silver,gold,consumption -c timezone=Asia/Hong_Kong'
     )
 
 # Build connection string for SQLAlchemy
 if DB_PASSWORD:
-    # Use password auth
-    connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    # Direct connection with password + SSL required + timeouts
+    connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=require&connect_timeout=5"
 else:
     # Use IAM auth with creator function
-    connection_string = f"postgresql://{DB_USER}@{DB_HOST}/{DB_NAME}"
+    connection_string = f"postgresql://{DB_USER}@{DB_HOST}/{DB_NAME}?sslmode=require&connect_timeout=5"
 
-# Create engine with appropriate configuration
+# Create engine with hardened connection-pool configuration.
+# When RDS is unreachable we want fast failure, not queue saturation.
+engine_kwargs = dict(
+    pool_size=6,           # accommodate 4 persistent singletons + 2 for API
+    max_overflow=4,        # burst capacity for concurrent API requests
+    pool_timeout=10,       # allow time for pool recovery under load
+    pool_recycle=1800,     # recycle every 30 min (IAM token TTL)
+    pool_pre_ping=True,    # drop stale connections before checkout
+    echo=False,
+    connect_args={"connect_timeout": 5},  # fail fast at TCP level
+)
+
 if DB_PASSWORD:
-    # Direct connection with password
-    engine = create_engine(
-        connection_string,
-        pool_size=5,
-        max_overflow=2,
-        pool_timeout=30,
-        pool_recycle=1800,
-        pool_pre_ping=True
-    )
+    engine = create_engine(connection_string, **engine_kwargs)
 else:
-    # IAM auth with creator function
     engine = create_engine(
         connection_string,
         creator=get_connection,
-        pool_size=5,
-        max_overflow=2,
-        pool_timeout=30,
-        pool_recycle=1800,
-        pool_pre_ping=True
+        **engine_kwargs,
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

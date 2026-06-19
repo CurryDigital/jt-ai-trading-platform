@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
 import { AuditLog } from './AuditLog';
+import { marketClock, marketStatus, fmtAge } from '../utils';
 
-// Enhanced Settings Tab with Configuration Management
-export const SettingsTab = () => {
-  const [activeSection, setActiveSection] = useState('ibkr'); // ibkr, trading, sync, display, data
+// Enhanced Settings Tab with Configuration Management + System Health
+export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
+  const [activeSection, setActiveSection] = useState('ibkr'); // ibkr, trading, sync, display, data, health
   const [syncStatus, setSyncStatus] = useState({});
   const [platformSettings, setPlatformSettings] = useState({
     defaultCapital: 100000,
@@ -20,12 +21,19 @@ export const SettingsTab = () => {
   const [resetConfirm, setResetConfirm] = useState(false);
   const [dataSources, setDataSources] = useState(null);
   const [dataSourcesLoading, setDataSourcesLoading] = useState(false);
+  const [clocks, setClocks] = useState(marketClock());
+  const [statuses, setStatuses] = useState(marketStatus());
 
   useEffect(() => {
     fetchSettings();
     fetchSyncStatus();
     fetchExecutionMode();
     fetchDataSources();
+    const id = setInterval(() => {
+      setClocks(marketClock());
+      setStatuses(marketStatus());
+    }, 1000);
+    return () => clearInterval(id);
   }, []);
 
   const fetchSettings = async () => {
@@ -113,6 +121,7 @@ export const SettingsTab = () => {
     { id: 'trading', label: '💰 Trading Config', icon: '💰' },
     { id: 'sync', label: '🔄 Data Sync', icon: '🔄' },
     { id: 'data', label: '📊 Data Sources', icon: '📊' },
+    { id: 'health', label: '🩺 System Health', icon: '🩺' },
     { id: 'audit', label: '🛡️ Audit Log', icon: '🛡️' },
     { id: 'display', label: '🎨 Display', icon: '🎨' },
   ];
@@ -643,6 +652,80 @@ export const SettingsTab = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SYSTEM HEALTH */}
+      {activeSection === 'health' && (
+        <div className="space-y-4">
+          {/* Market Clocks */}
+          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+            <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Market Clocks</h3>
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { city: 'HK', time: clocks.hkt, open: statuses.hk },
+                { city: 'LON', time: clocks.lon, open: statuses.lon },
+                { city: 'NYC', time: clocks.nyc, open: statuses.nyc },
+              ].map(m => (
+                <div key={m.city} className="p-4 rounded-lg bg-slate-800/50 border border-white/5 flex items-center gap-3">
+                  <span className={`w-2 h-2 rounded-full ${m.open ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                  <div>
+                    <div className="text-xs text-slate-400">{m.city}</div>
+                    <div className="text-sm font-bold text-white font-mono">{m.time}</div>
+                    <div className="text-[10px] text-slate-500">{m.open ? 'Open' : 'Closed'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Connection Status */}
+          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+            <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Connection Status</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 rounded-lg bg-slate-800/50 border border-white/5">
+                <div className="text-xs text-slate-400">API Latency</div>
+                <div className={`text-lg font-bold font-mono ${latencyMs != null && latencyMs < 500 ? 'text-emerald-400' : latencyMs != null && latencyMs < 2000 ? 'text-amber-400' : 'text-rose-400'}`}>
+                  {latencyMs != null ? `${latencyMs}ms` : '—'}
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-slate-800/50 border border-white/5">
+                <div className="text-xs text-slate-400">API Health</div>
+                <div className={`text-lg font-bold ${healthData?.status === 'healthy' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {healthData?.status || 'unknown'}
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-slate-800/50 border border-white/5">
+                <div className="text-xs text-slate-400">WebSocket</div>
+                <div className={`text-lg font-bold ${wsConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {wsConnected ? 'Connected' : 'Disconnected'}
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-slate-800/50 border border-white/5">
+                <div className="text-xs text-slate-400">Database</div>
+                <div className={`text-lg font-bold ${healthData?.db_connected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {healthData?.db_connected ? 'Connected' : 'Disconnected'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Health Details */}
+          {healthData && (
+            <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+              <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Health Details</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                {Object.entries(healthData).map(([key, value]) => (
+                  <div key={key} className="p-3 rounded-lg bg-slate-800/50">
+                    <span className="text-xs text-slate-400 block uppercase">{key.replace(/_/g, ' ')}</span>
+                    <span className={`font-mono ${typeof value === 'boolean' ? (value ? 'text-emerald-400' : 'text-rose-400') : 'text-white'}`}>
+                      {typeof value === 'boolean' ? (value ? '✓' : '✗') : String(value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -53,6 +53,11 @@ def safe_query(db: Session, sql: str, params: dict = None, fallback=None, label:
         db.rollback()
         raise
     except OperationalError as e:
+        error_str = str(e)
+        if "QueuePool limit" in error_str or "connection timed out" in error_str or "timeout expired" in error_str:
+            logger.error(f"DB pool exhausted [{label}]: {error_str[:120]}")
+            db.rollback()
+            raise  # re-raise so FastAPI exception handler returns 503
         logger.error(f"DB operational error [{label}]: {e}")
         db.rollback()
         return fallback
@@ -85,6 +90,11 @@ def safe_query_one(db: Session, sql: str, params: dict = None, fallback=None, la
         db.rollback()
         raise
     except OperationalError as e:
+        error_str = str(e)
+        if "QueuePool limit" in error_str or "connection timed out" in error_str or "timeout expired" in error_str:
+            logger.error(f"DB pool exhausted [{label}]: {error_str[:120]}")
+            db.rollback()
+            raise  # re-raise so FastAPI exception handler returns 503
         logger.error(f"DB operational error [{label}]: {e}")
         db.rollback()
         return fallback

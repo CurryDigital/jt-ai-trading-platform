@@ -8,7 +8,21 @@ logger = logging.getLogger(__name__)
 
 class SupervisorService:
     def __init__(self, db: Session = None):
-        self.db = db or SessionLocal()
+        self._db = db
+        self._session = None
+
+    @property
+    def db(self):
+        if self._db is not None:
+            return self._db
+        if self._session is None:
+            self._session = SessionLocal()
+        return self._session
+
+    def close(self):
+        if self._session is not None:
+            self._session.close()
+            self._session = None
 
     def audit_past_predictions(self):
         """

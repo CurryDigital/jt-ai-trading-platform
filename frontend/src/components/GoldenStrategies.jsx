@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '../utils';
 import {
   usePaperOpenPositionsPnl,
   usePaperSignalProximity,
@@ -26,9 +27,8 @@ const StrategyCapitalPool = ({ strategyId, strategyName, onUpdate }) => {
 
   const fetchPool = async () => {
     try {
-      const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/capital-pool`);
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/capital-pool`);
+      if (data) {
         setPool(data);
         setNewTotal(data.total_assigned);
       }
@@ -38,12 +38,8 @@ const StrategyCapitalPool = ({ strategyId, strategyName, onUpdate }) => {
   const updatePool = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/strategies/${encodeURIComponent(strategyId)}/capital-pool`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ total_assigned: newTotal })
-      });
-      if (res.ok) {
+      const data = await api.post(`/api/strategies/${encodeURIComponent(strategyId)}/capital-pool`, { total_assigned: newTotal });
+      if (data) {
         await fetchPool();
         setEditing(false);
         if (onUpdate) onUpdate();
@@ -202,9 +198,8 @@ const DailyPnLChart = ({ strategyId }) => {
   const fetchDailyPnL = async () => {
     try {
       // Get last 7 days of data from paper strategies endpoint
-      const res = await fetch(`/api/paper-strategies/${strategyId}/daily-pnl?days=7`);
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api.get(`/api/paper-strategies/${strategyId}/daily-pnl?days=7`);
+      if (data) {
         // Sort by date ascending
         const sorted = (data.daily || []).sort((a, b) => new Date(a.date) - new Date(b.date));
         setDailyData(sorted.slice(-7)); // Last 7 days
@@ -765,71 +760,83 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
     return () => clearInterval(interval);
   }, []);
 
-  const fetchStrategies = () => {
-    fetch('/api/agents/paper/strategy-book-extended')
-      .then(r => r.json())
-      .then(data => {
-        if (data.strategies) {
-          const enriched = data.strategies.map(s => ({
-            ...s,
-            id: s.strategy_id,
-            name: s.display_name || s.name,
-            sharpe: s.sharpe_ratio != null ? s.sharpe_ratio : null,
-            win_rate: s.win_rate != null ? s.win_rate : null,
-            avg_hold_days: parseInt(s.time_horizon) || 5,
-            capacity: '$50M',
-            max_dd: s.max_drawdown ? `${(s.max_drawdown * 100).toFixed(1)}%` : '-10%',
-            assetCount: s.universe_count || 0,
-            tradeSize: Math.floor((customPools[s.strategy_id] || defaultPoolSize) * 0.25),
-            // Convert annual_pnl to yearly_backtest format for the renderer
-            yearly_backtest: (() => {
-              const yb = {};
-              if (s.annual_pnl_2024 != null) {
-                yb['2024'] = { return_pct: s.annual_pnl_2024 * 100, trades: 0 };
-              }
-              if (s.annual_pnl_2025 != null) {
-                yb['2025'] = { return_pct: s.annual_pnl_2025 * 100, trades: 0 };
-              }
-              if (s.annual_pnl_2026 != null) {
-                yb['2026'] = { return_pct: s.annual_pnl_2026 * 100, trades: 0 };
-              }
-              return Object.keys(yb).length > 0 ? yb : null;
-            })(),
-            // Extract universe from entry_logic if available
-            universe: s.entry_logic && s.entry_logic.includes('Universe:')
-              ? s.entry_logic.split('Universe:')[1].split('.')[0].split(',').map(t => t.trim())
-              : []
-          }));
-          setStrategies(enriched);
+  const fetchStrategies = async () => {
+    try {
+      const data = await api.get('/api/agents/paper/strategy-book-extended');
+      if (data && data.strategies) {
+        const enriched = data.strategies.map(s => ({
+          ...s,
+          id: s.strategy_id,
+          name: s.display_name || s.name,
+          sharpe: s.sharpe_ratio != null ? s.sharpe_ratio : null,
+          win_rate: s.win_rate != null ? s.win_rate : null,
+          avg_hold_days: parseInt(s.time_horizon) || 5,
+          capacity: '$50M',
+          max_dd: s.max_drawdown ? `${(s.max_drawdown * 100).toFixed(1)}%` : '-10%',
+          assetCount: s.universe_count || 0,
+          tradeSize: Math.floor((customPools[s.strategy_id] || defaultPoolSize) * 0.25),
+          // Convert annual_pnl to yearly_backtest format for the renderer
+          yearly_backtest: (() => {
+            const yb = {};
+            if (s.annual_pnl_2024 != null) {
+              yb['2024'] = { return_pct: s.annual_pnl_2024 * 100, trades: 0 };
+            }
+            if (s.annual_pnl_2025 != null) {
+              yb['2025'] = { return_pct: s.annual_pnl_2025 * 100, trades: 0 };
+            }
+            if (s.annual_pnl_2026 != null) {
+              yb['2026'] = { return_pct: s.annual_pnl_2026 * 100, trades: 0 };
+            }
+            return Object.keys(yb).length > 0 ? yb : null;
+          })(),
+          // Extract universe from entry_logic if available
+          universe: s.entry_logic && s.entry_logic.includes('Universe:')
+            ? s.entry_logic.split('Universe:')[1].split('.')[0].split(',').map(t => t.trim())
+            : []
+        }));
+        setStrategies(enriched);
+        // Cache to localStorage for offline fallback
+        localStorage.setItem('goldenStrategies_cache', JSON.stringify(enriched));
+      } else {
+        // API returned null — try to load from cache
+        const cached = localStorage.getItem('goldenStrategies_cache');
+        if (cached) {
+          try { setStrategies(JSON.parse(cached)); } catch {}
         }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      }
+      setLoading(false);
+    } catch {
+      // On error, try to load from cache so user sees last known data
+      const cached = localStorage.getItem('goldenStrategies_cache');
+      if (cached) {
+        try { setStrategies(JSON.parse(cached)); } catch {}
+      }
+      setLoading(false);
+    }
   };
 
-  const fetchPipelineSummary = () => {
-    fetch('/api/strategies/pipeline-summary')
-      .then(r => r.json())
-      .then(data => setPipelineSummary(data))
-      .catch(e => console.error('Failed to fetch pipeline summary:', e));
+  const fetchPipelineSummary = async () => {
+    try {
+      const data = await api.get('/api/strategies/pipeline-summary');
+      if (data) setPipelineSummary(data);
+    } catch (e) { console.error('Failed to fetch pipeline summary:', e); }
   };
 
-  const fetchPaperStrategies = () => {
-    fetch('/api/paper-strategies')
-      .then(r => r.json())
-      .then(data => { 
+  const fetchPaperStrategies = async () => {
+    try {
+      const data = await api.get('/api/paper-strategies');
+      if (data) {
         if (data.strategies) setPaperStrategies(data.strategies);
         if (data.execution_mode) setExecutionMode(data.execution_mode);
-      })
-      .catch(e => console.error('Failed to fetch:', e));
+      }
+    } catch (e) { console.error('Failed to fetch:', e); }
   };
   
   const fetchStrategyStats = async () => {
     try {
       // Fetch all paper strategies and calculate actual stats
-      const res = await fetch('/api/paper-strategies');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api.get('/api/paper-strategies');
+      if (data) {
         const stats = {};
         
         // Group by strategy and calculate actual win rates
@@ -896,19 +903,14 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
       
       try {
         // Use deploy-auto: deploys full universe with BUY signals only, max 5 positions
-        const res = await fetch('/api/strategies/deploy-auto', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            strategy_id: strategyId,
-            total_pool: poolSize,
-            trade_size_pct: 0.25,
-            max_positions: 5
-          })
+        const data = await api.post('/api/strategies/deploy-auto', {
+          strategy_id: strategyId,
+          total_pool: poolSize,
+          trade_size_pct: 0.25,
+          max_positions: 5
         });
         
-        const data = await res.json();
-        if (res.ok && data.success) {
+        if (data && data.success) {
           results.push({ 
             strategy: strategy.name, 
             status: 'success',
@@ -919,7 +921,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
           results.push({ 
             strategy: strategy.name, 
             status: 'error', 
-            error: data.error || 'Deploy failed'
+            error: data?.error || 'Deploy failed'
           });
         }
       } catch (e) {
@@ -952,25 +954,17 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
     if (!confirm(`Are you sure you want to ${actionText} this strategy?`)) return;
 
     try {
-      const res = await fetch(`/api/strategies/${strategyId}/deactivate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }) // 'close' or 'keep'
-      });
-
-      if (res.ok) {
-        const data = await res.json();
+      const data = await api.post(`/api/strategies/${strategyId}/deactivate`, { action });
+      if (data) {
         alert(`✅ Strategy ${action === 'close' ? 'closed' : 'paused'} successfully!${data.positions_closed ? ` (${data.positions_closed} positions closed)` : ''}`);
         fetchPaperStrategies();
         fetchStrategyStats();
         if (onDeployStrategy) onDeployStrategy();
       } else {
-        const err = await res.json();
-        alert(`❌ Failed: ${err.detail || 'Unknown error'}`);
+        alert(`❌ Failed to ${action} strategy`);
       }
     } catch (e) {
-      console.error('Failed to deactivate strategy:', e);
-      alert('❌ Network error. Please try again.');
+      alert(`❌ Error: ${e.message}`);
     }
   };
 
@@ -1649,8 +1643,8 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                           <button
                             onClick={async () => {
                               try {
-                                const res = await fetch(`/api/strategies/${encodeURIComponent(strategy.id)}/approve`, { method: 'POST' });
-                                if (res.ok) {
+                                const data = await api.post(`/api/strategies/${encodeURIComponent(strategy.id)}/approve`);
+                                if (data) {
                                   fetchStrategies();
                                   fetchPipelineSummary();
                                 }
@@ -1664,8 +1658,8 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                             onClick={async () => {
                               if (!confirm('Reject this strategy? It will be marked as rejected.')) return;
                               try {
-                                const res = await fetch(`/api/strategies/${encodeURIComponent(strategy.id)}/reject`, { method: 'POST' });
-                                if (res.ok) {
+                                const data = await api.post(`/api/strategies/${encodeURIComponent(strategy.id)}/reject`);
+                                if (data) {
                                   fetchStrategies();
                                   fetchPipelineSummary();
                                 }
