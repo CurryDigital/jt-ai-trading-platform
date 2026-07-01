@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { CommandCenter } from './components/CommandCenter';
 import { MarketsTab } from './components/MarketsTab';
 import { SettingsTab } from './components/SettingsTab';
 import { StrategyLab } from './components/StrategyLab';
@@ -12,7 +13,8 @@ import { StrategyCompare } from './components/StrategyCompare';
 import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
 import PaperStrategiesPage from './components/PaperStrategiesPage';
-import AgenticResearchPage from './components/AgenticResearchPage';
+import { SignalsTab } from './components/SignalsTab';
+import { ManualTicket } from './components/ManualTicket';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
@@ -29,7 +31,6 @@ const Icon = {
   Markets: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>),
   Settings: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>),
   Strategies: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>),
-  Agents: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>),
 };
 
 // =================================================================
@@ -224,7 +225,7 @@ const KPI = ({ l, v, sub, pos, hint }) => (
 );
 
 // Portfolio Component — Split by Asset Class
-const PortfolioTab = ({ data }) => {
+const PortfolioTab = ({ data, globalMode }) => {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
   const [orderSymbol, setOrderSymbol] = useState('');
@@ -390,53 +391,56 @@ const PortfolioTab = ({ data }) => {
         <KPI l="Unrealized P&L" v={fmtK(totalPnL)} pos={totalPnL >= 0} />
       </div>
 
-      {/* Manual Order */}
-      <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs font-bold text-white">Quick Order</span>
-          {orderMsg && (
-            <span className={`text-[10px] ${orderMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{orderMsg.text}</span>
-          )}
+      {/* Quick IBKR Order + Manual Ticket */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-3 items-start">
+        <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-bold text-white">Quick Order (IBKR)</span>
+            {orderMsg && (
+              <span className={`text-[10px] ${orderMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{orderMsg.text}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={orderSymbol}
+              onChange={e => setOrderSymbol(e.target.value.toUpperCase())}
+              placeholder="Symbol"
+              className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-24 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+            />
+            <input
+              type="number"
+              value={orderQty}
+              onChange={e => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
+              min="1"
+              className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-16 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+            />
+            <select
+              value={orderType}
+              onChange={e => setOrderType(e.target.value)}
+              className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500/50"
+            >
+              <option value="MKT">MKT</option>
+              <option value="LMT">LMT</option>
+              <option value="STP">STP</option>
+            </select>
+            <button
+              onClick={() => placeOrder('BUY')}
+              disabled={orderLoading}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
+            >
+              {orderLoading ? '...' : '📈 BUY'}
+            </button>
+            <button
+              onClick={() => placeOrder('SELL')}
+              disabled={orderLoading}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
+            >
+              {orderLoading ? '...' : '📉 SELL'}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={orderSymbol}
-            onChange={e => setOrderSymbol(e.target.value.toUpperCase())}
-            placeholder="Symbol"
-            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-24 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
-          />
-          <input
-            type="number"
-            value={orderQty}
-            onChange={e => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
-            min="1"
-            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-16 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
-          />
-          <select
-            value={orderType}
-            onChange={e => setOrderType(e.target.value)}
-            className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500/50"
-          >
-            <option value="MKT">MKT</option>
-            <option value="LMT">LMT</option>
-            <option value="STP">STP</option>
-          </select>
-          <button
-            onClick={() => placeOrder('BUY')}
-            disabled={orderLoading}
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
-          >
-            {orderLoading ? '...' : '📈 BUY'}
-          </button>
-          <button
-            onClick={() => placeOrder('SELL')}
-            disabled={orderLoading}
-            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
-          >
-            {orderLoading ? '...' : '📉 SELL'}
-          </button>
-        </div>
+        <ManualTicket book="live" globalMode={globalMode} />
       </div>
 
       {/* Asset Class Filter */}
@@ -671,622 +675,6 @@ const PerformanceTab = ({ data, onSelectStrategy, onCompare }) => {
 };
 
 // =================================================================
-// Command Center — Market Overview Dashboard
-// Uses real API data: indices, global markets, breadth, sentiment
-// =================================================================
-const CommandCenter = ({ data, pipelineSummary, navigateToTab, healthData, onSelectStrategy }) => {
-  const totalPositionValue = data.positions.reduce((s, p) => s + (p.market_value || 0), 0);
-  const totalPnLOpen = data.positions.reduce((s, p) => s + (p.pnl || 0), 0);
-  const sortedStrategies = useMemo(() =>
-    [...(data.strategies || [])].sort((a, b) => (b.returns || 0) - (a.returns || 0)),
-    [data.strategies]
-  );
-  const top5 = sortedStrategies.slice(0, 5);
-
-  // Market overview state — mirrors what MarketsTab fetches
-  const [marketOverview, setMarketOverview] = useState({
-    indices: [],
-    global: [],
-    usBreadth: { advancing: 0, declining: 0, unchanged: 0, newHighs: 0, newLows: 0, above50MA: null, above200MA: null },
-    hkBreadth: { advancing: 0, declining: 0, unchanged: 0 },
-    cnBreadth: { advancing: 0, declining: 0, unchanged: 0 },
-    usSentiment: { fearGreed: null, fearGreedLabel: null, vix: null, putCall: null },
-    hkSentiment: { fearGreed: null, fearGreedLabel: null },
-    cnSentiment: { fearGreed: null, fearGreedLabel: null },
-    sectors: [],
-    loading: true
-  });
-
-  // Fetch all market data in parallel — same endpoints as MarketsTab
-  useEffect(() => {
-    const fetchOverview = async () => {
-      try {
-        const [indicesRes, globalRes, breadthUS, breadthHK, breadthCN, sentUS, sentHK, sentCN, sectorsRes] = await Promise.all([
-          fetch('/api/market/indices?timeframe=1D').then(r => r.ok ? r.json() : null),
-          fetch(`/api/market/global?_t=${Date.now()}`).then(r => r.ok ? r.json() : null),
-          fetch('/api/market/breadth?country=US').then(r => r.ok ? r.json() : null),
-          fetch('/api/market/breadth?country=HK').then(r => r.ok ? r.json() : null),
-          fetch('/api/market/breadth?country=CN').then(r => r.ok ? r.json() : null),
-          fetch('/api/market/sentiment?country=US').then(r => r.ok ? r.json() : null),
-          fetch('/api/market/sentiment?country=HK').then(r => r.ok ? r.json() : null),
-          fetch('/api/market/sentiment?country=CN').then(r => r.ok ? r.json() : null),
-          fetch('/api/market/sectors').then(r => r.ok ? r.json() : null)
-        ]);
-
-        setMarketOverview({
-          indices: indicesRes?.data || [],
-          global: globalRes?.data || [],
-          usBreadth: breadthUS || { advancing: 0, declining: 0, unchanged: 0, newHighs: 0, newLows: 0 },
-          hkBreadth: breadthHK || { advancing: 0, declining: 0, unchanged: 0 },
-          cnBreadth: breadthCN || { advancing: 0, declining: 0, unchanged: 0 },
-          usSentiment: sentUS || { fearGreed: null, fearGreedLabel: null, vix: null, putCall: null },
-          hkSentiment: sentHK || { fearGreed: null, fearGreedLabel: null },
-          cnSentiment: sentCN || { fearGreed: null, fearGreedLabel: null },
-          sectors: sectorsRes?.data || [],
-          loading: false
-        });
-      } catch (e) {
-        console.error('Failed to fetch market overview:', e);
-        setMarketOverview(prev => ({ ...prev, loading: false }));
-      }
-    };
-
-    fetchOverview();
-    const id = setInterval(fetchOverview, 60000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Find specific indices from the returned data
-  const findIndex = (symbol, namePattern) => {
-    // Search in indices first (has symbol field)
-    const fromIndices = marketOverview.indices.find(i =>
-      i.symbol === symbol || (namePattern && i.name?.includes(namePattern))
-    );
-    if (fromIndices) return fromIndices;
-    // Fall back to global markets (has name field, no symbol)
-    return marketOverview.global.find(i =>
-      i.name === namePattern || i.name?.includes(namePattern)
-    );
-  };
-
-  const djia = findIndex('DJI', 'Dow');
-  const sp500 = findIndex('SPX', 'S&P') || findIndex('SPY', 'S&P');
-  const nasdaq = findIndex('COMP', 'Nasdaq') || findIndex('IXIC', 'Nasdaq') || findIndex('QQQ', 'Nasdaq');
-  const russell = findIndex('RUT', 'Russell') || findIndex('IWM', 'Russell');
-  const ftse = findIndex('UKX', 'FTSE');
-  const dax = findIndex('DAX', 'DAX');
-  const nikkei = findIndex('N225', 'Nikkei');
-  const hsi = findIndex('HSI', 'Hang Seng');
-  const shcomp = findIndex('SHCOMP', 'Shanghai') || findIndex('000001.SS', 'Shanghai');
-  const sti = findIndex('STI', 'Straits Times') || findIndex('FSSTI', 'Straits');
-
-  // Compute bull/bear from ALL available major indices (not just US)
-  const computeMarketStatus = () => {
-    const changes = [djia, sp500, nasdaq, ftse, dax]
-      .map(i => i?.change_percent)
-      .filter(v => v != null);
-    if (changes.length === 0) return { status: 'UNKNOWN', label: '—', color: 'slate', emoji: '◯', score: null };
-    const avg = changes.reduce((a, b) => a + b, 0) / changes.length;
-    if (avg > 1.5) return { status: 'STRONG_BULL', label: 'Strong Bull', color: 'emerald', emoji: '🐂🐂', score: avg };
-    if (avg > 0.5) return { status: 'BULL', label: 'Bull', color: 'emerald', emoji: '🐂', score: avg };
-    if (avg < -1.5) return { status: 'STRONG_BEAR', label: 'Strong Bear', color: 'rose', emoji: '🐻🐻', score: avg };
-    if (avg < -0.5) return { status: 'BEAR', label: 'Bear', color: 'rose', emoji: '🐻', score: avg };
-    return { status: 'NEUTRAL', label: 'Neutral', color: 'amber', emoji: '➖', score: avg };
-  };
-
-  const marketStatus = computeMarketStatus();
-  const breadth = marketOverview.usBreadth;
-  const totalBreadth = (breadth.advancing || 0) + (breadth.declining || 0) + (breadth.unchanged || 0);
-  const advanceDeclineRatio = totalBreadth > 0 ? (breadth.advancing / Math.max(breadth.declining, 1)) : 1;
-
-  // Fear & Greed
-  const fgi = marketOverview.usSentiment.fearGreed;
-  const fgiLabel = marketOverview.usSentiment.fearGreedLabel || (
-    fgi == null ? '—' :
-    fgi >= 75 ? 'Extreme Greed' :
-    fgi >= 55 ? 'Greed' :
-    fgi >= 45 ? 'Neutral' :
-    fgi >= 25 ? 'Fear' : 'Extreme Fear'
-  );
-  const fgiColor = fgi == null ? 'slate' :
-    fgi >= 75 ? 'rose' :
-    fgi >= 55 ? 'amber' :
-    fgi >= 45 ? 'blue' :
-    fgi >= 25 ? 'emerald' : 'emerald';
-
-  const getPerfColor = (change) => {
-    if (change == null) return 'text-slate-400';
-    if (change > 1.5) return 'text-emerald-400';
-    if (change > 0.5) return 'text-emerald-300';
-    if (change > 0) return 'text-emerald-200';
-    if (change < -1.5) return 'text-rose-400';
-    if (change < -0.5) return 'text-rose-300';
-    if (change < 0) return 'text-rose-200';
-    return 'text-slate-400';
-  };
-
-  const getPerfBg = (change) => {
-    if (change == null) return 'bg-slate-500/10';
-    if (change > 1.5) return 'bg-emerald-500/20';
-    if (change > 0.5) return 'bg-emerald-500/10';
-    if (change > 0) return 'bg-emerald-500/5';
-    if (change < -1.5) return 'bg-rose-500/20';
-    if (change < -0.5) return 'bg-rose-500/10';
-    if (change < 0) return 'bg-rose-500/5';
-    return 'bg-slate-500/10';
-  };
-
-  // Top 3 performing sectors
-  const topSectors = [...(marketOverview.sectors || [])]
-    .sort((a, b) => (b.change_percent || 0) - (a.change_percent || 0))
-    .slice(0, 3);
-  const bottomSectors = [...(marketOverview.sectors || [])]
-    .sort((a, b) => (a.change_percent || 0) - (b.change_percent || 0))
-    .slice(0, 3);
-
-  return (
-    <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-sm font-bold text-white">Market Command</h1>
-          <p className="text-[10px] text-slate-500">Global market overview · bull/bear · breadth · sentiment</p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="qr-label">SHORTCUTS</span>
-          {[
-            { key: '1', tab: 'command', label: 'Cmd' },
-            { key: '2', tab: 'research', label: 'Res' },
-            { key: '3', tab: 'strategies', label: 'Strat' },
-            { key: '4', tab: 'execution', label: 'Exec' },
-            { key: '5', tab: 'settings', label: 'Set' },
-          ].map(s => (
-            <button key={s.key} onClick={() => navigateToTab(s.tab)} className="flex items-center gap-1 hover:opacity-80">
-              <span className="qr-kbd">{s.key}</span>
-              <span className="text-[9px] text-slate-500">{s.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ===== ROW 1: MARKET STATUS + BREADTH + SENTIMENT ===== */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Bull/Bear Status Card */}
-        <div className={`qr-surface overflow-hidden ${getPerfBg(marketStatus.score)}`}>
-          <div className="px-3 py-2 border-b border-white/[0.05]">
-            <span className="qr-label">Global Market Status</span>
-          </div>
-          <div className="p-3">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-2xl">{marketStatus.emoji}</span>
-              <div>
-                <div className={`text-lg font-black ${marketStatus.color === 'emerald' ? 'text-emerald-400' : marketStatus.color === 'rose' ? 'text-rose-400' : marketStatus.color === 'amber' ? 'text-amber-400' : 'text-slate-400'}`}>
-                  {marketStatus.label}
-                </div>
-                <div className="text-[10px] text-slate-500">
-                  Avg: {marketStatus.score != null ? `${marketStatus.score >= 0 ? '+' : ''}${marketStatus.score.toFixed(2)}%` : '—'}
-                </div>
-              </div>
-            </div>
-            {/* Index bars — show all major indices with real data */}
-            <div className="space-y-1.5">
-              {[
-                { label: 'DJIA', idx: djia },
-                { label: 'S&P500', idx: sp500 },
-                { label: 'NASDAQ', idx: nasdaq },
-                { label: 'FTSE100', idx: ftse },
-                { label: 'DAX', idx: dax },
-              ].filter(({ idx }) => idx != null).map(({ label, idx }) => (
-                <div key={label} className="flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400 font-semibold w-12">{label}</span>
-                  <div className="flex-1 mx-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${idx.change_percent >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                      style={{ width: `${Math.min(Math.abs(idx.change_percent || 0) * 20, 100)}%`, opacity: 0.7 }}
-                    />
-                  </div>
-                  <div className="text-right w-24">
-                    <span className="text-[10px] font-mono font-bold block text-white">
-                      {idx.price != null ? idx.price.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) : '—'}
-                    </span>
-                    <span className={`text-[8px] font-mono block ${getPerfColor(idx.change_percent)}`}>
-                      {idx.change_percent != null ? `${idx.change_percent >= 0 ? '+' : ''}${idx.change_percent.toFixed(2)}%` : ''}
-                      {idx.change != null ? ` · ${idx.change >= 0 ? '+' : ''}${idx.change.toFixed(0)} pts` : ''}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {marketOverview.indices.length === 0 && (
-                <div className="text-[10px] text-slate-600 py-2">No index data</div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Market Breadth */}
-        <div className="qr-surface overflow-hidden">
-          <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-            <span className="qr-label">US Market Breadth</span>
-            <span className="text-[10px] text-slate-500">A/D: {advanceDeclineRatio.toFixed(2)}</span>
-          </div>
-          <div className="p-3">
-            <div className="flex h-4 rounded-full overflow-hidden mb-3">
-              {totalBreadth > 0 ? (
-                <>
-                  <div className="bg-emerald-500" style={{ width: `${(breadth.advancing / totalBreadth) * 100}%` }} />
-                  <div className="bg-slate-600" style={{ width: `${(breadth.unchanged / totalBreadth) * 100}%` }} />
-                  <div className="bg-rose-500" style={{ width: `${(breadth.declining / totalBreadth) * 100}%` }} />
-                </>
-              ) : (
-                <div className="bg-slate-800 w-full" />
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <div className="text-[15px] font-bold text-emerald-400">{breadth.advancing || 0}</div>
-                <div className="text-[9px] text-slate-500 uppercase">Advancing</div>
-              </div>
-              <div>
-                <div className="text-[15px] font-bold text-slate-400">{breadth.unchanged || 0}</div>
-                <div className="text-[9px] text-slate-500 uppercase">Unchanged</div>
-              </div>
-              <div>
-                <div className="text-[15px] font-bold text-rose-400">{breadth.declining || 0}</div>
-                <div className="text-[9px] text-slate-500 uppercase">Declining</div>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="flex items-center justify-between py-1 px-2 rounded bg-slate-800/50">
-                <span className="text-[9px] text-slate-500">New Highs</span>
-                <span className="text-[11px] font-bold text-emerald-400">{breadth.newHighs != null ? breadth.newHighs : '—'}</span>
-              </div>
-              <div className="flex items-center justify-between py-1 px-2 rounded bg-slate-800/50">
-                <span className="text-[9px] text-slate-500">New Lows</span>
-                <span className="text-[11px] font-bold text-rose-400">{breadth.newLows != null ? breadth.newLows : '—'}</span>
-              </div>
-              <div className="flex items-center justify-between py-1 px-2 rounded bg-slate-800/50">
-                <span className="text-[9px] text-slate-500">Above 50MA</span>
-                <span className="text-[11px] font-bold text-blue-400">{breadth.above50MA != null ? `${breadth.above50MA}%` : '—'}</span>
-              </div>
-              <div className="flex items-center justify-between py-1 px-2 rounded bg-slate-800/50">
-                <span className="text-[9px] text-slate-500">Above 200MA</span>
-                <span className="text-[11px] font-bold text-indigo-400">{breadth.above200MA != null ? `${breadth.above200MA}%` : '—'}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Sentiment + Sector Leaders */}
-        <div className="qr-surface overflow-hidden">
-          <div className="px-3 py-2 border-b border-white/[0.05]">
-            <span className="qr-label">Sentiment & Sectors</span>
-          </div>
-          <div className="p-3">
-            {/* Fear/Greed gauge */}
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-slate-400">Fear & Greed</span>
-                <span className={`text-[11px] font-bold ${fgiColor === 'emerald' ? 'text-emerald-400' : fgiColor === 'rose' ? 'text-rose-400' : fgiColor === 'amber' ? 'text-amber-400' : 'text-blue-400'}`}>
-                  {fgi != null ? fgi : '—'}
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${fgiColor === 'emerald' ? 'bg-emerald-500' : fgiColor === 'rose' ? 'bg-rose-500' : fgiColor === 'amber' ? 'bg-amber-500' : 'bg-blue-500'}`}
-                  style={{ width: `${fgi != null ? Math.min(fgi, 100) : 0}%` }}
-                />
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1">{fgiLabel}</div>
-            </div>
-            {/* VIX */}
-            <div className="flex items-center justify-between py-1.5 border-t border-white/[0.04]">
-              <span className="text-[10px] text-slate-400">VIX</span>
-              <span className={`text-[12px] font-bold font-mono ${marketOverview.usSentiment.vix > 25 ? 'text-rose-400' : marketOverview.usSentiment.vix > 20 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {marketOverview.usSentiment.vix != null ? marketOverview.usSentiment.vix.toFixed(2) : '—'}
-              </span>
-            </div>
-            {/* Put/Call */}
-            <div className="flex items-center justify-between py-1.5 border-t border-white/[0.04]">
-              <span className="text-[10px] text-slate-400">Put/Call</span>
-              <span className={`text-[12px] font-bold font-mono ${marketOverview.usSentiment.putCall > 1.1 ? 'text-rose-400' : marketOverview.usSentiment.putCall < 0.8 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                {marketOverview.usSentiment.putCall != null ? marketOverview.usSentiment.putCall.toFixed(2) : '—'}
-              </span>
-            </div>
-            {/* Top/Bottom sectors */}
-            {topSectors.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-white/[0.04]">
-                <div className="text-[9px] text-slate-500 uppercase mb-1.5">Sector Leaders / Laggards</div>
-                <div className="space-y-1">
-                  {topSectors.map(s => (
-                    <div key={s.name} className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-300">{s.name}</span>
-                      <span className={`text-[10px] font-bold font-mono ${getPerfColor(s.change_percent)}`}>
-                        {s.change_percent != null ? `${s.change_percent >= 0 ? '+' : ''}${s.change_percent.toFixed(2)}%` : '—'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ===== ROW 2: US MARKET + GLOBAL INDICES ===== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* US Market — only US indices */}
-        <div className="qr-surface overflow-hidden">
-          <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-            <span className="qr-label">US Market</span>
-            <span className="text-[10px] text-slate-500">{marketOverview.indices.filter(i => ['SPX','DJI','COMP','RUT','IXIC'].includes(i.symbol)).length} indices</span>
-          </div>
-          <div className="p-3">
-            <div className="space-y-2">
-              {[
-                { name: 'S&P 500', flag: '🇺🇸', idx: sp500, key: 'SPX' },
-                { name: 'Dow Jones', flag: '🇺🇸', idx: djia, key: 'DJIA' },
-                { name: 'NASDAQ', flag: '💻', idx: nasdaq, key: 'COMP' },
-                { name: 'Russell 2000', flag: '📊', idx: russell, key: 'RUT' },
-              ].map(mkt => {
-                const change = mkt.idx?.change_percent;
-                const isBull = change != null && change > 0;
-                const isBear = change != null && change < 0;
-                const strength = change != null ? Math.abs(change) : 0;
-                return (
-                  <div key={mkt.key} className="flex items-center gap-3">
-                    <span className="text-sm w-6 text-center">{mkt.flag}</span>
-                    <div className="w-24">
-                      <div className="text-[11px] font-bold text-white">{mkt.name}</div>
-                      <div className="text-[9px] text-slate-500">{mkt.key}</div>
-                    </div>
-                    <div className="flex-1 flex items-center">
-                      <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden flex">
-                        <div className="bg-emerald-500/30 h-full" style={{ width: isBull ? `${Math.min(strength * 25, 50)}%` : '0%' }} />
-                        <div className="flex-1" />
-                        <div className="bg-rose-500/30 h-full" style={{ width: isBear ? `${Math.min(strength * 25, 50)}%` : '0%' }} />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-right">
-                        <div className="text-[11px] font-bold font-mono text-white">
-                          {mkt.idx?.price != null ? mkt.idx.price.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) : '—'}
-                        </div>
-                        <div className={`text-[9px] font-mono ${getPerfColor(change)}`}>
-                          {change != null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : ''}
-                          {mkt.idx?.change != null ? ` · ${mkt.idx.change >= 0 ? '+' : ''}${mkt.idx.change.toFixed(0)} pts` : ''}
-                        </div>
-                      </div>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isBull ? 'bg-emerald-500/20 text-emerald-400' : isBear ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700/30 text-slate-500'}`}>
-                        {isBull ? 'BULL' : isBear ? 'BEAR' : '—'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Global Indices — Europe + Asia */}
-        <div className="qr-surface overflow-hidden">
-          <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-            <span className="qr-label">Global Indices</span>
-            <button onClick={() => navigateToTab('research')} className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold">Markets →</button>
-          </div>
-          <div className="p-3">
-            {/* Europe */}
-            <div className="mb-2">
-              <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5">Europe</div>
-              <div className="space-y-1.5">
-                {[
-                  { name: 'FTSE 100', flag: '🇬🇧', idx: ftse, key: 'UKX' },
-                  { name: 'DAX', flag: '🇩🇪', idx: dax, key: 'DAX' },
-                ].map(mkt => {
-                  const change = mkt.idx?.change_percent;
-                  const isBull = change != null && change > 0;
-                  const isBear = change != null && change < 0;
-                  return (
-                    <div key={mkt.key} className="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-b-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{mkt.flag}</span>
-                        <div>
-                          <div className="text-[11px] font-bold text-white">{mkt.name}</div>
-                          <div className="text-[9px] text-slate-500">{mkt.key}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-right">
-                          <div className="text-[11px] font-bold font-mono text-white">
-                            {mkt.idx?.price != null ? mkt.idx.price.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) : '—'}
-                          </div>
-                          <div className={`text-[9px] font-mono ${getPerfColor(change)}`}>
-                            {change != null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : ''}
-                            {mkt.idx?.change != null ? ` · ${mkt.idx.change >= 0 ? '+' : ''}${mkt.idx.change.toFixed(0)} pts` : ''}
-                          </div>
-                        </div>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${isBull ? 'bg-emerald-500/20 text-emerald-400' : isBear ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700/30 text-slate-500'}`}>
-                          {isBull ? 'BULL' : isBear ? 'BEAR' : '—'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Asia */}
-            <div className="pt-2 border-t border-white/[0.04]">
-              <div className="text-[9px] text-slate-500 uppercase tracking-wider mb-1.5">Asia</div>
-              <div className="space-y-1.5">
-                {[
-                  { name: 'Hang Seng', flag: '🇭🇰', idx: hsi, key: 'HSI' },
-                  { name: 'Nikkei 225', flag: '🇯🇵', idx: nikkei, key: 'N225' },
-                  { name: 'Shanghai Comp', flag: '🇨🇳', idx: shcomp, key: 'SHCOMP', missing: !shcomp },
-                  { name: 'Straits Times', flag: '🇸🇬', idx: sti, key: 'STI', missing: !sti },
-                ].map(mkt => {
-                  const change = mkt.idx?.change_percent;
-                  const changePts = mkt.idx?.change;
-                  const isBull = change != null && change > 0;
-                  const isBear = change != null && change < 0;
-                  return (
-                    <div key={mkt.key} className="flex items-center justify-between py-1 border-b border-white/[0.03] last:border-b-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{mkt.flag}</span>
-                        <div>
-                          <div className="text-[11px] font-bold text-white">{mkt.name}</div>
-                          <div className="text-[9px] text-slate-500">{mkt.key}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-right">
-                          <div className="text-[11px] font-bold font-mono text-white">
-                            {mkt.idx?.price != null ? mkt.idx.price.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2}) : '—'}
-                          </div>
-                          <div className={`text-[9px] font-mono ${getPerfColor(change)}`}>
-                            {change != null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : ''}
-                            {changePts != null ? ` · ${changePts >= 0 ? '+' : ''}${changePts.toFixed(0)} pts` : ''}
-                          </div>
-                        </div>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${isBull ? 'bg-emerald-500/20 text-emerald-400' : isBear ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700/30 text-slate-500'}`}>
-                          {isBull ? 'BULL' : isBear ? 'BEAR' : '—'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* HK/CN mini breadth */}
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.04]">
-              <div className="p-2 rounded bg-slate-800/50">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-sm">🇭🇰</span>
-                  <span className="text-[10px] font-bold text-white">HK</span>
-                </div>
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-slate-500">F&G:</span>
-                  <span className={`font-bold ${marketOverview.hkSentiment.fearGreed >= 55 ? 'text-emerald-400' : marketOverview.hkSentiment.fearGreed >= 45 ? 'text-blue-400' : 'text-rose-400'}`}>
-                    {marketOverview.hkSentiment.fearGreed != null ? marketOverview.hkSentiment.fearGreed : '—'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-slate-500">A/D:</span>
-                  <span className="text-emerald-400 font-bold">{marketOverview.hkBreadth.advancing || 0}/{marketOverview.hkBreadth.declining || 0}</span>
-                </div>
-              </div>
-              <div className="p-2 rounded bg-slate-800/50">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-sm">🇨🇳</span>
-                  <span className="text-[10px] font-bold text-white">CN</span>
-                </div>
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-slate-500">F&G:</span>
-                  <span className={`font-bold ${marketOverview.cnSentiment.fearGreed >= 55 ? 'text-emerald-400' : marketOverview.cnSentiment.fearGreed >= 45 ? 'text-blue-400' : 'text-rose-400'}`}>
-                    {marketOverview.cnSentiment.fearGreed != null ? marketOverview.cnSentiment.fearGreed : '—'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-slate-500">A/D:</span>
-                  <span className="text-emerald-400 font-bold">{marketOverview.cnBreadth.advancing || 0}/{marketOverview.cnBreadth.declining || 0}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ===== ROW 3: PLATFORM KPIs + PIPELINE ===== */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-        <KPI l="Strategies"  v={data.strategies.length} sub={`${data.strategies.filter(s => s.live_trades > 0).length} live`} hint="Total researcher strategies" />
-        <KPI l="Positions"   v={data.positions.length} sub={fmtK(totalPositionValue)} hint="Open positions market value" />
-        <KPI l="Open P&L"    v={fmtK(totalPnLOpen)} pos={totalPnLOpen >= 0} sub={totalPositionValue > 0 ? `${((totalPnLOpen/totalPositionValue)*100).toFixed(2)}%` : null} />
-        <KPI l="P&L Today"   v={fmtK(data.dailyPnl[0]?.pnl)} pos={data.dailyPnl[0]?.pnl >= 0} sub={data.dailyPnl[0]?.trades ? `${data.dailyPnl[0].trades} trades` : null} />
-        <KPI l="Win Rate"    v={`${((data.summary?.win_rate || 0) * 100).toFixed(1)}%`} pos={(data.summary?.win_rate || 0) > 0.5} sub={data.summary?.total_trades ? `${data.summary.total_trades} tr` : null} />
-        <KPI l="DB Latency"  v={healthData?.latency_ms != null ? `${healthData.latency_ms}ms` : '—'} sub={healthData?.status || 'unknown'} pos={healthData?.status === 'healthy'} />
-      </div>
-
-      {/* ===== ROW 4: PIPELINE + TOP STRATEGIES ===== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* Pipeline */}
-        {pipelineSummary && (
-          <div className="qr-surface overflow-hidden">
-            <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-              <span className="qr-label">Strategy Pipeline</span>
-              <button onClick={() => navigateToTab('strategies')} className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold">Manage →</button>
-            </div>
-            <div className="p-3">
-              <div className="flex items-center gap-1.5">
-                {[
-                  { key: 'experimental', label: 'EXPERIMENTAL', cls: 'qr-chip-slate' },
-                  { key: 'near_golden',  label: 'NEAR GOLDEN',  cls: 'qr-chip-blue'  },
-                  { key: 'golden',       label: 'GOLDEN',       cls: 'qr-chip-amber' },
-                  { key: 'deployed',     label: 'DEPLOYED',     cls: 'qr-chip-emerald'},
-                ].map((stage, i) => (
-                  <React.Fragment key={stage.key}>
-                    {i > 0 && <span className="text-slate-700 text-[10px]">→</span>}
-                    <div className={`flex-1 text-center py-2 px-1 rounded-md ${stage.cls.replace('qr-chip-', 'bg-').replace('emerald', 'emerald-500/10').replace('amber', 'amber-500/10').replace('blue', 'blue-500/10').replace('slate', 'slate-700/30')}`}>
-                      <div className="qr-num text-[15px] font-bold">{pipelineSummary[stage.key] || 0}</div>
-                      <div className="text-[8px] text-slate-500 uppercase tracking-wider mt-0.5">{stage.label}</div>
-                    </div>
-                  </React.Fragment>
-                ))}
-              </div>
-              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500">
-                <span>Total: <span className="qr-num text-slate-300">{pipelineSummary.total || 0}</span></span>
-                <span>Last DE update: <span className="qr-num text-slate-300">{fmtAge(pipelineSummary.last_update)}</span></span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Top strategies */}
-        {top5.length > 0 && (
-          <div className="qr-surface overflow-hidden">
-            <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-              <span className="qr-label">Top 5 Strategies</span>
-              <button onClick={() => navigateToTab('strategies')} className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold">All →</button>
-            </div>
-            <table className="w-full">
-              <tbody className="divide-y divide-white/[0.04]">
-                {top5.map(s => (
-                  <tr key={s.strategy_id || s.id} className="qr-tr-hover cursor-pointer" onClick={() => onSelectStrategy?.(s.strategy_id || s.id)}>
-                    <td className="py-1 px-3">
-                      <div className="font-bold text-white text-[11px] truncate max-w-[200px] hover:text-blue-300">{s.strategy_name || s.name || s.strategy_id}</div>
-                      <div className="text-[9px] text-slate-500">{s.asset_class || '—'} · {s.priority || ''}</div>
-                    </td>
-                    <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—'}</td>
-                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl(s.returns)}`}>{s.returns != null ? fmtPct(s.returns) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Quick action bar */}
-      <div className="qr-surface px-3 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        <span className="qr-label flex-shrink-0">QUICK</span>
-        <span className="qr-divider-v h-3" />
-        {[
-          { tab: 'research',      label: 'Markets',       IconComponent: Icon.Markets,    color: 'amber' },
-          { tab: 'research',        label: 'Signals',       IconComponent: Icon.Research,   color: 'blue' },
-          { tab: 'strategies',      label: 'Strategy Lab',  IconComponent: Icon.Lab,        color: 'blue' },
-          { tab: 'strategies',      label: 'Pipeline',      IconComponent: Icon.Strategies, color: 'amber' },
-          { tab: 'execution',       label: 'Portfolio',     IconComponent: Icon.Portfolio,  color: 'emerald' },
-        ].map(item => (
-          <button key={item.label} onClick={() => navigateToTab(item.tab)} className="qr-btn-ghost flex-shrink-0">
-            <item.IconComponent />
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// =================================================================
 // Main App
 // =================================================================
 export default function App() {
@@ -1297,7 +685,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [ibkrConnected, setIbkrConnected] = useState(false);
-  const [pipelineSummary, setPipelineSummary] = useState(null);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [latencyMs, setLatencyMs] = useState(null);
   const [healthData, setHealthData] = useState(null);
@@ -1377,7 +764,7 @@ export default function App() {
     const redirects = {
       'portfolio':        { tab: 'execution', sub: 'portfolio' },
       'performance':      { tab: 'strategies', sub: 'performance' },
-      'agentic_research': { tab: 'research', sub: 'agentic_research' },
+      'agentic_research': { tab: 'research', sub: 'signals' },
       'paper_strategies': { tab: 'execution', sub: 'paper_strategies' },
     };
     const r = redirects[currentTab];
@@ -1431,8 +818,8 @@ export default function App() {
   const subTabConfig = useMemo(() => ({
     research: [
       { id: 'markets',          label: 'Markets',     short: 'Mkt',  IconComponent: Icon.Markets,     key: 'q' },
-      { id: 'research',         label: 'Signals',     short: 'Sig',  IconComponent: Icon.Research,    key: 'w' },
-      { id: 'agentic_research', label: 'Agents',      short: 'Agt',  IconComponent: Icon.Agents,      key: 'e' },
+      { id: 'research',         label: 'Screener',    short: 'Scr',  IconComponent: Icon.Research,    key: 'w' },
+      { id: 'signals',          label: 'Signals',     short: 'Sig',  IconComponent: Icon.Strategies,  key: 'e' },
     ],
     strategies: [
       { id: 'lab',              label: 'Lab',         short: 'Lab',  IconComponent: Icon.Lab,         key: 'q' },
@@ -1498,17 +885,6 @@ export default function App() {
     };
     fetchMode();
     const id = setInterval(fetchMode, 30000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Pipeline summary
-  useEffect(() => {
-    const fetch = async () => {
-      const ps = await api.get('/api/strategies/pipeline-summary');
-      if (ps) setPipelineSummary(ps);
-    };
-    fetch();
-    const id = setInterval(fetch, 60000);
     return () => clearInterval(id);
   }, []);
 
@@ -1686,7 +1062,7 @@ export default function App() {
           </div>
         )}
 
-        {currentTab === 'command'          && <CommandCenter data={data} pipelineSummary={pipelineSummary} navigateToTab={navigateToTab} healthData={healthData} onSelectStrategy={openStrategyDetail} />}
+        {currentTab === 'command'          && <CommandCenter data={data} navigateToTab={navigateToTab} onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'settings'         && <SettingsTab healthData={healthData} latencyMs={latencyMs} wsConnected={wsConnected} />}
 
         {/* Research tab — find trade ideas */}
@@ -1694,7 +1070,7 @@ export default function App() {
           <>
             {activeSubTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
             {activeSubTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
-            {activeSubTab === 'agentic_research' && <AgenticResearchPage />}
+            {activeSubTab === 'signals'          && <SignalsTab onOpenStrategy={openStrategyDetail} />}
           </>
         )}
 
@@ -1710,8 +1086,8 @@ export default function App() {
         {/* Execution tab — track positions & trades */}
         {currentTab === 'execution' && (
           <>
-            {activeSubTab === 'portfolio'        && <PortfolioTab data={data} />}
-            {activeSubTab === 'paper_strategies' && <PaperStrategiesPage />}
+            {activeSubTab === 'portfolio'        && <PortfolioTab data={data} globalMode={executionMode} />}
+            {activeSubTab === 'paper_strategies' && <PaperStrategiesPage globalMode={executionMode} />}
             {activeSubTab === 'live_ops'         && <LiveOpsPanel onSelectStrategy={openStrategyDetail} />}
           </>
         )}

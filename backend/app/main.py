@@ -21,6 +21,7 @@ import logging
 # Route modules
 from app.routes import market, stocks, fx, crypto, strategies, positions
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex, backtest, agents
+from app.routes import command, markets_v2, macro, signals, settings as settings_routes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,6 +106,11 @@ app.include_router(metadata.router)
 app.include_router(hkex.router)
 app.include_router(backtest.router)
 app.include_router(agents.router)
+app.include_router(command.router)
+app.include_router(markets_v2.router)
+app.include_router(macro.router)
+app.include_router(signals.router)
+app.include_router(settings_routes.router)
 
 # Include stock detail router (conditional)
 if HAS_STOCK_DETAIL_API and stock_detail_router:
@@ -975,81 +981,6 @@ def get_market_data(tickers: str = "", db: Session = Depends(get_db)):
         "count": len(results),
         "ibkr_connected": ib_connected
     }
-
-
-@app.get("/api/settings")
-def get_platform_settings(db: Session = Depends(get_db)):
-    """Get all platform settings from gold.platform_settings"""
-    try:
-        result = db.execute(text("""
-            SELECT key, value FROM gold.platform_settings
-        """)).fetchall()
-
-        settings = {}
-        for row in result:
-            key = row.key
-            val = row.value
-            # Try to parse numeric values
-            try:
-                val = float(val)
-                if val == int(val):
-                    val = int(val)
-            except (ValueError, TypeError):
-                pass
-            settings[key] = val
-
-        # Map stored keys to frontend field names
-        return {
-            "defaultCapital": settings.get("simulation_capital", 100000),
-            "maxPositionsPerStrategy": settings.get("max_positions_per_strategy", 4),
-            "tradeSizePercent": settings.get("trade_size_percent", 25),
-            "autoRefreshInterval": settings.get("auto_refresh_interval", 30),
-            "priceAlerts": settings.get("price_alerts", "true") == "true" if isinstance(settings.get("price_alerts"), str) else bool(settings.get("price_alerts", True)),
-            "emailNotifications": settings.get("email_notifications", "false") == "true" if isinstance(settings.get("email_notifications"), str) else bool(settings.get("email_notifications", False)),
-        }
-    except Exception as e:
-        logger.error(f"Settings fetch error: {e}")
-        return {
-            "defaultCapital": 100000,
-            "maxPositionsPerStrategy": 4,
-            "tradeSizePercent": 25,
-            "autoRefreshInterval": 30,
-            "priceAlerts": True,
-            "emailNotifications": False,
-        }
-
-
-@app.post("/api/settings")
-def save_platform_settings(payload: dict, db: Session = Depends(get_db)):
-    """Save platform settings to gold.platform_settings"""
-    try:
-        # Map frontend field names to storage keys
-        field_map = {
-            "defaultCapital": "simulation_capital",
-            "maxPositionsPerStrategy": "max_positions_per_strategy",
-            "tradeSizePercent": "trade_size_percent",
-            "autoRefreshInterval": "auto_refresh_interval",
-            "priceAlerts": "price_alerts",
-            "emailNotifications": "email_notifications",
-        }
-
-        for frontend_key, db_key in field_map.items():
-            if frontend_key in payload:
-                value = str(payload[frontend_key]).lower() if isinstance(payload[frontend_key], bool) else str(payload[frontend_key])
-                db.execute(text("""
-                    INSERT INTO gold.platform_settings (key, value, updated_at)
-                    VALUES (:key, :value, NOW())
-                    ON CONFLICT (key) DO UPDATE SET
-                        value = EXCLUDED.value,
-                        updated_at = NOW()
-                """), {"key": db_key, "value": value})
-
-        db.commit()
-        return {"success": True, "message": "Settings saved"}
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Settings save error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/sync/status")
