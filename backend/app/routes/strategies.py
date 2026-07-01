@@ -175,7 +175,15 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                     })
         except Exception as e:
             logger.error(f"Top signals fetch error: {e}")
-        
+
+        # Signal-family linkage — unifies Research vocabulary with the strategy registry (redesign addition)
+        family_by_strategy = {}
+        families = safe_query(db, """
+            SELECT family_key, strategy_id FROM gold.signal_families WHERE strategy_id IS NOT NULL
+        """, {}, label="route_signal_families")
+        for fam in families:
+            family_by_strategy[fam.strategy_id] = fam.family_key
+
         strategies = []
         for row in result:
             tickers = row.universe_tickers
@@ -210,6 +218,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "version": None,
                 "top_tickers": top_tickers,
                 "yearly_backtest": yearly_data,
+                "signal_family_key": family_by_strategy.get(sid),
             })
         # Also fetch from strategy_templates if they have different strategies
         template_strategies = []
@@ -239,6 +248,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                     "version": None,
                     "top_tickers": [],
                     "yearly_backtest": {},
+                    "signal_family_key": None,
                 })
         except Exception as e:
             logger.error(f"Template fetch error: {e}")
@@ -275,6 +285,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                         "version": None,
                         "top_tickers": [],
                         "yearly_backtest": {},
+                        "signal_family_key": family_by_strategy.get(q.strategy_id),
                     })
         except Exception as e:
             logger.error(f"Quant fetch error: {e}")

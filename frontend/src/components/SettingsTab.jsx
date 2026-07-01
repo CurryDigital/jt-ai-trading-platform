@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
 import { AuditLog } from './AuditLog';
-import { marketClock, marketStatus, fmtAge } from '../utils';
+import { marketClock, marketStatus } from '../utils';
 
 // Enhanced Settings Tab with Configuration Management + System Health
 export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
@@ -15,6 +15,8 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
     priceAlerts: true,
     emailNotifications: false
   });
+  const [riskConfig, setRiskConfig] = useState({ max_drawdown: '15', min_sharpe_oos: '0.8', high_turnover: '500', low_trade_count: '20' });
+  const [notifConfig, setNotifConfig] = useState({ telegram_token: '', telegram_chat_id: '', fills: true, demotes: true, stalls: true, promotions: false });
   const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -41,9 +43,21 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       const res = await fetch('/api/settings');
       if (res.ok) {
         const data = await res.json();
-        setPlatformSettings(prev => ({ ...prev, ...data }));
+        setPlatformSettings(prev => ({ ...prev, ...(data.trading_config || {}) }));
+        setRiskConfig(prev => ({ ...prev, ...(data.risk_config || {}) }));
+        setNotifConfig(prev => ({ ...prev, ...(data.notifications || {}) }));
       }
     } catch (e) { console.error('Failed to fetch settings:', e); }
+  };
+
+  const putSettingsSection = async (section, payload) => {
+    try {
+      await fetch(`/api/settings/${section}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) { console.error(`Failed to save ${section}:`, e); }
   };
 
   const fetchSyncStatus = async () => {
@@ -81,11 +95,9 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(platformSettings)
-      });
+      if (activeSection === 'risk') await putSettingsSection('risk_config', riskConfig);
+      else if (activeSection === 'notif') await putSettingsSection('notifications', notifConfig);
+      else await putSettingsSection('trading_config', platformSettings);
     } catch (e) { console.error('Failed to save settings:', e); }
     finally { setSaving(false); }
   };
@@ -119,6 +131,8 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   const sections = [
     { id: 'ibkr', label: '🔗 IBKR Connection', icon: '🔗' },
     { id: 'trading', label: '💰 Trading Config', icon: '💰' },
+    { id: 'risk', label: '⚠️ Risk Config', icon: '⚠️' },
+    { id: 'notif', label: '🔔 Notifications', icon: '🔔' },
     { id: 'sync', label: '🔄 Data Sync', icon: '🔄' },
     { id: 'data', label: '📊 Data Sources', icon: '📊' },
     { id: 'health', label: '🩺 System Health', icon: '🩺' },
@@ -353,6 +367,75 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* RISK CONFIG — promotion & demotion thresholds */}
+      {activeSection === 'risk' && (
+        <div className="space-y-4">
+          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+            <h3 className="text-sm font-black text-white uppercase tracking-wider mb-1">Risk Thresholds</h3>
+            <p className="text-xs text-slate-500 mb-4">Breaching any threshold flags a deployed strategy for auto-demotion.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[
+                ['max_drawdown', 'Max Drawdown (%)'],
+                ['min_sharpe_oos', 'Min Sharpe (OOS)'],
+                ['high_turnover', 'High Turnover (%/yr)'],
+                ['low_trade_count', 'Low Trade Count'],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <label className="text-xs text-slate-400 block mb-2">{label}</label>
+                  <input
+                    type="text"
+                    value={riskConfig[key]}
+                    onChange={(e) => setRiskConfig({ ...riskConfig, [key]: e.target.value })}
+                    className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFICATIONS — Telegram alerts */}
+      {activeSection === 'notif' && (
+        <div className="space-y-4">
+          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+            <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Telegram Alerts</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="text-xs text-slate-400 block mb-2">Bot Token</label>
+                <input type="password" value={notifConfig.telegram_token}
+                  onChange={(e) => setNotifConfig({ ...notifConfig, telegram_token: e.target.value })}
+                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-2">Chat ID</label>
+                <input type="text" value={notifConfig.telegram_chat_id}
+                  onChange={(e) => setNotifConfig({ ...notifConfig, telegram_chat_id: e.target.value })}
+                  className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono text-white" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              {[
+                ['fills', 'Order fills', 'Every live execution'],
+                ['demotes', 'Auto-demotions', 'Strategy demoted on risk breach'],
+                ['stalls', 'Stuck workflows', 'Agent / pipeline stalls'],
+                ['promotions', 'Promotions ready', 'Strategy passed all QA gates'],
+              ].map(([key, label, hint]) => (
+                <div key={key} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                  <div><span className="text-sm font-medium text-white">{label}</span><p className="text-xs text-slate-500">{hint}</p></div>
+                  <button
+                    onClick={() => setNotifConfig({ ...notifConfig, [key]: !notifConfig[key] })}
+                    className={`w-12 h-6 rounded-full transition-all ${notifConfig[key] ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                  >
+                    <div className={`w-5 h-5 rounded-full bg-white transition-all ${notifConfig[key] ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
