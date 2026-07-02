@@ -15,7 +15,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError, OperationalError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import logging
 
 # Route modules
@@ -7022,6 +7023,23 @@ def get_hkex_ipo_detail(ticker: str, db: Session = Depends(get_db)):
         } if performance else None
     }
 
+
+# Static SPA hosting from the production frontend build
+# main.py is at backend/app/main.py, so go up two dirs from backend/app to workspace root, then into frontend/dist.
+_FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "frontend", "dist")
+if os.path.isdir(_FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_FRONTEND_DIST, "assets")), name="assets")
+
+    @app.get("/")
+    def serve_index():
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+
+    @app.get("/{path:path}")
+    def serve_spa(path: str):
+        # API routes are handled first; unknown paths fall back to index.html for client-side routing
+        if path.startswith("api/") or path.startswith("ws/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn
