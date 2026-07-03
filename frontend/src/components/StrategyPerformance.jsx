@@ -1481,27 +1481,24 @@ export const StrategyPerformance = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
-              <span className="text-2xl">📊</span>
-              Trading Performance
-            </h2>
-            <span className={`text-[10px] px-2 py-1 rounded font-bold ${
-              executionMode === 'SIMULATION' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-              executionMode === 'PAPER_TRADING' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-              'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-sm font-bold text-white">Performance</h2>
+            <span className={`qr-chip ${
+              executionMode === 'SIMULATION' ? 'qr-chip-slate' :
+              executionMode === 'PAPER_TRADING' ? 'qr-chip-amber' :
+              'qr-chip-rose'
             }`}>
-              {executionMode === 'SIMULATION' ? '🧪 SIMULATION' :
-               executionMode === 'PAPER_TRADING' ? '📝 PAPER TRADING' :
-               '💰 LIVE TRADING'}
+              {executionMode === 'SIMULATION' ? 'SIMULATION' :
+               executionMode === 'PAPER_TRADING' ? 'PAPER TRADING' :
+               'LIVE TRADING'}
             </span>
           </div>
-          <p className="text-sm text-slate-400 mt-1">
-            {executionMode === 'SIMULATION' 
+          <p className="text-[10px] text-slate-500 mt-1">
+            {executionMode === 'SIMULATION'
               ? 'Trades are simulated (database only)'
               : executionMode === 'PAPER_TRADING'
               ? 'Trades execute in IBKR Paper Account'
-              : '⚠️ Trades execute with REAL MONEY'}
+              : 'Trades execute with real money'}
           </p>
         </div>
 
@@ -1511,21 +1508,21 @@ export const StrategyPerformance = () => {
               Prices: {lastPriceUpdate.toLocaleTimeString()}
             </span>
           )}
-          
+
           {/* Manual Refresh Button */}
           <button
             onClick={fetchPrices}
-            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold rounded-lg transition-colors"
+            className="qr-btn-ghost"
             title="Refresh prices now"
           >
-            🔄 Refresh
+            Refresh
           </button>
-          
+
           {/* Time Period Selector */}
           <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
             {['1W', '1M', '3M', 'YTD', 'ALL'].map((period) => (
-              <button 
-                key={period} 
+              <button
+                key={period}
                 onClick={() => setTimePeriod(period)}
                 className={`px-3 py-1.5 rounded text-[10px] font-bold transition-all ${
                   timePeriod === period ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'
