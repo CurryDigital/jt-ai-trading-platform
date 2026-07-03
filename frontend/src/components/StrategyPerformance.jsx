@@ -1958,7 +1958,7 @@ export const StrategyPerformance = () => {
           <div className="qr-surface p-4">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wider">🎯 Strategy Scorecard</h3>
+                <h3 className="text-[13px] font-bold text-white">Strategy Scorecard</h3>
                 <p className="text-xs text-slate-400 mt-1">Performance metrics to decide: PAUSE / REFINE / CONTINUE</p>
               </div>
               <div className="flex items-center gap-2">
@@ -2255,7 +2255,7 @@ export const StrategyPerformance = () => {
           )}
 
           <div className="space-y-4">
-            <h3 className="text-sm font-black text-white uppercase tracking-wider">Strategy Performance (Click for Details)</h3>
+            <h3 className="text-[13px] font-bold text-white">Strategy Performance (Click for Details)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(groupedByStrategy).map(([strategyId, data]) => (
                 <StrategySummary 
@@ -2274,7 +2274,7 @@ export const StrategyPerformance = () => {
       {/* Positions View */}
       {activeView === 'positions' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-black text-white uppercase tracking-wider">All Positions (Click for Details)</h3>
+          <h3 className="text-[13px] font-bold text-white">All Positions (Click for Details)</h3>
           
           {paperStrategies.length === 0 ? (
             <div className="text-center py-12 text-slate-500">
@@ -2301,7 +2301,7 @@ export const StrategyPerformance = () => {
       {activeView === 'trades' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black text-white uppercase tracking-wider">Trade History</h3>
+            <h3 className="text-[13px] font-bold text-white">Trade History</h3>
             <span className="text-xs text-slate-500">Last {allTrades.length} trades</span>
           </div>
           
