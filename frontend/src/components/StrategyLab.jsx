@@ -223,35 +223,32 @@ const StrategyLab = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-black text-white flex items-center gap-2">
-            <span className="text-2xl">🧪</span>
-            Strategy Lab
-          </h2>
-          <p className="text-sm text-slate-400 mt-1">
-            {filteredStrategies.length} strategies • Real backtest data only
+          <h2 className="text-sm font-bold text-white">Strategy Lab</h2>
+          <p className="text-[10px] text-slate-500 mt-0.5">
+            {filteredStrategies.length} strategies · real backtest data only
           </p>
         </div>
-        
+
         <div className="flex items-center gap-2">
-          <button 
+          <button
             onClick={() => { fetchStrategies(true); fetchLiveStats(); }}
-            className="px-4 py-2 bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold rounded-lg"
+            className="qr-btn-ghost"
           >
-            🔄 Refresh
+            Refresh
           </button>
         </div>
       </div>
 
       {/* Asset Class Filter Tabs */}
-      <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/50 border border-white/5 overflow-x-auto">
+      <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.05] overflow-x-auto w-fit">
         {assetClasses.map(ac => (
           <button
             key={ac.id}
             onClick={() => setActiveAssetClass(ac.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-bold whitespace-nowrap transition-colors ${
               activeAssetClass === ac.id
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
+                ? 'bg-white/[0.08] text-white'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <span>{ac.icon}</span>
