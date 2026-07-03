@@ -331,22 +331,20 @@ export const IbkrGatewayTester = () => {
   };
 
   return (
-    <div className="glass rounded-[2rem] p-8 border-white/10 shadow-2xl font-outfit"
+    <div className="qr-surface p-4"
     >
       {/* Header */}
-      <div className="flex items-center justify-between mb-8"
+      <div className="flex items-center justify-between mb-4"
       >
         <div className="space-y-1"
         >
-          <div className="flex items-center gap-3"
+          <div className="flex items-center gap-2"
           >
-            <span className="text-2xl"
-            >🎯</span>
-            <h3 className="text-xl font-black text-white uppercase italic tracking-tight font-outfit"
+            <h3 className="text-[13px] font-bold text-white"
             >
               IBKR Gateway Diagnostics
             </h3>
-            <span className={`text-[10px] px-2 py-1 rounded font-bold font-outfit ${
+            <span className={`text-[10px] px-2 py-1 rounded font-bold ${
               executionMode === 'SIMULATION' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
               executionMode === 'PAPER_TRADING' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
               'bg-rose-500/20 text-rose-400 border border-rose-500/30'
