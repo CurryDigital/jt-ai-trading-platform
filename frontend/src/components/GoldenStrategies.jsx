@@ -985,53 +985,51 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
   }
 
   return (
-    <div className="golden-strategies space-y-4">
+    <div className="golden-strategies space-y-3">
       {/* Tab Navigation */}
-      <div className="flex items-center gap-2 mb-6 bg-slate-900/50 p-1 rounded-lg">
+      <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.05] w-fit">
         <button
           onClick={() => setActiveTab('deploy')}
-          className={`flex-1 py-2 px-4 rounded-md text-sm font-bold transition-all ${
-            activeTab === 'deploy' 
-              ? 'bg-blue-500 text-white' 
-              : 'text-slate-400 hover:text-white'
+          className={`px-3 py-1.5 rounded text-[10px] font-bold transition-colors ${
+            activeTab === 'deploy'
+              ? 'bg-white/[0.08] text-white'
+              : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          📋 Deployed ({Object.keys(groupedPaperStrategies).length})
+          Deployed <span className="qr-num opacity-70">{Object.keys(groupedPaperStrategies).length}</span>
         </button>
         <button
           onClick={() => setActiveTab('available')}
-          className={`flex-1 py-2 px-4 rounded-md text-sm font-bold transition-all ${
-            activeTab === 'available' 
-              ? 'bg-blue-500 text-white' 
-              : 'text-slate-400 hover:text-white'
+          className={`px-3 py-1.5 rounded text-[10px] font-bold transition-colors ${
+            activeTab === 'available'
+              ? 'bg-white/[0.08] text-white'
+              : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          🏆 Available ({strategies.length})
+          Available <span className="qr-num opacity-70">{strategies.length}</span>
         </button>
       </div>
 
       {/* Pipeline Stage Summary */}
       {pipelineSummary && (
-        <div className="flex items-center gap-1 p-1 bg-slate-900/50 rounded-xl border border-white/5">
-          {[
-            { key: 'experimental', label: 'Experimental', color: 'slate', icon: '🧪' },
-            { key: 'near_golden', label: 'Near Golden', color: 'blue', icon: '🔵' },
-            { key: 'golden', label: 'Golden', color: 'amber', icon: '⭐' },
-            { key: 'deployed', label: 'Deployed', color: 'emerald', icon: '🚀' },
-          ].map((stage, i) => (
-            <React.Fragment key={stage.key}>
-              {i > 0 && <span className="text-slate-700 text-xs">→</span>}
-              <div className={`flex-1 text-center py-2 px-2 rounded-lg transition-all ${
-                stage.key === 'experimental' ? 'bg-slate-800/50' :
-                stage.key === 'near_golden' ? 'bg-blue-500/10' :
-                stage.key === 'golden' ? 'bg-amber-500/10' :
-                'bg-emerald-500/10'
-              }`}>
-                <div className="text-lg font-bold text-white">{pipelineSummary[stage.key] || 0}</div>
-                <div className="text-[9px] text-slate-400 uppercase tracking-wider">{stage.label}</div>
-              </div>
-            </React.Fragment>
-          ))}
+        <div className="qr-surface overflow-hidden">
+          <div className="px-3 py-1.5 border-b border-white/[0.05]"><span className="qr-label">Strategy Pipeline</span></div>
+          <div className="flex items-center gap-1.5 p-3">
+            {[
+              { key: 'experimental', label: 'Experimental', bg: 'bg-slate-500/10' },
+              { key: 'near_golden', label: 'Near Golden', bg: 'bg-blue-500/10' },
+              { key: 'golden', label: 'Golden', bg: 'bg-amber-500/10' },
+              { key: 'deployed', label: 'Deployed', bg: 'bg-emerald-500/10' },
+            ].map((stage, i) => (
+              <React.Fragment key={stage.key}>
+                {i > 0 && <span className="text-slate-600 text-[11px]">→</span>}
+                <div className={`flex-1 text-center py-2 px-1 rounded ${stage.bg}`}>
+                  <div className="font-mono text-base font-bold text-white">{pipelineSummary[stage.key] || 0}</div>
+                  <div className="text-[8px] uppercase tracking-wide text-slate-500 mt-0.5">{stage.label}</div>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       )}
 
