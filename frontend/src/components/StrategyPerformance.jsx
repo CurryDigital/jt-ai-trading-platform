@@ -493,14 +493,14 @@ const PositionKPIDetail = ({ position, priceData, onClose }) => {
           {/* Entry Signal Gauge for Pending Positions */}
           {!hasTrades && (
             <div>
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Entry Signal</h3>
+              <h3 className="qr-label mb-3">Entry Signal</h3>
               <EntrySignalGauge position={position} strategyId={position.strategy_id} />
             </div>
           )}
           
           {/* Capital Allocation */}
           <div>
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Capital Allocation</h3>
+            <h3 className="qr-label mb-3">Capital Allocation</h3>
             <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
               <div>
                 <div className="flex justify-between text-xs mb-1">
@@ -532,7 +532,7 @@ const PositionKPIDetail = ({ position, priceData, onClose }) => {
           {/* Performance KPIs */}
           {hasTrades && (
             <div>
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Performance KPIs</h3>
+              <h3 className="qr-label mb-3">Performance KPIs</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-slate-800/50 rounded-xl p-3">
                   <span className="text-[10px] text-slate-500 uppercase block">Total Trades</span>
@@ -597,7 +597,7 @@ const PositionKPIDetail = ({ position, priceData, onClose }) => {
           {/* Position Details */}
           {hasTrades && position.entry_price && (
             <div>
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Position Details</h3>
+              <h3 className="qr-label mb-3">Position Details</h3>
               <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-sm text-slate-400">Entry Price</span>
@@ -1072,7 +1072,7 @@ const StrategySummary = ({ strategy, positions, priceData, onClick }) => {
   return (
     <button 
       onClick={onClick}
-      className="w-full text-left bg-slate-900/50 border border-white/10 rounded-xl p-4 hover:border-blue-500/50 hover:bg-slate-800/50 transition-all"
+      className="w-full text-left qr-surface p-4 hover:border-blue-500/50 hover:bg-slate-800/50 transition-all"
     >
       <div className="flex items-center justify-between mb-3">
         <div>
@@ -1552,19 +1552,19 @@ export const StrategyPerformance = () => {
         <>
           {/* Top Stats Row */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <span className="text-xs text-slate-500 uppercase">Total Positions</span>
               <p className="text-2xl font-bold text-white mt-1">{stats.totalPositions}</p>
               <p className="text-xs text-emerald-400 mt-1">{stats.activePositions} active • {stats.pendingPositions} pending</p>
             </div>
 
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <span className="text-xs text-slate-500 uppercase">Total Trades</span>
               <p className="text-2xl font-bold text-white mt-1">{stats.totalTrades}</p>
               <p className="text-xs text-slate-500 mt-1">Across all strategies</p>
             </div>
 
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <span className="text-xs text-slate-500 uppercase">Total P&L</span>
               <p className={`text-2xl font-bold mt-1 ${stats.totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {stats.totalPnL >= 0 ? '+' : ''}${stats.totalPnL.toLocaleString(undefined, {maximumFractionDigits: 0})}
@@ -1572,7 +1572,7 @@ export const StrategyPerformance = () => {
               <p className="text-xs text-slate-500 mt-1">Realized + Unrealized</p>
             </div>
 
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <span className="text-xs text-slate-500 uppercase">Unrealized P&L</span>
               <p className={`text-2xl font-bold mt-1 ${stats.totalUnrealizedPnL >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
                 {stats.totalUnrealizedPnL >= 0 ? '+' : ''}${stats.totalUnrealizedPnL.toLocaleString(undefined, {maximumFractionDigits: 0})}
@@ -1580,7 +1580,7 @@ export const StrategyPerformance = () => {
               <p className="text-xs text-slate-500 mt-1">Open positions</p>
             </div>
 
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <span className="text-xs text-slate-500 uppercase">Strategy Win Rate</span>
               <p className={`text-2xl font-bold mt-1 ${stats.overallWinRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
                 {stats.overallWinRate.toFixed(0)}%
@@ -1590,7 +1590,7 @@ export const StrategyPerformance = () => {
           </div>
 
           {/* Capital Deployment Status */}
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+          <div className="qr-surface p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-bold text-slate-500 uppercase">Capital Deployment</h3>
               <span className={`text-[10px] px-2 py-1 rounded ${
@@ -1637,7 +1637,7 @@ export const StrategyPerformance = () => {
           </div>
 
           {/* Account Summary - Cash + Portfolio Value */}
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+          <div className="qr-surface p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-bold text-slate-500 uppercase">Account Summary</h3>
               <span className="text-[10px] text-slate-500">
@@ -1700,7 +1700,7 @@ export const StrategyPerformance = () => {
           {/* Daily P&L Chart & Risk Metrics */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Daily P&L Chart */}
-            <div className="lg:col-span-2 bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="lg:col-span-2 qr-surface p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xs font-bold text-slate-500 uppercase">Daily P&L</h3>
                 <span className="text-[10px] text-slate-500">{dailyPnL.length} days</span>
@@ -1735,7 +1735,7 @@ export const StrategyPerformance = () => {
             </div>
             
             {/* Risk Metrics */}
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4 space-y-4">
+            <div className="qr-surface p-4 space-y-4">
               <h3 className="text-xs font-bold text-slate-500 uppercase">Risk Metrics</h3>
               
               {/* Drawdown Gauge */}
@@ -1792,7 +1792,7 @@ export const StrategyPerformance = () => {
           {/* NEW: Strategy Attribution & Analytics */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Strategy Attribution Pie Chart */}
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <h3 className="text-xs font-bold text-slate-500 uppercase mb-4">Strategy P&L Attribution</h3>
               {stats.strategyAttribution.length > 0 ? (
                 <div className="space-y-3">
@@ -1828,7 +1828,7 @@ export const StrategyPerformance = () => {
             </div>
 
             {/* Trade Distribution by Asset Class */}
-            <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+            <div className="qr-surface p-4">
               <h3 className="text-xs font-bold text-slate-500 uppercase mb-4">Portfolio by Asset Class</h3>
               {stats.assetDistribution.length > 0 ? (
                 <div className="space-y-4">
@@ -1879,7 +1879,7 @@ export const StrategyPerformance = () => {
           </div>
 
           {/* NEW: Win/Loss Table by Strategy */}
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+          <div className="qr-surface p-4">
             <h3 className="text-xs font-bold text-slate-500 uppercase mb-4">Win/Loss by Strategy</h3>
             {stats.strategyAttribution.filter(s => s.totalPositions > 0).length > 0 ? (
               <div className="overflow-x-auto">
@@ -1924,7 +1924,7 @@ export const StrategyPerformance = () => {
           </div>
 
           {/* NEW: Recent Activity Feed */}
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+          <div className="qr-surface p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-bold text-slate-500 uppercase">Recent Activity</h3>
               <span className="text-[10px] text-slate-500">Last {Math.min(allTrades.length, 10)} trades</span>
@@ -1955,10 +1955,10 @@ export const StrategyPerformance = () => {
           </div>
 
           {/* NEW: Strategy Scorecard - Primary Focus */}
-          <div className="bg-slate-900/50 border border-white/10 rounded-xl p-4">
+          <div className="qr-surface p-4">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wider">🎯 Strategy Scorecard</h3>
+                <h3 className="text-[13px] font-bold text-white">Strategy Scorecard</h3>
                 <p className="text-xs text-slate-400 mt-1">Performance metrics to decide: PAUSE / REFINE / CONTINUE</p>
               </div>
               <div className="flex items-center gap-2">
@@ -2255,7 +2255,7 @@ export const StrategyPerformance = () => {
           )}
 
           <div className="space-y-4">
-            <h3 className="text-sm font-black text-white uppercase tracking-wider">Strategy Performance (Click for Details)</h3>
+            <h3 className="text-[13px] font-bold text-white">Strategy Performance (Click for Details)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(groupedByStrategy).map(([strategyId, data]) => (
                 <StrategySummary 
@@ -2274,7 +2274,7 @@ export const StrategyPerformance = () => {
       {/* Positions View */}
       {activeView === 'positions' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-black text-white uppercase tracking-wider">All Positions (Click for Details)</h3>
+          <h3 className="text-[13px] font-bold text-white">All Positions (Click for Details)</h3>
           
           {paperStrategies.length === 0 ? (
             <div className="text-center py-12 text-slate-500">
@@ -2301,7 +2301,7 @@ export const StrategyPerformance = () => {
       {activeView === 'trades' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black text-white uppercase tracking-wider">Trade History</h3>
+            <h3 className="text-[13px] font-bold text-white">Trade History</h3>
             <span className="text-xs text-slate-500">Last {allTrades.length} trades</span>
           </div>
           

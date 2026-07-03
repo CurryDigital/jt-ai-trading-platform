@@ -1133,13 +1133,10 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
       {activeTab === 'available' && (
         <>
           {/* Multi-Deploy Header */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="text-xl font-black text-white flex items-center gap-2">
-                <span className="text-2xl">🏆</span>
-                {strategies.length} JT-Ready Strategies
-              </h2>
-              <p className="text-sm text-slate-400 mt-1">Research-validated strategies across US, HK, CN, SG markets</p>
+              <h2 className="text-sm font-bold text-white">{strategies.length} JT-Ready Strategies</h2>
+              <p className="text-[10px] text-slate-500 mt-0.5">Research-validated strategies across US, HK, CN, SG markets</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1147,14 +1144,14 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                 <button
                   onClick={handleMultiDeploy}
                   disabled={deploying === 'multi'}
-                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-sm font-bold rounded-lg"
+                  className="qr-btn-primary disabled:opacity-40"
                 >
-                  {deploying === 'multi' ? 'Deploying...' : `Deploy ${selectedStrategies.size} Selected`}
+                  {deploying === 'multi' ? 'Deploying…' : `Deploy ${selectedStrategies.size} Selected`}
                 </button>
               )}
               <button
                 onClick={toggleAll}
-                className="px-3 py-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg"
+                className="qr-btn-ghost"
               >
                 {selectedStrategies.size === strategies.length ? 'Deselect All' : 'Select All'}
               </button>
@@ -1176,7 +1173,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                 <button
                   key={p.key}
                   onClick={() => setFilterPriority(p.key)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
                     filterPriority === p.key
                       ? p.key === 'ALL' ? 'bg-white/10 text-white ring-1 ring-white/20' : p.badgeClass
                       : 'text-slate-500 hover:text-slate-300'
@@ -1213,7 +1210,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
                 <button
                   key={s.key}
                   onClick={() => setFilterStatus(s.key)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  className={`px-2.5 py-1 rounded text-[10px] font-bold transition-colors ${
                     filterStatus === s.key
                       ? colorClasses[s.color]
                       : 'text-slate-500 hover:text-slate-300'
@@ -1386,9 +1383,9 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
               const actualStats = strategyStats[strategy.id];
               
               return (
-                <div key={strategy.id} 
-                  className={`rounded-xl border transition-all ${
-                    isSelected ? 'border-emerald-500 bg-emerald-500/5' : 'border-white/10 bg-slate-900/50'
+                <div key={strategy.id}
+                  className={`qr-surface transition-colors ${
+                    isSelected ? 'border-emerald-500 bg-emerald-500/5' : ''
                   }`}
                 >
                   <div className="p-4">
@@ -1620,7 +1617,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
 
                       {/* Universe */}
                       <div className="mb-4">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        <h4 className="qr-label mb-2">
                           Asset Universe ({strategy.universe_count || strategy.universe?.length || 0})
                         </h4>
                         <div className="flex flex-wrap gap-1">

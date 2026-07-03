@@ -225,7 +225,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           </div>
 
           {/* Capital Settings */}
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Capital Allocation</h3>
             
             <div className="space-y-4">
@@ -291,7 +291,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           </div>
 
           {/* Risk Settings */}
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Risk Management</h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -380,7 +380,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       {/* RISK CONFIG — promotion & demotion thresholds */}
       {activeSection === 'risk' && (
         <div className="space-y-4">
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-1">Risk Thresholds</h3>
             <p className="text-xs text-slate-500 mb-4">Breaching any threshold flags a deployed strategy for auto-demotion.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -408,7 +408,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       {/* NOTIFICATIONS — Telegram alerts */}
       {activeSection === 'notif' && (
         <div className="space-y-4">
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Telegram Alerts</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
@@ -449,7 +449,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       {/* DATA SYNC */}
       {activeSection === 'sync' && (
         <div className="space-y-4">
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Data Synchronization Status</h3>
             
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -488,7 +488,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
             </div>
           </div>
 
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Auto Refresh Settings</h3>
             
             <div>
@@ -546,19 +546,19 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           {/* Summary Stats */}
           {dataSources?.summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="p-4 bg-slate-900/50 border border-white/10 rounded-xl text-center">
+              <div className="p-4 qr-surface text-center">
                 <span className="text-2xl font-bold text-white">{dataSources.summary.total_feeds}</span>
                 <span className="text-xs text-slate-500 block">Total Feeds</span>
               </div>
-              <div className="p-4 bg-slate-900/50 border border-white/10 rounded-xl text-center">
+              <div className="p-4 qr-surface text-center">
                 <span className="text-2xl font-bold text-blue-400">{dataSources.summary.ibkr_primary}</span>
                 <span className="text-xs text-slate-500 block">IBKR Primary</span>
               </div>
-              <div className="p-4 bg-slate-900/50 border border-white/10 rounded-xl text-center">
+              <div className="p-4 qr-surface text-center">
                 <span className="text-2xl font-bold text-purple-400">{dataSources.summary.yahoo_primary}</span>
                 <span className="text-xs text-slate-500 block">Yahoo Primary</span>
               </div>
-              <div className="p-4 bg-slate-900/50 border border-white/10 rounded-xl text-center">
+              <div className="p-4 qr-surface text-center">
                 <span className="text-2xl font-bold text-emerald-400">{dataSources.summary.database_primary}</span>
                 <span className="text-xs text-slate-500 block">Database</span>
               </div>
@@ -566,7 +566,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           )}
 
           {/* Data Sources Table */}
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-black text-white uppercase tracking-wider">
                 Data Source Breakdown
@@ -635,7 +635,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           </div>
 
           {/* Data Source Legend */}
-          <div className="p-4 bg-slate-900/50 border border-white/10 rounded-xl">
+          <div className="p-4 qr-surface">
             <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Source Legend</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               <div className="flex items-center gap-2">
@@ -669,7 +669,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       {/* DISPLAY SETTINGS */}
       {activeSection === 'display' && (
         <div className="space-y-4">
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Display Preferences</h3>
             
             <div className="space-y-4">
@@ -720,7 +720,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           </div>
 
           {/* Platform Info */}
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Platform Information</h3>
             
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -749,7 +749,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       {activeSection === 'health' && (
         <div className="space-y-4">
           {/* Market Clocks */}
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Market Clocks</h3>
             <div className="grid grid-cols-3 gap-4">
               {[
@@ -770,7 +770,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           </div>
 
           {/* Connection Status */}
-          <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+          <div className="qr-surface p-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Connection Status</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-4 rounded-lg bg-slate-800/50 border border-white/5">
@@ -802,7 +802,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
 
           {/* Health Details */}
           {healthData && (
-            <div className="p-6 rounded-xl bg-slate-900/50 border border-white/10">
+            <div className="qr-surface p-4">
               <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4">Health Details</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                 {Object.entries(healthData).map(([key, value]) => (
