@@ -1620,7 +1620,7 @@ export const GoldenStrategies = ({ onDeployStrategy, onSelectStrategy }) => {
 
                       {/* Universe */}
                       <div className="mb-4">
-                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                        <h4 className="qr-label mb-2">
                           Asset Universe ({strategy.universe_count || strategy.universe?.length || 0})
                         </h4>
                         <div className="flex flex-wrap gap-1">
