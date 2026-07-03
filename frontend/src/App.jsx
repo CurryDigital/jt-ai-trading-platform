@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { CommandCenter } from './components/CommandCenter';
-import { MarketsTab } from './components/MarketsTab';
 import { SettingsTab } from './components/SettingsTab';
 import { StrategyLab } from './components/StrategyLab';
 import { ResearchTab } from './components/ResearchTab';
@@ -14,6 +13,8 @@ import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
 import PaperStrategiesPage from './components/PaperStrategiesPage';
 import { SignalsTab } from './components/SignalsTab';
+import { MacroTab } from './components/MacroTab';
+import { AnalyticsTab } from './components/AnalyticsTab';
 import { ManualTicket } from './components/ManualTicket';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
@@ -817,9 +818,10 @@ export default function App() {
   // Sub-tab hotkeys: q/w/e/r for left-hand easy access
   const subTabConfig = useMemo(() => ({
     research: [
-      { id: 'markets',          label: 'Markets',     short: 'Mkt',  IconComponent: Icon.Markets,     key: 'q' },
-      { id: 'research',         label: 'Screener',    short: 'Scr',  IconComponent: Icon.Research,    key: 'w' },
-      { id: 'signals',          label: 'Signals',     short: 'Sig',  IconComponent: Icon.Strategies,  key: 'e' },
+      { id: 'macro',            label: 'Macro',       short: 'Mac',  IconComponent: Icon.Markets,     key: 'q' },
+      { id: 'signals',          label: 'Signals',     short: 'Sig',  IconComponent: Icon.Strategies,  key: 'w' },
+      { id: 'analytics',        label: 'Analytics',   short: 'Ana',  IconComponent: Icon.Performance, key: 'e' },
+      { id: 'research',         label: 'Screener',    short: 'Scr',  IconComponent: Icon.Research,    key: 'r' },
     ],
     strategies: [
       { id: 'lab',              label: 'Lab',         short: 'Lab',  IconComponent: Icon.Lab,         key: 'q' },
@@ -837,7 +839,7 @@ export default function App() {
 
   // Sub-tab state — default to the first sub-tab of each merged section
   const [activeSubTabs, setActiveSubTabs] = useState({
-    research:   'markets',
+    research:   'macro',
     strategies: 'lab',
     execution:  'portfolio',
   });
@@ -1068,9 +1070,10 @@ export default function App() {
         {/* Research tab — find trade ideas */}
         {currentTab === 'research' && (
           <>
-            {activeSubTab === 'markets'          && <MarketsTab onTickerClick={() => {}} />}
-            {activeSubTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
+            {activeSubTab === 'macro'            && <MacroTab />}
             {activeSubTab === 'signals'          && <SignalsTab onOpenStrategy={openStrategyDetail} />}
+            {activeSubTab === 'analytics'        && <AnalyticsTab />}
+            {activeSubTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
           </>
         )}
 

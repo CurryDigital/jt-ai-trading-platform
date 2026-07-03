@@ -150,34 +150,41 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   ];
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 max-w-5xl">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-black text-white">Platform Settings</h2>
+        <div>
+          <h2 className="text-sm font-bold text-white">Settings</h2>
+          <p className="text-[10px] text-slate-500">System &amp; broker configuration</p>
+        </div>
         <button
           onClick={saveSettings}
           disabled={saving}
-          className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-sm font-bold rounded-lg"
+          className="qr-btn-primary disabled:opacity-40"
         >
-          {saving ? 'Saving...' : '💾 Save Changes'}
+          {saving ? 'Saving…' : 'Save Changes'}
         </button>
       </div>
 
-      {/* Section Tabs */}
-      <div className="flex items-center gap-2 p-1 rounded-xl bg-slate-900/50 border border-white/5">
-        {sections.map(section => (
-          <button
-            key={section.id}
-            onClick={() => setActiveSection(section.id)}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-xs font-bold transition-all ${
-              activeSection === section.id
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            {section.label}
-          </button>
-        ))}
-      </div>
+      <div className="grid grid-cols-1 md:grid-cols-[230px_1fr] gap-3 items-start">
+        {/* Section nav */}
+        <div className="qr-surface-strong overflow-hidden">
+          {sections.map(section => (
+            <button
+              key={section.id}
+              onClick={() => setActiveSection(section.id)}
+              className={`w-full text-left px-3.5 py-2.5 border-b border-white/[0.04] border-l-2 transition-colors ${
+                activeSection === section.id
+                  ? 'border-l-blue-500 bg-blue-500/[0.08]'
+                  : 'border-l-transparent hover:bg-white/[0.03]'
+              }`}
+            >
+              <div className={`text-[12px] font-semibold ${activeSection === section.id ? 'text-white' : 'text-slate-300'}`}>{section.label}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* Detail panel */}
+        <div className="qr-surface-strong overflow-hidden">
 
       {/* IBKR CONNECTION */}
       {activeSection === 'ibkr' && (
@@ -811,6 +818,8 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           )}
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 };
