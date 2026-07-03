@@ -7,6 +7,8 @@ by the qr_etl data-engineering process.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from datetime import datetime, timezone
 
 from app.dependencies import get_db, logger
@@ -49,32 +51,47 @@ def get_command_overview(db: Session = Depends(get_db)):
     """, label="command_equity_curve")
     equity_curve = [{"d": str(r.d), "equity": float(r.equity)} for r in reversed(curve_rows)]
 
-    pipeline_row = safe_query_one(db, """
-        SELECT
-            COUNT(*) FILTER (WHERE priority = 'EXPERIMENTAL') AS experimental,
-            COUNT(*) FILTER (WHERE priority = 'NEAR_GOLDEN') AS near_golden,
-            COUNT(*) FILTER (WHERE priority = 'GOLDEN' AND approved_at IS NULL) AS golden,
-            COUNT(*) FILTER (WHERE approved_at IS NOT NULL) AS deployed,
-            COUNT(*) AS total
-        FROM gold.strategy_registry WHERE status != 'DEPRECATED'
-    """, label="command_pipeline_counts")
+    # gold.strategy_registry's priority/approved_at columns are part of the aspirational
+    # schema in BACKEND_DB_CHANGES.md, not (yet) present on the deployed table — the
+    # existing /api/strategies/researcher endpoint already hardcodes priority=None for
+    # this reason. safe_query() deliberately does NOT swallow "column does not exist"
+    # errors (only missing tables), so these two queries are wrapped explicitly here to
+    # degrade to null/empty instead of taking down the whole /api/command/overview response.
     pipeline = None
-    if pipeline_row:
-        m = pipeline_row._mapping
-        pipeline = {k: int(m[k] or 0) for k in ["experimental", "near_golden", "golden", "deployed", "total"]}
+    try:
+        pipeline_row = db.execute(text("""
+            SELECT
+                COUNT(*) FILTER (WHERE priority = 'EXPERIMENTAL') AS experimental,
+                COUNT(*) FILTER (WHERE priority = 'NEAR_GOLDEN') AS near_golden,
+                COUNT(*) FILTER (WHERE priority = 'GOLDEN' AND approved_at IS NULL) AS golden,
+                COUNT(*) FILTER (WHERE approved_at IS NOT NULL) AS deployed,
+                COUNT(*) AS total
+            FROM gold.strategy_registry WHERE status != 'DEPRECATED'
+        """)).fetchone()
+        if pipeline_row:
+            m = pipeline_row._mapping
+            pipeline = {k: int(m[k] or 0) for k in ["experimental", "near_golden", "golden", "deployed", "total"]}
+    except ProgrammingError as e:
+        logger.warning(f"command_pipeline_counts: gold.strategy_registry missing priority/approved_at columns: {e}")
+        db.rollback()
 
-    deployed_rows = safe_query(db, """
-        SELECT strategy_id, name, asset_class AS asset, trade_count_oos AS live_trades,
-               win_rate_oos AS live_win_rate, sharpe_oos
-        FROM gold.strategy_registry
-        WHERE approved_at IS NOT NULL AND status != 'DEPRECATED'
-        ORDER BY sharpe_oos DESC NULLS LAST LIMIT 10
-    """, label="command_deployed_health")
-    deployed_health = [{
-        "strategy_id": r.strategy_id, "name": r.name, "asset": r.asset,
-        "live_trades": r.live_trades, "live_win_rate": float(r.live_win_rate) if r.live_win_rate is not None else None,
-        "return_pct": float(r.sharpe_oos) if r.sharpe_oos is not None else None,
-    } for r in deployed_rows]
+    deployed_health = []
+    try:
+        deployed_rows = db.execute(text("""
+            SELECT strategy_id, name, asset_class AS asset, trade_count_oos AS live_trades,
+                   win_rate_oos AS live_win_rate, sharpe_oos
+            FROM gold.strategy_registry
+            WHERE approved_at IS NOT NULL AND status != 'DEPRECATED'
+            ORDER BY sharpe_oos DESC NULLS LAST LIMIT 10
+        """)).fetchall()
+        deployed_health = [{
+            "strategy_id": r.strategy_id, "name": r.name, "asset": r.asset,
+            "live_trades": r.live_trades, "live_win_rate": float(r.live_win_rate) if r.live_win_rate is not None else None,
+            "return_pct": float(r.sharpe_oos) if r.sharpe_oos is not None else None,
+        } for r in deployed_rows]
+    except ProgrammingError as e:
+        logger.warning(f"command_deployed_health: gold.strategy_registry missing approved_at column: {e}")
+        db.rollback()
 
     attention_rows = safe_query(db, """
         SELECT item_id, severity AS sev, tag, title, impact, target, ref_id, created_at
