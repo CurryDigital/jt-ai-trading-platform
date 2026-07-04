@@ -35,6 +35,42 @@
   --fs-base: 12px;
   --fs-md: 13px;
   --fs-lg: 14px;
+
+  /* ===== JTCML Quant Workspace design-system tokens (ported from bundle styles.css) ===== */
+  /* P&L semantic colors */
+  --pnl-pos: #34d399;
+  --pnl-neg: #fb7185;
+  --pnl-nul: #64748b;
+
+  /* Text ramp (strong -> faint) */
+  --text-strong: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-body: #94a3b8;
+  --text-muted: #64748b;
+  --text-faint: #475569;
+
+  /* Chip accents */
+  --chip-blue: #3b82f6;
+  --chip-rose: #f43f5e;
+  --chip-amber: #f59e0b;
+  --chip-emerald: #34d399;
+  --chip-violet: #8b5cf6;
+  --chip-slate: #64748b;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Fonts (aliases onto the already-loaded families) */
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'Outfit', sans-serif;
+
+  /* Layout */
+  --content-max: 1800px;
+  --bg-input: rgba(15, 23, 42, 0.5);
+  --shadow-logo: 0 2px 8px rgba(59, 130, 246, 0.4);
 }
 
 * {
@@ -188,6 +224,36 @@ body {
   .qr-spark {
     @apply inline-flex items-end h-3 gap-px;
   }
+
+  /* ===== JTCML bundle surface + text utilities (used by ported workspace screens) ===== */
+  .jt-surface {
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-lg);
+  }
+  .jt-surface-strong {
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+  }
+  .jt-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .jt-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 1;
+    text-align: right;
+  }
+}
+
+@keyframes jt-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
 }
 
 .glass {

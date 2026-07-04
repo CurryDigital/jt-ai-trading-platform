@@ -5,7 +5,6 @@ import { SettingsTab } from './components/SettingsTab';
 import { StrategyLab } from './components/StrategyLab';
 import { ResearchTab } from './components/ResearchTab';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
-import { GoldenStrategies } from './components/GoldenStrategies';
 import { StrategyPerformance } from './components/StrategyPerformance';
 import { StrategyDetail } from './components/StrategyDetail';
 import { StrategyCompare } from './components/StrategyCompare';
@@ -15,6 +14,7 @@ import PaperStrategiesPage from './components/PaperStrategiesPage';
 import { SignalsTab } from './components/SignalsTab';
 import { MacroTab } from './components/MacroTab';
 import { AnalyticsTab } from './components/AnalyticsTab';
+import { StrategiesWorkspace } from './components/StrategiesWorkspace';
 import { ManualTicket } from './components/ManualTicket';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
@@ -1081,8 +1081,8 @@ export default function App() {
         {currentTab === 'strategies' && (
           <>
             {activeSubTab === 'lab'              && <StrategyLab />}
-            {activeSubTab === 'strategies'       && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
-            {activeSubTab === 'performance'      && <PerformanceTab data={data} onSelectStrategy={openStrategyDetail} onCompare={openCompare} />}
+            {activeSubTab === 'strategies'       && <StrategiesWorkspace sub="pipeline" onOpen={openStrategyDetail} />}
+            {activeSubTab === 'performance'      && <StrategiesWorkspace sub="performance" onOpen={openStrategyDetail} />}
           </>
         )}
 
