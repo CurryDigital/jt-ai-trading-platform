@@ -3,11 +3,11 @@ import { api } from '../utils';
 
 // Research > Analytics — signal performance, proximity-to-trigger, live feed. Per market.
 const MARKET_META = {
-  US:     { label: 'United States', accent: 'text-blue-400',    ring: 'ring-blue-500/30' },
-  HK:     { label: 'Hong Kong',     accent: 'text-rose-400',    ring: 'ring-rose-500/30' },
-  CRYPTO: { label: 'Crypto',        accent: 'text-emerald-400', ring: 'ring-emerald-500/30' },
-  FX:     { label: 'Forex',         accent: 'text-sky-400',     ring: 'ring-sky-500/30' },
-  METAL:  { label: 'Metals',        accent: 'text-amber-400',   ring: 'ring-amber-500/30' },
+  US:     { label: 'United States', sym: 'US',  hex: '#3b82f6' },
+  HK:     { label: 'Hong Kong',     sym: 'HK',  hex: '#f43f5e' },
+  CRYPTO: { label: 'Crypto',        sym: 'CR',  hex: '#14b8a6' },
+  FX:     { label: 'Forex',         sym: 'FX',  hex: '#0ea5e9' },
+  METAL:  { label: 'Metals',        sym: 'XAU', hex: '#eab308' },
 };
 const MARKETS = Object.keys(MARKET_META);
 const ROWS = [['US', 'HK'], ['CRYPTO', 'FX', 'METAL']];
@@ -22,9 +22,9 @@ const Sec = ({ label, children }) => (
 function AnalyticsColumn({ market, perf, prox, feed }) {
   const meta = MARKET_META[market];
   return (
-    <div className={`qr-surface-strong overflow-hidden ring-1 ${meta.ring}`}>
-      <div className="flex items-center gap-3 px-3.5 py-2.5 bg-white/[0.03]">
-        <span className={`font-mono text-lg font-black ${meta.accent}`}>{market === 'METAL' ? 'XAU' : market === 'CRYPTO' ? 'CR' : market}</span>
+    <div className="jt-surface-strong overflow-hidden" style={{ border: `1px solid ${meta.hex}44`, borderTop: `3px solid ${meta.hex}` }}>
+      <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.hex}24` }}>
+        <span className="font-mono text-lg font-black" style={{ color: meta.hex }}>{meta.sym}</span>
         <div className="text-[13px] font-bold text-white flex-1">{meta.label}</div>
         <span className="text-[9px] font-bold text-slate-400 bg-white/[0.06] rounded px-2 py-0.5">{(feed || []).length} live</span>
       </div>

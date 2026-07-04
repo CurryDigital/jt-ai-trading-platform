@@ -3,13 +3,13 @@ import { api, pnlCl, fmtPct } from '../utils';
 
 // Research > Macro — US & HK equities + Crypto/FX/Metals: regime, KPIs, sectors, calendar, news.
 const REGION_META = {
-  US: { accent: 'text-blue-400', ring: 'ring-blue-500/30', flag: 'bg-blue-500/10' },
-  HK: { accent: 'text-rose-400', ring: 'ring-rose-500/30', flag: 'bg-rose-500/10' },
+  US: { hex: '#3b82f6' },
+  HK: { hex: '#f43f5e' },
 };
 const GLOBAL_META = {
-  CRYPTO: { label: 'Crypto', sub: 'Digital assets', accent: 'text-emerald-400', ring: 'ring-emerald-500/30', flag: 'bg-emerald-500/10' },
-  FX: { label: 'Forex', sub: 'Currency pairs', accent: 'text-sky-400', ring: 'ring-sky-500/30', flag: 'bg-sky-500/10' },
-  METAL: { label: 'Metals', sub: 'Gold & silver', accent: 'text-amber-400', ring: 'ring-amber-500/30', flag: 'bg-amber-500/10' },
+  CRYPTO: { label: 'Crypto', sub: 'Digital assets', sym: 'CR',  hex: '#14b8a6' },
+  FX:     { label: 'Forex',  sub: 'Currency pairs', sym: 'FX',  hex: '#0ea5e9' },
+  METAL:  { label: 'Metals', sub: 'Gold & silver',  sym: 'XAU', hex: '#eab308' },
 };
 const DAY2 = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
@@ -49,9 +49,9 @@ function MacroRegionCard({ m, newsForRegion }) {
   const avg = avgOf(m.regime_7d);
   const r = regimeOf(avg);
   return (
-    <div className={`qr-surface-strong overflow-hidden ring-1 ${meta.ring}`}>
-      <div className={`flex items-center gap-3 px-3.5 py-2.5 ${meta.flag}`}>
-        <span className={`font-mono text-xl font-black tracking-wide ${meta.accent}`}>{m.key}</span>
+    <div className="jt-surface-strong overflow-hidden" style={{ border: `1px solid ${meta.hex}44`, borderTop: `3px solid ${meta.hex}` }}>
+      <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.hex}24` }}>
+        <span className="font-mono text-xl font-black tracking-wide" style={{ color: meta.hex }}>{m.key}</span>
         <div className="flex-1">
           <div className="text-[13px] font-bold text-white">{m.index_name || m.key}</div>
           <div className="text-[9px] text-slate-500">{m.index_sym}</div>
@@ -98,7 +98,7 @@ function MacroRegionCard({ m, newsForRegion }) {
         <div className="py-2">
           {(m.events && m.events.length ? m.events : [{ event: 'No events scheduled', date: '', importance: null }]).map((ev, i) => (
             <div key={i} className="flex items-center gap-2.5 px-3.5 py-1.5">
-              {ev.date && <span className={`font-mono text-[10px] font-bold min-w-[46px] ${meta.accent}`}>{ev.date}</span>}
+              {ev.date && <span className="font-mono text-[10px] font-bold min-w-[46px]" style={{ color: meta.hex }}>{ev.date}</span>}
               <span className="text-[12px] text-slate-300 flex-1">{ev.event}</span>
               {ev.importance && <span className={`qr-chip ${ev.importance === 'High' ? 'qr-chip-rose' : 'qr-chip-amber'}`}>{ev.importance}</span>}
             </div>
@@ -130,8 +130,9 @@ function MiniMacroCard({ m }) {
   const avg = avgOf(m.regime_7d);
   const r = regimeOf(avg);
   return (
-    <div className={`qr-surface-strong overflow-hidden ring-1 ${meta.ring}`}>
-      <div className={`flex items-center gap-3 px-3.5 py-2.5 ${meta.flag}`}>
+    <div className="jt-surface-strong overflow-hidden" style={{ border: `1px solid ${meta.hex}44`, borderTop: `3px solid ${meta.hex}` }}>
+      <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.hex}24` }}>
+        <span className="font-mono text-lg font-black tracking-wide" style={{ color: meta.hex }}>{meta.sym}</span>
         <div className="flex-1">
           <div className="text-[13px] font-bold text-white">{meta.label}</div>
           <div className="text-[9px] text-slate-500">{meta.sub}</div>
