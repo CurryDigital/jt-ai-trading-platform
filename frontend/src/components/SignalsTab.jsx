@@ -6,11 +6,11 @@ import { api, pnlCl, fmtPct } from '../utils';
 // Click a row to open Strategy Detail (if the family is deployed).
 
 const MARKET_META = {
-  US:     { label: 'United States', sub: 'US equities',     accent: 'text-blue-400',    ring: 'ring-blue-500/30',   flag: 'bg-blue-500/10' },
-  HK:     { label: 'Hong Kong',     sub: 'HK equities',      accent: 'text-rose-400',    ring: 'ring-rose-500/30',  flag: 'bg-rose-500/10' },
-  CRYPTO: { label: 'Crypto',        sub: 'Digital assets',   accent: 'text-emerald-400', ring: 'ring-emerald-500/30', flag: 'bg-emerald-500/10' },
-  FX:     { label: 'Forex',        sub: 'Currency pairs',    accent: 'text-sky-400',     ring: 'ring-sky-500/30',   flag: 'bg-sky-500/10' },
-  METAL:  { label: 'Metals',       sub: 'Gold & silver',     accent: 'text-amber-400',   ring: 'ring-amber-500/30', flag: 'bg-amber-500/10' },
+  US:     { label: 'United States', sub: 'US equities',    sym: 'US',  hex: '#3b82f6' },
+  HK:     { label: 'Hong Kong',     sub: 'HK equities',    sym: 'HK',  hex: '#f43f5e' },
+  CRYPTO: { label: 'Crypto',        sub: 'Digital assets', sym: 'CR',  hex: '#14b8a6' },
+  FX:     { label: 'Forex',         sub: 'Currency pairs', sym: 'FX',  hex: '#0ea5e9' },
+  METAL:  { label: 'Metals',        sub: 'Gold & silver',  sym: 'XAU', hex: '#eab308' },
 };
 const MARKETS = Object.keys(MARKET_META);
 const ROWS = [['US', 'HK'], ['CRYPTO', 'FX', 'METAL']];
@@ -49,9 +49,9 @@ export const SignalsTab = ({ onOpenStrategy }) => {
     const meta = MARKET_META[market];
     const list = [...(universe[market] || [])].sort((a, b) => (b.potential || 0) - (a.potential || 0));
     return (
-      <div className={`qr-surface-strong overflow-hidden ring-1 ${meta.ring}`}>
-        <div className={`flex items-center gap-3 px-3.5 py-2.5 ${meta.flag}`}>
-          <span className={`font-mono text-xl font-black tracking-wide ${meta.accent}`}>{market === 'METAL' ? 'XAU' : market === 'CRYPTO' ? 'CR' : market}</span>
+      <div className="jt-surface-strong overflow-hidden" style={{ border: `1px solid ${meta.hex}44`, borderTop: `3px solid ${meta.hex}` }}>
+        <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.hex}24` }}>
+          <span className="font-mono text-xl font-black tracking-wide" style={{ color: meta.hex }}>{meta.sym}</span>
           <div className="flex-1">
             <div className="text-[13px] font-bold text-white">{meta.label}</div>
             <div className="text-[9px] text-slate-500">{meta.sub}</div>
