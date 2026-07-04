@@ -173,18 +173,19 @@ def reset_simulation(db: Session = Depends(get_db)):
 @router.get("/trades")
 def get_execution_trades(book: str = "live", limit: int = 50, db: Session = Depends(get_db)):
     """Recent fills for the Live/Paper trade log — algo executions + manual orders."""
+    # Alias as "ts" (not "t") — SQLAlchemy 2.0's Row conflicts with a column literally named "t".
     rows = safe_query(db, """
-        SELECT executed_at AS t, side, ticker, quantity AS qty, price, 'algo' AS source
+        SELECT executed_at AS ts, side, ticker, quantity AS qty, price, 'algo' AS source
         FROM gold.trade_executions ORDER BY executed_at DESC LIMIT :limit
     """, {"limit": limit}, label="execution_trades_algo")
     manual_rows = safe_query(db, """
-        SELECT created_at AS t, side, ticker, qty, entry_price AS price, 'manual' AS source
+        SELECT created_at AS ts, side, ticker, qty, entry_price AS price, 'manual' AS source
         FROM gold.manual_orders WHERE book = :book ORDER BY created_at DESC LIMIT :limit
     """, {"book": book, "limit": limit}, label="execution_trades_manual")
     combined = list(rows) + list(manual_rows)
-    combined.sort(key=lambda r: r.t, reverse=True)
+    combined.sort(key=lambda r: r.ts, reverse=True)
     data = [{
-        "t": r.t.isoformat() if r.t else None, "side": r.side, "ticker": r.ticker,
+        "t": r.ts.isoformat() if r.ts else None, "side": r.side, "ticker": r.ticker,
         "qty": float(r.qty) if r.qty is not None else None,
         "price": float(r.price) if r.price is not None else None, "source": r.source,
     } for r in combined[:limit]]
