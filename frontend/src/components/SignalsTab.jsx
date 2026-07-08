@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { api, pnlCl, fmtPct, fmtNum } from '../utils';
+import React, { useMemo, useState } from 'react';
+import { api, usePoll, pnlCl, fmtPct, fmtNum } from '../utils';
 
 // Research > Signals — multi-family setups across US · HK · Crypto · FX · Metals.
 // Signal families ARE the deployed strategies (shared vocabulary with Strategies).
@@ -21,23 +21,16 @@ export const SignalsTab = ({ onOpenStrategy }) => {
   const [asOf, setAsOf] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const [uni, fam] = await Promise.all([
-        api.get(`/api/signals/universe?markets=${MARKETS.join(',')}&limit=8`),
-        api.get('/api/signals/families'),
-      ]);
-      if (!alive) return;
-      setUniverse(uni?.data || {});
-      setAsOf(uni?.as_of || null);
-      setFamilies(fam?.data || []);
-      setLoading(false);
-    };
-    load();
-    const id = setInterval(load, 300000); // 5 min — matches signal_setups DE refresh cadence
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  usePoll(async () => {
+    const [uni, fam] = await Promise.all([
+      api.get(`/api/signals/universe?markets=${MARKETS.join(',')}&limit=8`),
+      api.get('/api/signals/families'),
+    ]);
+    setUniverse(uni?.data || {});
+    setAsOf(uni?.as_of || null);
+    setFamilies(fam?.data || []);
+    setLoading(false);
+  }, 300000); // 5 min — matches signal_setups DE refresh cadence
 
   const familyByKey = useMemo(() => {
     const m = {};

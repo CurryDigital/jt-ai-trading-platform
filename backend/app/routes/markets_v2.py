@@ -3,6 +3,7 @@
 Separate namespace (/api/markets/*) from the legacy /api/market/* routes used
 by the old world-index framing — see design-bundle handoff/API_SPEC_v2.md §1.2.
 """
+import time
 from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -11,6 +12,12 @@ from app.dependencies import get_db
 from app.db.safe_query import safe_query
 
 router = APIRouter(prefix="/api/markets", tags=["markets_v2"])
+
+# The Command Center ribbon polls the market band every 15s from every open
+# browser tab. A short in-process cache keeps that from turning into 4 DB
+# queries per tab per tick (this RDS has a history of pool exhaustion).
+_OVERVIEW_TTL_S = 12
+_overview_cache = {}  # regions key -> (monotonic_ts, payload)
 
 
 def _now_iso():
@@ -114,3 +121,27 @@ def get_market_movers_v2(db: Session = Depends(get_db)):
     gainers = [{"ticker": r.ticker, "change_pct": float(r.change_pct)} for r in rows if r.direction == "gainer"]
     losers = [{"ticker": r.ticker, "change_pct": float(r.change_pct)} for r in rows if r.direction == "loser"]
     return {"gainers": gainers, "losers": losers}
+
+
+@router.get("/overview")
+def get_markets_overview(regions: str = "US,HK", db: Session = Depends(get_db)):
+    """Single-call aggregate of indices + breadth + sentiment + movers.
+
+    The Command Center's Market Status band previously made 4 HTTP requests
+    per 15s poll tick; this collapses them to one, and the in-process cache
+    means concurrent tabs / rapid polls share one set of DB queries.
+    """
+    key = ",".join(sorted(r.strip().upper() for r in regions.split(",") if r.strip()))
+    cached = _overview_cache.get(key)
+    if cached and (time.monotonic() - cached[0]) < _OVERVIEW_TTL_S:
+        return cached[1]
+
+    payload = {
+        "indices": get_dashboard_indices(regions=regions, db=db),
+        "breadth": get_market_breadth_v2(regions=regions, db=db),
+        "sentiment": get_market_sentiment_v2(regions=regions, db=db),
+        "movers": get_market_movers_v2(db=db),
+        "as_of": _now_iso(),
+    }
+    _overview_cache[key] = (time.monotonic(), payload)
+    return payload

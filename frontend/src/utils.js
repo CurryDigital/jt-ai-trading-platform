@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 // Utils - Compact formatting functions
 export const fmt = (n, d = 2) => n == null || isNaN(n) ? '—' : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -79,18 +79,36 @@ const _authHeaders = () => {
 // API helpers with error handling and timeout
 const API_TIMEOUT_MS = 10000;
 
+// GET micro-cache + in-flight dedupe. Many components poll the same endpoints
+// (13 call-sites hit /api/execution/global-mode alone); sharing one request per
+// URL per 3s window collapses those duplicates without touching any component.
+const GET_CACHE_TTL_MS = 3000;
+const _getCache = new Map(); // url -> { ts, promise }
+
+const _rawGet = async (url) => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    const res = await fetch(url, { headers: _authHeaders(), signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.status === 401) { _onUnauthorized.fn(); return null; }
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+};
+
 export const api = {
-  get: async (url) => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-      const res = await fetch(url, { headers: _authHeaders(), signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (res.status === 401) { _onUnauthorized.fn(); return null; }
-      return res.ok ? await res.json() : null;
-    } catch {
-      return null;
+  get: (url) => {
+    const hit = _getCache.get(url);
+    if (hit && Date.now() - hit.ts < GET_CACHE_TTL_MS) return hit.promise;
+    const promise = _rawGet(url);
+    _getCache.set(url, { ts: Date.now(), promise });
+    if (_getCache.size > 200) {
+      const cutoff = Date.now() - GET_CACHE_TTL_MS;
+      for (const [k, v] of _getCache) if (v.ts < cutoff) _getCache.delete(k);
     }
+    return promise;
   },
   post: async (url, body) => {
     try {
@@ -109,6 +127,25 @@ export const api = {
       return null;
     }
   }
+};
+
+// Visibility-aware polling: runs `fn` immediately and every `ms`, but stops
+// while the browser tab is hidden and fires again the moment it's visible.
+// With ~30 pollers across the app, hidden tabs were hammering the RDS-backed
+// API around the clock — this makes background tabs free.
+export const usePoll = (fn, ms) => {
+  const fnRef = useRef(fn);
+  useEffect(() => { fnRef.current = fn; });
+  useEffect(() => {
+    let id = null;
+    const tick = () => fnRef.current();
+    const start = () => { if (id == null) { tick(); id = setInterval(tick, ms); } };
+    const stop = () => { if (id != null) { clearInterval(id); id = null; } };
+    const onVis = () => (document.hidden ? stop() : start());
+    document.addEventListener('visibilitychange', onVis);
+    onVis();
+    return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
+  }, [ms]);
 };
 
 // Data fetching hook

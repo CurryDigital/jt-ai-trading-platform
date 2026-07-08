@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { api, fmtK, fmtPct, fmtAge, pnlCl } from '../utils';
+import React, { useMemo, useState } from 'react';
+import { api, usePoll, fmtK, fmtPct, fmtAge, pnlCl } from '../utils';
 
 // Re-zoned Command Center — JTCML workspace redesign:
 //   1) Market Status band (US · HK)   2) My Book (equity curve + KPIs)
@@ -124,29 +124,16 @@ function MarketBand({ navigateToTab }) {
   const [sentiment, setSentiment] = useState(null);
   const [movers, setMovers] = useState({ gainers: [], losers: [] });
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const [idx, brd, sent, mov] = await Promise.all([
-        api.get('/api/markets/indices?regions=US,HK'),
-        api.get('/api/markets/breadth?regions=US,HK'),
-        api.get('/api/markets/sentiment'),
-        api.get('/api/markets/movers'),
-      ]);
-      if (!alive) return;
-      // /api/markets/indices returns { data: [...] }; some api.get wrappers may unwrap it.
-      // Accept either shape so every index card renders its own values.
-      const rawIdx = idx?.data || idx;
-      setIndices(Array.isArray(rawIdx) ? rawIdx : []);
-      // Breadth returns a { us: {...}, hk: {...} } map.
-      setBreadth(brd || { us: null, hk: null });
-      setSentiment(sent || null);
-      setMovers(mov || { gainers: [], losers: [] });
-    };
-    load();
-    const id = setInterval(load, 15000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  // One aggregate call per tick (was 4 separate requests), paused while hidden.
+  usePoll(async () => {
+    const ov = await api.get('/api/markets/overview?regions=US,HK');
+    if (!ov) return;
+    const rawIdx = ov.indices?.data || ov.indices;
+    setIndices(Array.isArray(rawIdx) ? rawIdx : []);
+    setBreadth(ov.breadth || { us: null, hk: null });
+    setSentiment(ov.sentiment || null);
+    setMovers(ov.movers || { gainers: [], losers: [] });
+  }, 15000);
 
   const us = sentiment?.us || sentiment;
   const hk = sentiment?.hk;
@@ -259,16 +246,10 @@ function MarketBand({ navigateToTab }) {
 export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   const [overview, setOverview] = useState(null);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const res = await api.get('/api/command/overview');
-      if (alive) setOverview(res);
-    };
-    load();
-    const id = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  usePoll(async () => {
+    const res = await api.get('/api/command/overview');
+    if (res) setOverview(res);
+  }, 60000);
 
   const positions = data?.positions || [];
   const longMV = positions.filter(p => p.side === 'LONG').reduce((s, p) => s + (p.market_value || 0), 0);
