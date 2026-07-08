@@ -1,24 +1,34 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { CommandCenter } from './components/CommandCenter';
-import { SettingsTab } from './components/SettingsTab';
-import { StrategyLab } from './components/StrategyLab';
-import { ResearchTab } from './components/ResearchTab';
 import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
-import { StrategyPerformance } from './components/StrategyPerformance';
-import { StrategyDetail } from './components/StrategyDetail';
-import { StrategyCompare } from './components/StrategyCompare';
-import { LiveOpsPanel } from './components/LiveOpsPanel';
 import { LoginPage } from './components/LoginPage';
-import PaperStrategiesPage from './components/PaperStrategiesPage';
-import { SignalsTab } from './components/SignalsTab';
-import { MacroTab } from './components/MacroTab';
-import { AnalyticsTab } from './components/AnalyticsTab';
-import { StrategiesWorkspace } from './components/StrategiesWorkspace';
 import { ManualTicket } from './components/ManualTicket';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
-import { fmt, fmtK, fmtPct, pnlCl, api, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
+import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
+
+// Tab-level code splitting: each view loads on first visit instead of shipping
+// one ~470kB monolith on initial paint. Vite emits a chunk per component.
+const CommandCenter = lazy(() => import('./components/CommandCenter').then(m => ({ default: m.CommandCenter })));
+const SettingsTab = lazy(() => import('./components/SettingsTab').then(m => ({ default: m.SettingsTab })));
+const StrategyLab = lazy(() => import('./components/StrategyLab').then(m => ({ default: m.StrategyLab })));
+const ResearchTab = lazy(() => import('./components/ResearchTab').then(m => ({ default: m.ResearchTab })));
+const StrategyDetail = lazy(() => import('./components/StrategyDetail').then(m => ({ default: m.StrategyDetail })));
+const StrategyPerformance = lazy(() => import('./components/StrategyPerformance').then(m => ({ default: m.StrategyPerformance })));
+const StrategyCompare = lazy(() => import('./components/StrategyCompare').then(m => ({ default: m.StrategyCompare })));
+const LiveOpsPanel = lazy(() => import('./components/LiveOpsPanel').then(m => ({ default: m.LiveOpsPanel })));
+const PaperStrategiesPage = lazy(() => import('./components/PaperStrategiesPage'));
+const SignalsTab = lazy(() => import('./components/SignalsTab').then(m => ({ default: m.SignalsTab })));
+const MacroTab = lazy(() => import('./components/MacroTab').then(m => ({ default: m.MacroTab })));
+const AnalyticsTab = lazy(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })));
+const StrategiesWorkspace = lazy(() => import('./components/StrategiesWorkspace').then(m => ({ default: m.StrategiesWorkspace })));
+
+const TabFallback = () => (
+  <div className="qr-surface px-3 py-8 flex items-center justify-center gap-2 text-[11px] text-slate-500">
+    <div className="w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+    Loading view…
+  </div>
+);
 
 // =================================================================
 // Iconography — minimal stroke icons sized for the dense UI (12px)
@@ -876,62 +886,46 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [navItems, currentTab, subTabConfig]);
 
-  // Mode + IBKR status
-  useEffect(() => {
-    const fetchMode = async () => {
-      const modeData = await api.get('/api/execution/global-mode');
-      if (modeData) {
-        setExecutionMode(modeData.execution_mode || 'SIMULATION');
-        setIbkrConnected(modeData.ibkr_connected || false);
-      }
-    };
-    fetchMode();
-    const id = setInterval(fetchMode, 30000);
-    return () => clearInterval(id);
-  }, []);
+  // Mode + IBKR status (paused while the browser tab is hidden)
+  usePoll(async () => {
+    const modeData = await api.get('/api/execution/global-mode');
+    if (modeData) {
+      setExecutionMode(modeData.execution_mode || 'SIMULATION');
+      setIbkrConnected(modeData.ibkr_connected || false);
+    }
+  }, 30000);
 
   // System health
-  useEffect(() => {
-    const fetch = async () => {
-      const t0 = performance.now();
-      const h = await api.get('/api/system/health');
-      const t1 = performance.now();
-      setLatencyMs(Math.round(t1 - t0));
-      if (h) setHealthData(h);
-    };
-    fetch();
-    const id = setInterval(fetch, 15000);
-    return () => clearInterval(id);
-  }, []);
+  usePoll(async () => {
+    const t0 = performance.now();
+    const h = await api.get('/api/system/health');
+    const t1 = performance.now();
+    setLatencyMs(Math.round(t1 - t0));
+    if (h) setHealthData(h);
+  }, 15000);
 
   // Main data fetch
-  useEffect(() => {
-    const fetchAll = async () => {
-      const [strategies, positions, performance, paper] = await Promise.all([
-        api.get('/api/strategies/researcher'),
-        api.get('/api/portfolio/positions'),
-        api.get('/api/performance/strategy'),
-        api.get('/api/paper-strategies')
-      ]);
+  usePoll(async () => {
+    const [strategies, positions, performance, paper] = await Promise.all([
+      api.get('/api/strategies/researcher'),
+      api.get('/api/portfolio/positions'),
+      api.get('/api/performance/strategy'),
+      api.get('/api/paper-strategies')
+    ]);
 
-      setData({
-        strategies: strategies?.strategies || [],
-        positions: positions?.positions || positions || [],
-        paperStrategies: paper?.strategies || [],
-        dailyPnl: performance?.monthly_returns || [],
-        monthlyReturns: performance?.monthly_returns || [],
-        trades: [],
-        summary: performance?.summary || {},
-        mode: executionMode,
-      });
-      setLastRefresh(new Date().toISOString());
-      setLoading(false);
-    };
-
-    fetchAll();
-    const id = setInterval(fetchAll, 60000);
-    return () => clearInterval(id);
-  }, [executionMode]);
+    setData({
+      strategies: strategies?.strategies || [],
+      positions: positions?.positions || positions || [],
+      paperStrategies: paper?.strategies || [],
+      dailyPnl: performance?.monthly_returns || [],
+      monthlyReturns: performance?.monthly_returns || [],
+      trades: [],
+      summary: performance?.summary || {},
+      mode: executionMode,
+    });
+    setLastRefresh(new Date().toISOString());
+    setLoading(false);
+  }, 60000);
 
   // Block UI behind auth gate when enabled
   if (!authChecked) return (
@@ -1064,6 +1058,7 @@ export default function App() {
           </div>
         )}
 
+        <Suspense fallback={<TabFallback />}>
         {currentTab === 'command'          && <CommandCenter data={data} navigateToTab={navigateToTab} onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'settings'         && <SettingsTab healthData={healthData} latencyMs={latencyMs} wsConnected={wsConnected} />}
 
@@ -1105,6 +1100,7 @@ export default function App() {
             ? <StrategyCompare strategyIds={compareIds} onClose={closeCompare} onSelectStrategy={openStrategyDetail} />
             : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategies selected · pick 2–6 from <button onClick={() => { navigateToTab('strategies'); setSubTab('strategies', 'performance'); }} className="text-blue-400 hover:text-blue-300 underline">Performance</button> and click Compare</div>
         )}
+        </Suspense>
       </main>
 
       {/* Mobile bottom nav */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { api } from '../utils';
+import { api, usePoll } from '../utils';
 import { Chip, KpiTile, Button, ModeBadge, fmtPct } from './jtkit';
 import { HORIZON, mapApiToBook } from './strategyProfiles';
 
@@ -17,21 +17,18 @@ const STAGE_CHIP = { deployed: 'emerald', golden: 'amber', near_golden: 'blue', 
 function useStrategyBook() {
   const [book, setBook] = useState(null);
   const [error, setError] = useState(false);
-  const load = useCallback(async () => {
-    const rows = await api.get('/api/strategies/researcher');
+  const load = useCallback(async (fresh = false) => {
+    // fresh=1 bypasses the backend's 15s researcher cache — used right after a
+    // confirmed promote so the new mode is visible immediately.
+    const rows = await api.get(`/api/strategies/researcher${fresh ? '?fresh=1' : ''}`);
     if (rows == null) { setError(true); return; }
     setError(false);
     const raw = Array.isArray(rows) ? rows : (rows?.strategies || rows?.data || []);
     setBook(mapApiToBook(raw));
   }, []);
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => { if (alive) await load(); };
-    tick();
-    const id = setInterval(tick, 60000);
-    return () => { alive = false; clearInterval(id); };
-  }, [load]);
-  return { book, reload: load, error };
+  usePoll(load, 60000);
+  const reload = useCallback(() => load(true), [load]);
+  return { book, reload, error };
 }
 
 function HorizonSeg({ hzn, setHzn, counts }) {

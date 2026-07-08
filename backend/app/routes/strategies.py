@@ -82,9 +82,22 @@ def delete_strategy(strat_id: str, db: Session = Depends(get_db)):
 # Researcher Strategies
 # =============================================================================
 
+# /strategies/researcher fans out into ~8 registry/backtest/signal queries and is
+# polled by six different frontend surfaces at 60s intervals. A short in-process
+# cache collapses those overlapping polls into one query burst. `fresh=1` bypasses
+# it (the promote flow uses this so a confirmed mode change is visible immediately).
+_RESEARCHER_TTL_S = 15
+_researcher_cache = {}  # (asset_class, priority, status) -> (monotonic_ts, payload)
+
+
 @router.get("/strategies/researcher")
-def get_researcher_strategies(asset_class: str = None, priority: str = None, status: str = None, db: Session = Depends(get_db)):
+def get_researcher_strategies(asset_class: str = None, priority: str = None, status: str = None, fresh: int = 0, db: Session = Depends(get_db)):
     """Get JT Researcher strategies from strategy_registry with backtest data and top signals."""
+    cache_key = (asset_class, priority, status)
+    if not fresh:
+        cached = _researcher_cache.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < _RESEARCHER_TTL_S:
+            return cached[1]
     try:
         # Build query with all columns - safe_query handles errors gracefully
         query = """
@@ -292,8 +305,10 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
         
         # Combine all strategies
         all_strategies = strategies + template_strategies + quant_strategies
-        
-        return {"strategies": all_strategies, "count": len(all_strategies)}
+
+        payload = {"strategies": all_strategies, "count": len(all_strategies)}
+        _researcher_cache[cache_key] = (time.monotonic(), payload)
+        return payload
     except Exception as e:
         logger.error(f"Route researcher strategies error: {e}")
         return {"strategies": [], "count": 0}

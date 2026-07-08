@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { api, pnlCl, fmtPct } from '../utils';
+import React, { useState } from 'react';
+import { api, usePoll, pnlCl, fmtPct } from '../utils';
 
 // Research > Macro — US & HK equities + Crypto/FX/Metals: regime, KPIs, sectors, calendar, news.
 const REGION_META = {
@@ -166,24 +166,17 @@ export const MacroTab = () => {
   const [news, setNews] = useState({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const [reg, glob, nws] = await Promise.all([
-        api.get('/api/macro/regions'),
-        api.get('/api/macro/global'),
-        api.get('/api/news?markets=US,HK'),
-      ]);
-      if (!alive) return;
-      setRegions(reg?.data || []);
-      setGlobal(glob?.data || []);
-      setNews(nws?.data || {});
-      setLoading(false);
-    };
-    load();
-    const id = setInterval(load, 900000); // 15 min — matches macro DE refresh cadence
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  usePoll(async () => {
+    const [reg, glob, nws] = await Promise.all([
+      api.get('/api/macro/regions'),
+      api.get('/api/macro/global'),
+      api.get('/api/news?markets=US,HK'),
+    ]);
+    setRegions(reg?.data || []);
+    setGlobal(glob?.data || []);
+    setNews(nws?.data || {});
+    setLoading(false);
+  }, 900000); // 15 min — matches macro DE refresh cadence
 
   return (
     <div className="space-y-3">

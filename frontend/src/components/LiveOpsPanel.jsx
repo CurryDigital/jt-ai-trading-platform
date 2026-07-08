@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { api, fmt, fmtK, fmtAge, pnlCl } from '../utils';
+import React, { useState } from 'react';
+import { api, usePoll, fmt, fmtK, fmtAge, pnlCl } from '../utils';
 
 const STATUS_STYLE = {
   PENDING:   'qr-chip-amber',
@@ -25,13 +25,7 @@ const fmtTimeShort = (iso) => {
 
 const GatewayPanel = () => {
   const [gw, setGw] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    const load = async () => { const r = await api.get('/api/execution/gateway'); if (alive) setGw(r); };
-    load();
-    const id = setInterval(load, 15000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  usePoll(async () => { const r = await api.get('/api/execution/gateway'); if (r) setGw(r); }, 15000);
   if (!gw) return <div className="py-6 text-center text-[11px] text-slate-600">Loading gateway status…</div>;
   return (
     <div className="p-3.5 flex flex-col gap-3">
@@ -65,13 +59,7 @@ const KillSwitchPanel = () => {
   const [phrase, setPhrase] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    const load = async () => { const r = await api.get('/api/execution/limits'); if (alive) setLimits(r); };
-    load();
-    const id = setInterval(load, 15000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  usePoll(async () => { const r = await api.get('/api/execution/limits'); if (r) setLimits(r); }, 15000);
   const haltReady = phrase.trim().toUpperCase() === 'HALT ALL';
   const fire = async () => {
     setBusy(true); setMsg(null);
@@ -123,17 +111,11 @@ export const LiveOpsPanel = ({ onSelectStrategy }) => {
   const [tab, setTab] = useState('orders');
   const [refreshedAt, setRefreshedAt] = useState(null);
 
-  const load = async () => {
+  usePoll(async () => {
     const res = await api.get('/api/operations/live');
     if (res) setData(res);
     setRefreshedAt(new Date().toISOString());
-  };
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 10000);  // 10s — this is the "now" surface
-    return () => clearInterval(id);
-  }, []);
+  }, 10000); // 10s — this is the "now" surface
 
   if (!data) {
     return (

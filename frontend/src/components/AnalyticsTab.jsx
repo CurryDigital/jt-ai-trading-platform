@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { api } from '../utils';
+import React, { useState } from 'react';
+import { api, usePoll } from '../utils';
 
 // Research > Analytics — signal performance, proximity-to-trigger, live feed. Per market.
 const MARKET_META = {
@@ -99,25 +99,18 @@ export const AnalyticsTab = () => {
   const [feed, setFeed] = useState({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const q = `markets=${MARKETS.join(',')}`;
-      const [p, x, f] = await Promise.all([
-        api.get(`/api/signals/performance?${q}`),
-        api.get(`/api/signals/proximity?${q}`),
-        api.get(`/api/signals/feed?${q}&limit=4`),
-      ]);
-      if (!alive) return;
-      setPerf(p?.data || {});
-      setProx(x?.data || {});
-      setFeed(f?.data || {});
-      setLoading(false);
-    };
-    load();
-    const id = setInterval(load, 300000); // 5 min
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  usePoll(async () => {
+    const q = `markets=${MARKETS.join(',')}`;
+    const [p, x, f] = await Promise.all([
+      api.get(`/api/signals/performance?${q}`),
+      api.get(`/api/signals/proximity?${q}`),
+      api.get(`/api/signals/feed?${q}&limit=4`),
+    ]);
+    setPerf(p?.data || {});
+    setProx(x?.data || {});
+    setFeed(f?.data || {});
+    setLoading(false);
+  }, 300000); // 5 min
 
   return (
     <div className="space-y-3">
