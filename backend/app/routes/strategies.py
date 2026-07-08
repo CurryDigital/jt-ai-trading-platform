@@ -72,8 +72,8 @@ def toggle_strategy(strat_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/quant/strategies/delete/{strat_id}")
-def delete_strategy(strat_id: int, db: Session = Depends(get_db)):
-    db.execute(text("DELETE FROM gold.strategy_registry WHERE asset_class = 'quant' WHERE id = :sid"), {"sid": strat_id})
+def delete_strategy(strat_id: str, db: Session = Depends(get_db)):
+    db.execute(text("DELETE FROM gold.strategy_registry WHERE asset_class = 'quant' AND strategy_id = :sid"), {"sid": strat_id})
     db.commit()
     return {"status": "success"}
 
