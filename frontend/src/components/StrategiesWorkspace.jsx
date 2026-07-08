@@ -19,7 +19,8 @@ function useStrategyBook() {
     const load = async () => {
       const rows = await api.get('/api/strategies/researcher');
       if (!alive) return;
-      setBook(mapApiToBook(Array.isArray(rows) ? rows : (rows?.data || [])));
+      const raw = Array.isArray(rows) ? rows : (rows?.strategies || rows?.data || []);
+      setBook(mapApiToBook(raw));
     };
     load();
     const id = setInterval(load, 60000);

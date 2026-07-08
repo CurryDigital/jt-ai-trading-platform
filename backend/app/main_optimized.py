@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 # Routes
-from app.routes import market, stocks, fx, crypto, strategies, positions
+from app.routes import market, stocks, fx, crypto, strategies, positions, signals
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex
 
 # DB
@@ -45,6 +45,7 @@ app.include_router(ibkr.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
 app.include_router(metadata.router, prefix="/api")
 app.include_router(hkex.router, prefix="/api")
+app.include_router(signals.router, prefix="/api")
 
 def get_db():
     db = SessionLocal()

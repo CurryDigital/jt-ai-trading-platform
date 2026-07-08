@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 import logging
 
 # Route modules
-from app.routes import market, stocks, fx, crypto, strategies, positions
+from app.routes import market, stocks, fx, crypto, strategies, positions, research
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex, backtest, agents
 from app.routes import command, markets_v2, macro, signals, settings as settings_routes
 
@@ -111,6 +111,8 @@ app.include_router(command.router)
 app.include_router(markets_v2.router)
 app.include_router(macro.router)
 app.include_router(signals.router)
+# Include research router
+app.include_router(research.router)
 app.include_router(settings_routes.router)
 
 # Include stock detail router (conditional)

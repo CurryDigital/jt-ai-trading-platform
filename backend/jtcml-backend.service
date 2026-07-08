@@ -5,16 +5,14 @@ After=network.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/.openclaw/workspace/agents/jtcml_platform/repo/backend
-Environment=AZURE_OPENAI_API_KEY=9Hjt8RDYsjBflHI9C0qSJRQYSqfb04qgNyjm6JA42AnnV4BKb7qVJQQJ99BFACqBBLyXJ3w3AAABACOGWJK7
-Environment=AZURE_OPENAI_ENDPOINT=https://databricksllmpoc.openai.azure.com/
-Environment=AZURE_OPENAI_DEPLOYMENT=gpt-4.1-nano
-Environment=AZURE_OPENAI_API_VERSION=2025-03-01-preview
-Environment=SERPER_API_KEY=fbccff7e2b07f4c417387bafadd141b97f1583be
+WorkingDirectory=/home/ubuntu/.hermes/profiles/qr_frontend/workspace/jt-ai-trading-platform/backend
 Environment=PYTHONUNBUFFERED=1
-Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/ubuntu/.hermes/profiles/qr_frontend/workspace/jt-ai-trading-platform/backend/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
-ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+# Load DB credentials and optional keys from .env
+EnvironmentFile=/home/ubuntu/.hermes/profiles/qr_frontend/workspace/jt-ai-trading-platform/backend/.env
+
+ExecStart=/home/ubuntu/.hermes/profiles/qr_frontend/workspace/jt-ai-trading-platform/backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-access-log
 ExecReload=/bin/kill -HUP $MAINPID
 
 # Restart policy - always up

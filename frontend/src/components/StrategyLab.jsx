@@ -26,11 +26,22 @@ const StrategyLab = () => {
 
   const assetClasses = [
     { id: 'ALL', label: 'All Strategies', icon: '📊' },
-    { id: 'STOCK', label: 'Equity', icon: '📈' },
+    { id: 'EQUITY', label: 'Equity', icon: '📈' },
+    { id: 'ETF', label: 'ETF', icon: '📋' },
     { id: 'FX', label: 'FX', icon: '💱' },
     { id: 'CRYPTO', label: 'Crypto', icon: '₿' },
     { id: 'COMMODITY', label: 'Commodity', icon: '🛢️' },
   ];
+
+  const normalizeAssetClass = (raw) => {
+    const v = (raw || '').toUpperCase();
+    if (v === 'STOCK' || v === 'EQUITY' || v === 'EQUITY_INDEX' || v === 'QUANT') return 'EQUITY';
+    if (v === 'ETF') return 'ETF';
+    if (v === 'FX') return 'FX';
+    if (v === 'CRYPTO') return 'CRYPTO';
+    if (v === 'COMMODITY' || v === 'COMMODITIES' || v === 'FUTURE') return 'COMMODITY';
+    return 'EQUITY';
+  };
 
   useEffect(() => {
     fetchStrategies(true);
@@ -96,14 +107,14 @@ const StrategyLab = () => {
         })
       });
       
-      const data = await res.json();
+      const data = res.ok ? await res.json().catch(() => ({})) : { success: false, error: res.statusText || 'Deploy failed' };
       setDeployResult({ ...data, strategyId: strategy.id });
-      
+
       // Clear result after 3 seconds
       setTimeout(() => {
         setDeployResult(null);
       }, 3000);
-      
+
       // Refresh if successful
       if (data.success) {
         fetchStrategies(false);
@@ -135,10 +146,10 @@ const StrategyLab = () => {
   // Filter and sort
   const filteredStrategies = useMemo(() => {
     let filtered = mergedStrategies;
-    
+
     // Asset class filter
     if (activeAssetClass !== 'ALL') {
-      filtered = filtered.filter(s => s.asset_class === activeAssetClass);
+      filtered = filtered.filter(s => normalizeAssetClass(s.asset_class) === activeAssetClass);
     }
     
     // Min win rate filter (backtest)
@@ -258,7 +269,7 @@ const StrategyLab = () => {
             }`}>
               {ac.id === 'ALL' 
                 ? strategies.length 
-                : strategies.filter(s => s.asset_class === ac.id).length}
+                : strategies.filter(s => normalizeAssetClass(s.asset_class) === ac.id).length}
             </span>
           </button>
         ))}
@@ -371,14 +382,19 @@ const StrategyLab = () => {
                         </div>
                       </td>
                       <td className="p-3 text-center">
-                        <span className={`text-[10px] px-2 py-1 rounded ${
-                          s.asset_class === 'STOCK' ? 'bg-blue-500/20 text-blue-400' :
-                          s.asset_class === 'FX' ? 'bg-purple-500/20 text-purple-400' :
-                          s.asset_class === 'CRYPTO' ? 'bg-amber-500/20 text-amber-400' :
-                          'bg-rose-500/20 text-rose-400'
-                        }`}>
-                          {s.asset_class}
-                        </span>
+                        {(() => {
+                          const ac = normalizeAssetClass(s.asset_class);
+                          const cls = ac === 'EQUITY' ? 'bg-blue-500/20 text-blue-400' :
+                                      ac === 'ETF' ? 'bg-indigo-500/20 text-indigo-400' :
+                                      ac === 'FX' ? 'bg-purple-500/20 text-purple-400' :
+                                      ac === 'CRYPTO' ? 'bg-amber-500/20 text-amber-400' :
+                                      'bg-rose-500/20 text-rose-400';
+                          return (
+                            <span className={`text-[10px] px-2 py-1 rounded ${cls}`}>
+                              {s.asset_class}
+                            </span>
+                          );
+                        })()}
                       </td>
                       
                       {/* Backtest Metrics - Real data only */}

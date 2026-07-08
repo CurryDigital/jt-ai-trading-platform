@@ -107,3 +107,8 @@ def safe_query_one(db: Session, sql: str, params: dict = None, fallback=None, la
 def clear_missing_table_cache():
     """Clear the cache (e.g., after DDL migration creates the tables)."""
     _missing_tables.clear()
+
+
+# Auto-clear cache on module import so a fresh backend process always tries once.
+# This makes the cache per-request safety rather than a hard persistent skip.
+clear_missing_table_cache()
