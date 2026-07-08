@@ -11,6 +11,18 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>JTCML Trading</title>
+    <script>
+      // Clear any stale PWA/service-worker cache from previous builds so new deployments take effect immediately
+      if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          if (regs.length) {
+            Promise.all(regs.map(function(r) { return r.unregister(); })).then(function() {
+              window.location.reload();
+            });
+          }
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

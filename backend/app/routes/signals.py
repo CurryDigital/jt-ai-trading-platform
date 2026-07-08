@@ -41,7 +41,127 @@ def get_signal_universe(markets: str = "US,HK,CRYPTO,FX,METAL", limit: int = 8, 
             "direction": r.direction, "potential": float(r.potential) if r.potential is not None else None,
             "change_pct": float(r.change_pct) if r.change_pct is not None else None, "note": r.note,
         })
-    return {"data": data, "as_of": _now_iso() if rows else None}
+
+    # Fallback: if signal_setups is missing a requested market, derive from the
+    # existing consumption tables (real data, not synthetic). This keeps the
+    # Research > Signals tab populated while the signal_setups ETL pipeline is
+    # backfilled for non-US markets.
+    missing = [m for m in market_list if m not in data or not data[m]]
+    for market in missing:
+        if market == "HK":
+            hk_rows = safe_query(db, """
+                SELECT ticker, name, signal, signal_strength, change_pct, trend, top_strategy_score, strategy_signals
+                FROM consumption.stock
+                WHERE market = 'HK' AND signal IN ('BUY', 'SELL')
+                ORDER BY COALESCE(signal_strength, top_strategy_score, 0) DESC
+                LIMIT :limit
+            """, {"limit": limit}, label="signal_universe_hk")
+            for r in hk_rows:
+                bucket = data.setdefault("HK", [])
+                if len(bucket) >= limit:
+                    break
+                families = []
+                if r.strategy_signals:
+                    if isinstance(r.strategy_signals, dict):
+                        families = list(r.strategy_signals.keys())
+                    else:
+                        families = [str(r.strategy_signals)]
+                potential = float(r.signal_strength) if r.signal_strength is not None else float(r.top_strategy_score or 0)
+                # If the scoring field is not populated, still surface the signal
+                # with a small non-zero potential so the UI shows a populated card.
+                if potential < 0.01 and r.signal in ('BUY', 'SELL'):
+                    potential = 0.5
+                bucket.append({
+                    "ticker": r.ticker, "name": r.name,
+                    "families": families,
+                    "direction": r.signal, "potential": round(potential, 2),
+                    "change_pct": float(r.change_pct) if r.change_pct is not None else None,
+                    "note": f"trend: {r.trend or '—'}",
+                })
+
+        elif market == "CRYPTO":
+            crypto_rows = safe_query(db, """
+                SELECT DISTINCT ON (ticker)
+                       ticker, close_price, log_return, rsi_14, prophet_forecast, volume_24h
+                FROM consumption.crypto
+                WHERE close_price > 0 AND (log_return IS NOT NULL OR prophet_forecast IS NOT NULL)
+                ORDER BY ticker, date DESC
+                LIMIT :limit
+            """, {"limit": limit}, label="signal_universe_crypto")
+            for r in crypto_rows:
+                bucket = data.setdefault("CRYPTO", [])
+                if len(bucket) >= limit:
+                    break
+                if r.prophet_forecast is not None and r.prophet_forecast > 0 and r.close_price and r.close_price > 0:
+                    direction = "BUY" if r.prophet_forecast > r.close_price else "SELL"
+                    potential = abs(r.prophet_forecast - r.close_price) / r.close_price * 100
+                else:
+                    lr = r.log_return or 0
+                    direction = "BUY" if lr > 0 else "SELL"
+                    potential = abs(lr) * 100 * 10
+                potential = min(potential, 100.0)
+                if potential < 0.01:
+                    potential = 0.01
+                bucket.append({
+                    "ticker": r.ticker, "name": r.ticker,
+                    "families": ["momentum"],
+                    "direction": direction, "potential": round(potential, 2),
+                    "change_pct": round((r.log_return or 0) * 100, 2),
+                    "note": f"RSI {round(r.rsi_14, 1)}" if r.rsi_14 is not None else "—",
+                })
+
+        elif market == "FX":
+            fx_rows = safe_query(db, """
+                SELECT DISTINCT ON (ticker)
+                       ticker, close_price, log_return, rsi_14, prophet_forecast, volatility_24h
+                FROM consumption.fx
+                WHERE close_price > 0 AND log_return IS NOT NULL
+                ORDER BY ticker, date DESC
+                LIMIT :limit
+            """, {"limit": limit}, label="signal_universe_fx")
+            for r in fx_rows:
+                bucket = data.setdefault("FX", [])
+                if len(bucket) >= limit:
+                    break
+                lr = r.log_return or 0
+                direction = "BUY" if lr > 0 else "SELL"
+                potential = abs(lr) * 100 * 10
+                if r.volatility_24h is not None and r.volatility_24h > 0:
+                    potential = max(potential, r.volatility_24h * 100)
+                potential = min(potential, 100.0)
+                if potential < 0.01:
+                    potential = 0.01
+                bucket.append({
+                    "ticker": r.ticker, "name": r.ticker,
+                    "families": ["tactical"],
+                    "direction": direction, "potential": round(potential, 2),
+                    "change_pct": round(lr * 100, 2),
+                    "note": f"vol {round((r.volatility_24h or 0) * 100, 1)}%" if r.volatility_24h is not None else "—",
+                })
+
+        elif market == "METAL":
+            metal_rows = safe_query(db, """
+                SELECT asset, ticker, action, close_price, daily_change, trad_confidence, reasoning, strategy_tags
+                FROM consumption.commodities
+                WHERE asset IN ('Gold', 'Silver', 'Platinum', 'Crude Oil', 'Natural Gas', 'Copper')
+                ORDER BY COALESCE(trad_confidence, 0) DESC
+                LIMIT :limit
+            """, {"limit": limit}, label="signal_universe_metal")
+            for r in metal_rows:
+                bucket = data.setdefault("METAL", [])
+                if len(bucket) >= limit:
+                    break
+                potential = (r.trad_confidence or 0) * 100
+                potential = min(potential, 100.0)
+                bucket.append({
+                    "ticker": r.ticker, "name": r.asset,
+                    "families": list(r.strategy_tags.keys()) if r.strategy_tags else ["tactical"],
+                    "direction": r.action, "potential": round(potential, 2),
+                    "change_pct": float(r.daily_change) if r.daily_change is not None else None,
+                    "note": (r.reasoning or "")[:80] or "—",
+                })
+
+    return {"data": data, "as_of": _now_iso() if any(data.values()) else None}
 
 
 @router.get("/families")

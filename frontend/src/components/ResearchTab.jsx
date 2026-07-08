@@ -1,374 +1,294 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '../utils';
 
-// Research Tab — uses /api/stocks/all (available) instead of broken endpoints
+const BUCKET_ORDER = ['HK', 'FX', 'METAL', 'CRYPTO', 'US'];
+
+const bucketMeta = {
+  US: { title: 'US Equities', icon: '📊', color: '#3b82f6', subtitle: 'Stocks' },
+  HK: { title: 'HK Crypto', icon: '🏙', color: '#f97316', subtitle: 'Hong Kong' },
+  METAL: { title: 'XAU / Metal', icon: '🥇', color: '#eab308', subtitle: 'Gold & silver' },
+  CRYPTO: { title: 'Crypto', icon: '₿', color: '#14b8a6', subtitle: 'Digital assets' },
+  FX: { title: 'FX', icon: '💱', color: '#0ea5e9', subtitle: 'Currency pairs' },
+};
+
+const fmt = (n, d = 2) => {
+  if (n == null || n === '' || Number.isNaN(Number(n))) return '—';
+  return Number(n).toFixed(d);
+};
+
+const pnlCl = (v) => (v == null ? 'text-slate-500' : Number(v) >= 0 ? 'text-emerald-400' : 'text-rose-400');
+
+const normalizeRegime = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw;
+  const riskOn = Number.isFinite(Number(r.risk_on_pct)) ? Number(r.risk_on_pct) : null;
+  const riskOff = Number.isFinite(Number(r.risk_off_pct)) ? Number(r.risk_off_pct) : null;
+  const neutral = Number.isFinite(Number(r.neutral_pct)) ? Number(r.neutral_pct) : null;
+  const confidence = Number.isFinite(Number(r.regime_confidence)) ? Number(r.regime_confidence) : null;
+  const allFifty = [riskOn, riskOff, neutral].every(n => n === 50);
+  const stale = Boolean(r.stale) || allFifty;
+  const dominant = r.dominant_regime || (allFifty ? 'NO DATA' : 'NEUTRAL');
+  return { riskOn, riskOff, neutral, dominant, confidence, stale, allFifty };
+};
+
 export const ResearchTab = ({ onTickerClick }) => {
-  const [activeSection, setActiveSection] = useState('screener'); // screener, signals, movers
-  const [stocks, setStocks] = useState([]);
+  const [activeSection, setActiveSection] = useState('signals');
   const [signals, setSignals] = useState([]);
+  const [universe, setUniverse] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const markets = 'US,HK,CRYPTO,FX,METAL';
 
-  const [filters, setFilters] = useState({
-    market: 'ALL',
-    action: 'ALL',
-    minScore: 0,
-    sortBy: 'score',
-    searchQuery: '',
-    sector: 'ALL',
-  });
+  const [regime, setRegime] = useState({});
+  const [regimeLoading, setRegimeLoading] = useState(false);
+  const [regimeError, setRegimeError] = useState(null);
+  const [regimeLoaded, setRegimeLoaded] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const refreshSignals = () => {
     setLoading(true);
     setError(null);
-    try {
-      // Primary: /api/stocks/all — returns real stock data from consumption layer
-      const stocksRes = await fetch('/api/stocks/all');
-      if (stocksRes.ok) {
-        const data = await stocksRes.json();
-        // Defensive: API returns array directly, but guard against object wrappers
-        const arr = Array.isArray(data) ? data : (data && Array.isArray(data.data)) ? data.data : [];
-        setStocks(arr);
-      } else {
-        setError('Failed to load stock data (HTTP ' + stocksRes.status + ')');
-      }
-
-      // Secondary: /api/signals/1 — may be empty but we try
-      const signalsRes = await fetch('/api/signals/1');
-      if (signalsRes.ok) {
-        const data = await signalsRes.json();
-        const arr = Array.isArray(data) ? data : (data && Array.isArray(data.data)) ? data.data : [];
-        setSignals(arr);
-      }
-    } catch (e) {
-      console.error('ResearchTab fetch error:', e);
-      setError(e.message || 'Network error');
-    }
-    setLoading(false);
+    api.get('/api/signals/universe?markets=' + encodeURIComponent(markets))
+      .then(res => {
+        const data = res?.data || {};
+        setUniverse(data);
+        const all = [];
+        Object.entries(data).forEach(([market, list]) => {
+          (list || []).forEach(item => {
+            all.push({ ...item, market, category: market.toLowerCase() });
+          });
+        });
+        setSignals(all);
+      })
+      .catch(e => {
+        console.error('ResearchTab fetch error:', e);
+        setError(e.message || 'Network error');
+      })
+      .finally(() => setLoading(false));
   };
 
-  // Guard: ensure stocks is always an array before filtering
-  const safeStocks = Array.isArray(stocks) ? stocks : [];
-
-  // Filter stocks
-  const filteredStocks = safeStocks.filter(stock => {
-    if (!stock || typeof stock !== 'object') return false;
-    const ticker = (stock.ticker || '').toUpperCase();
-    const name = (stock.name || '').toLowerCase();
-    const q = filters.searchQuery.toLowerCase();
-    if (q && !ticker.includes(q) && !name.includes(q)) return false;
-    if (filters.market !== 'ALL' && stock.market !== filters.market) return false;
-    if (filters.sector !== 'ALL' && (stock.sector || 'Unknown') !== filters.sector) return false;
-    if (filters.action !== 'ALL' && stock.action !== filters.action) return false;
-    if ((stock.score || 0) < filters.minScore) return false;
-    return true;
-  }).sort((a, b) => {
-    if (filters.sortBy === 'score') return (b.score || 0) - (a.score || 0);
-    if (filters.sortBy === 'change') return (b.change || 0) - (a.change || 0);
-    if (filters.sortBy === 'price') return (b.price || 0) - (a.price || 0);
-    if (filters.sortBy === 'name') return (a.ticker || '').localeCompare(b.ticker || '');
-    return 0;
-  });
-
-  // Top movers (biggest % change)
-  const movers = [...safeStocks]
-    .filter(s => s && s.change != null)
-    .sort((a, b) => Math.abs(b.change || 0) - Math.abs(a.change || 0))
-    .slice(0, 20);
-
-  // Sectors for filter
-  const sectors = [...new Set(safeStocks.map(s => s.sector).filter(Boolean))].sort();
-
-  const sections = [
-    { id: 'screener', label: '🔍 Stock Screener' },
-    { id: 'signals', label: '⚡ Signals' },
-    { id: 'movers', label: '📈 Top Movers' },
-  ];
-
-  const fmt = (n, d = 2) => {
-    if (n == null || n === '' || Number.isNaN(Number(n))) return '—';
-    return Number(n).toFixed(d);
+  const refreshRegime = () => {
+    setRegimeLoading(true);
+    setRegimeError(null);
+    api.get('/api/research/regime-forecast/all?horizon=7d')
+      .then(res => {
+        const data = res?.data || {};
+        const mapped = {};
+        BUCKET_ORDER.forEach(k => { mapped[k] = normalizeRegime(data[k]); });
+        setRegime(mapped);
+        setRegimeLoaded(true);
+      })
+      .catch(e => {
+        console.error('ResearchTab regime fetch error:', e);
+        setRegimeError(e.message || 'Network error');
+      })
+      .finally(() => setRegimeLoading(false));
   };
-  const pnlCl = (v) => (v == null ? 'text-slate-500' : Number(v) >= 0 ? 'text-emerald-400' : 'text-rose-400');
 
-  // Defensive: don't render table if safeStocks is not an array
-  if (!Array.isArray(safeStocks)) {
+  useEffect(() => {
+    const init = () => refreshSignals();
+    init();
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== 'regime' || regimeLoaded) return;
+    const init = () => refreshRegime();
+    init();
+  }, [activeSection, regimeLoaded]);
+
+  const SignalCard = ({ bucketKey }) => {
+    const meta = bucketMeta[bucketKey] || { title: bucketKey, icon: '•', color: '#64748b', subtitle: '' };
+    const list = universe[bucketKey] || [];
+    const top = list.slice(0, 8);
     return (
-      <div className="p-6 text-center text-rose-300 text-sm">
-        ⚠️ Data error: stocks is not an array. <button onClick={fetchData} className="underline">Retry</button>
+      <div className="rounded-xl bg-slate-900/50 border border-white/[0.06] overflow-hidden h-full flex flex-col" style={{ border: `1px solid ${meta.color}44`, borderTop: `3px solid ${meta.color}` }}>
+        <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.color}24` }}>
+          <span className="text-xl flex-none">{meta.icon}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-bold text-white truncate">{meta.title}</div>
+            <div className="text-[9px] text-slate-500">{meta.subtitle}</div>
+          </div>
+          <span className="text-[9px] font-bold text-slate-400 bg-white/[0.06] rounded px-2 py-0.5 flex-none">{list.length} setups</span>
+        </div>
+        <div className="px-3.5 py-1.5 border-t border-white/[0.05] text-[9px] uppercase tracking-wide text-slate-500">Top Opportunities · ranked by potential</div>
+        <div className="flex-1">
+          {top.length === 0 ? (
+            <div className="py-8 text-center text-[11px] text-slate-600">No signals available</div>
+          ) : (
+            top.map((sig, i) => (
+              <div
+                key={`${bucketKey}-${sig.ticker || i}`}
+                onClick={() => onTickerClick && onTickerClick(sig.ticker)}
+                className={`flex items-center gap-3 px-3.5 py-2 cursor-pointer hover:bg-white/[0.03] ${i > 0 ? 'border-t border-white/[0.04]' : ''}`}
+              >
+                <span className="font-mono text-[13px] font-black w-4 flex-none" style={{ color: i === 0 ? meta.color : '#64748b' }}>{i + 1}</span>
+                <div className="min-w-[76px] flex-none">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[12px] font-bold text-white">{sig.ticker}</span>
+                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${sig.direction === 'BUY' ? 'bg-emerald-500/15 text-emerald-400' : sig.direction === 'SELL' ? 'bg-rose-500/15 text-rose-400' : 'bg-amber-500/15 text-amber-400'}`}>{sig.direction || 'HOLD'}</span>
+                  </div>
+                  <div className="text-[9px] text-slate-500">{sig.name || sig.market}</div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] text-slate-300 truncate">{sig.note || '—'}</div>
+                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                    {(sig.families || []).slice(0, 2).map(f => (
+                      <span key={f} className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-slate-500/15 text-slate-400">{f}</span>
+                    ))}
+                    {sig.change_pct != null && <span className={`font-mono text-[9px] ${pnlCl(sig.change_pct)}`}>{sig.change_pct >= 0 ? '+' : ''}{fmt(sig.change_pct)}%</span>}
+                  </div>
+                </div>
+                <div className="w-14 text-right flex-none">
+                  <div className="font-mono text-[13px] font-bold text-white">{fmt(sig.potential, 0)}%</div>
+                  <div className="h-1 rounded bg-white/10 overflow-hidden mt-1">
+                    <div className="h-full" style={{ width: `${Math.min(Math.max((sig.potential || 0), 0), 100)}%`, background: meta.color }} />
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     );
-  }
+  };
+
+  const RegimeCard = ({ bucketKey }) => {
+    const meta = bucketMeta[bucketKey] || { title: bucketKey, icon: '•', color: '#64748b', subtitle: '' };
+    const r = regime[bucketKey];
+    const hasData = Boolean(r && !r.allFifty && !r.stale);
+    const riskOn = r?.riskOn ?? 0;
+    const riskOff = r?.riskOff ?? 0;
+    const neutral = r?.neutral ?? 0;
+    const total = riskOn + riskOff + neutral || 1;
+    const onWidth = `${((riskOn / total) * 100).toFixed(1)}%`;
+    const offWidth = `${((riskOff / total) * 100).toFixed(1)}%`;
+    const neutralWidth = `${((neutral / total) * 100).toFixed(1)}%`;
+    const dominant = r?.dominant || '—';
+    const confidence = r?.confidence;
+
+    return (
+      <div className="rounded-xl bg-slate-900/50 border border-white/[0.06] overflow-hidden h-full flex flex-col" style={{ border: `1px solid ${meta.color}44`, borderTop: `3px solid ${meta.color}` }}>
+        <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.color}24` }}>
+          <span className="text-xl flex-none">{meta.icon}</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-bold text-white truncate">{meta.title}</div>
+            <div className="text-[9px] text-slate-500">7-day regime</div>
+          </div>
+          {r?.stale && <span className="text-[8px] font-bold text-amber-300 bg-amber-500/15 rounded px-1.5 py-0.5 flex-none">STALE</span>}
+        </div>
+        <div className="px-3.5 py-3 flex-1 space-y-3">
+          {!hasData ? (
+            <div className="py-6 text-center text-[11px] text-amber-400">No forecast</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-300">Dominant</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${dominant === 'RISK_ON' ? 'bg-emerald-500/15 text-emerald-400' : dominant === 'RISK_OFF' ? 'bg-rose-500/15 text-rose-400' : 'bg-amber-500/15 text-amber-400'}`}>{dominant.replace(/_/g, ' ')}</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Risk-on</span>
+                  <span>{fmt(riskOn, 0)}%</span>
+                </div>
+                <div className="h-1.5 rounded bg-white/10 overflow-hidden">
+                  <div className="h-full rounded bg-emerald-500" style={{ width: onWidth }} />
+                </div>
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Neutral</span>
+                  <span>{fmt(neutral, 0)}%</span>
+                </div>
+                <div className="h-1.5 rounded bg-white/10 overflow-hidden">
+                  <div className="h-full rounded bg-amber-500" style={{ width: neutralWidth }} />
+                </div>
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Risk-off</span>
+                  <span>{fmt(riskOff, 0)}%</span>
+                </div>
+                <div className="h-1.5 rounded bg-white/10 overflow-hidden">
+                  <div className="h-full rounded bg-rose-500" style={{ width: offWidth }} />
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-white/[0.05]">
+                <span className="text-[9px] text-slate-500">Confidence</span>
+                <span className="text-[10px] font-mono font-bold text-white">{confidence != null ? `${fmt(confidence * 100, 0)}%` : '—'}</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
-      {/* Section Tabs */}
-      <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06]">
-        {sections.map(sec => (
-          <button
-            key={sec.id}
-            onClick={() => setActiveSection(sec.id)}
-            className={`flex-1 px-3 py-2 rounded-md text-[11px] font-bold transition-all ${
-              activeSection === sec.id
-                ? 'bg-blue-500 text-white shadow-lg'
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            {sec.label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-bold text-white">Research</h2>
+          <p className="text-[10px] text-slate-500">Signals across asset classes</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex bg-slate-900/60 rounded-md p-0.5 border border-white/[0.06]">
+            <button
+              onClick={() => setActiveSection('signals')}
+              className={`px-3 py-1 text-[10px] font-bold rounded ${activeSection === 'signals' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
+            >Signals</button>
+            <button
+              onClick={() => setActiveSection('regime')}
+              className={`px-3 py-1 text-[10px] font-bold rounded ${activeSection === 'regime' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
+            >Regime</button>
+          </div>
+          <button onClick={activeSection === 'regime' ? refreshRegime : refreshSignals} className="px-3 py-1 bg-blue-500 hover:bg-blue-400 text-white text-[10px] font-bold rounded-md">🔄 Refresh</button>
+        </div>
       </div>
 
-      {/* Error banner */}
       {error && (
         <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs">
           ⚠️ {error}
-          <button onClick={fetchData} className="ml-2 underline hover:text-rose-200">Retry</button>
+          <button onClick={refreshSignals} className="ml-2 underline hover:text-rose-200">Retry</button>
         </div>
       )}
 
-      {/* === STOCK SCREENER === */}
-      {activeSection === 'screener' && (
-        <div className="space-y-3">
-          {/* Filters */}
-          <div className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06] space-y-3">
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">🔍</span>
-              <input
-                type="text"
-                placeholder="Search ticker or name..."
-                value={filters.searchQuery}
-                onChange={e => setFilters({...filters, searchQuery: e.target.value})}
-                className="w-full pl-8 pr-3 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white placeholder-slate-600 focus:border-blue-500/50 focus:outline-none"
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={filters.market}
-                onChange={e => setFilters({...filters, market: e.target.value})}
-                className="bg-slate-800/80 border border-white/10 rounded px-2 py-1 text-[11px] text-white"
-              >
-                <option value="ALL">All Markets</option>
-                <option value="US">US</option>
-                <option value="HK">HK</option>
-              </select>
-              <select
-                value={filters.sector}
-                onChange={e => setFilters({...filters, sector: e.target.value})}
-                className="bg-slate-800/80 border border-white/10 rounded px-2 py-1 text-[11px] text-white"
-              >
-                <option value="ALL">All Sectors</option>
-                {sectors.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-              <select
-                value={filters.action}
-                onChange={e => setFilters({...filters, action: e.target.value})}
-                className="bg-slate-800/80 border border-white/10 rounded px-2 py-1 text-[11px] text-white"
-              >
-                <option value="ALL">All Actions</option>
-                <option value="BUY">Buy</option>
-                <option value="SELL">Sell</option>
-                <option value="HOLD">Hold</option>
-              </select>
-              <select
-                value={filters.sortBy}
-                onChange={e => setFilters({...filters, sortBy: e.target.value})}
-                className="bg-slate-800/80 border border-white/10 rounded px-2 py-1 text-[11px] text-white"
-              >
-                <option value="score">Sort: Score</option>
-                <option value="change">Sort: Change %</option>
-                <option value="price">Sort: Price</option>
-                <option value="name">Sort: Name</option>
-              </select>
-              <button
-                onClick={fetchData}
-                className="ml-auto px-3 py-1 bg-blue-500 hover:bg-blue-400 text-white text-[10px] font-bold rounded-md transition-colors"
-              >
-                🔄 Refresh
-              </button>
-            </div>
-          </div>
-
-          {/* Results count */}
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-white">{filteredStocks.length} stocks</span>
-            <span className="text-[10px] text-slate-500">{stocks.length} total in DB</span>
-          </div>
-
-          {/* Stock table */}
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="w-6 h-6 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-xs text-slate-500">Loading stocks...</p>
-            </div>
-          ) : filteredStocks.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-sm">
-              <div className="text-3xl mb-2">🔍</div>
-              <p>No stocks match filters</p>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
-              <table className="w-full text-[11px]">
-                <thead className="bg-slate-900/80">
-                  <tr className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                    {['Ticker', 'Name', 'Sector', 'Price', 'Change', 'Score', 'RSI', 'Trend', 'Action'].map(h =>
-                      <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {filteredStocks.map(stock => (
-                    <tr
-                      key={stock.ticker}
-                      onClick={() => onTickerClick && onTickerClick(stock.ticker)}
-                      className="hover:bg-white/[0.03] transition-colors cursor-pointer"
-                    >
-                      <td className="py-2 px-2 font-bold text-white">{stock.ticker}</td>
-                      <td className="py-2 px-2 text-slate-400 max-w-[140px] truncate">{stock.name || '—'}</td>
-                      <td className="py-2 px-2 text-slate-500">{stock.sector || '—'}</td>
-                      <td className="py-2 px-2 text-right font-mono text-white">${fmt(stock.price)}</td>
-                      <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(stock.change)}`}>
-                        {stock.change >= 0 ? '+' : ''}{fmt(stock.change)}%
-                      </td>
-                      <td className="py-2 px-2 text-right font-mono text-white">{Math.round(stock.score || 0)}</td>
-                      <td className="py-2 px-2 text-right font-mono text-slate-400">{fmt(stock.rsi, 1)}</td>
-                      <td className="py-2 px-2 text-right">
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          stock.trend === 'bullish' ? 'bg-emerald-500/15 text-emerald-400' :
-                          stock.trend === 'bearish' ? 'bg-rose-500/15 text-rose-400' :
-                          'bg-slate-500/15 text-slate-400'
-                        }`}>{stock.trend || '—'}</span>
-                      </td>
-                      <td className="py-2 px-2 text-right">
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          stock.action === 'BUY' ? 'bg-emerald-500/15 text-emerald-400' :
-                          stock.action === 'SELL' ? 'bg-rose-500/15 text-rose-400' :
-                          'bg-amber-500/15 text-amber-400'
-                        }`}>{stock.action || 'HOLD'}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {regimeError && activeSection === 'regime' && (
+        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs">
+          ⚠️ {regimeError}
+          <button onClick={refreshRegime} className="ml-2 underline hover:text-rose-200">Retry</button>
         </div>
       )}
 
-      {/* === SIGNALS === */}
-      {activeSection === 'signals' && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-white">{signals.length} signals from /api/signals/1</span>
-            <button onClick={fetchData} className="px-3 py-1 bg-blue-500 hover:bg-blue-400 text-white text-[10px] font-bold rounded-md">🔄 Refresh</button>
-          </div>
-
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="w-6 h-6 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-xs text-slate-500">Loading signals...</p>
-            </div>
-          ) : signals.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-sm">
-              <div className="text-3xl mb-2">⚡</div>
-              <p>No signals available</p>
-              <p className="text-[10px] text-slate-600 mt-1">Consumption layer may be empty or DE pipeline not run</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {signals.slice(0, 50).map((sig, idx) => (
-                <div
-                  key={`${sig.ticker}-${idx}`}
-                  onClick={() => onTickerClick && onTickerClick(sig.ticker)}
-                  className="p-3 rounded-xl bg-slate-900/50 border border-white/[0.06] hover:border-blue-500/40 cursor-pointer transition-all"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h4 className="text-sm font-bold text-white">{sig.ticker}</h4>
-                      <p className="text-[10px] text-slate-500">{sig.category} · {sig.asset}</p>
-                    </div>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                      sig.action === 'BUY' ? 'bg-emerald-500/15 text-emerald-400' :
-                      sig.action === 'SELL' ? 'bg-rose-500/15 text-rose-400' :
-                      'bg-amber-500/15 text-amber-400'
-                    }`}>{sig.action || 'HOLD'}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-slate-800/50 rounded p-1.5">
-                      <span className="text-[9px] text-slate-500 block">Price</span>
-                      <span className="text-xs font-bold text-white">${fmt(sig.price)}</span>
-                    </div>
-                    <div className="bg-slate-800/50 rounded p-1.5">
-                      <span className="text-[9px] text-slate-500 block">Confidence</span>
-                      <span className={`text-xs font-bold ${(sig.total_confidence || 0) >= 70 ? 'text-emerald-400' : (sig.total_confidence || 0) >= 50 ? 'text-blue-400' : 'text-amber-400'}`}>
-                        {fmt(sig.total_confidence)}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      {activeSection === 'signals' && loading && (
+        <div className="text-center py-12">
+          <div className="w-6 h-6 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-2" />
+          <p className="text-xs text-slate-500">Loading signals...</p>
         </div>
       )}
 
-      {/* === TOP MOVERS === */}
-      {activeSection === 'movers' && (
+      {activeSection === 'signals' && !loading && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-white">Top 20 Movers by % Change</span>
-            <button onClick={fetchData} className="px-3 py-1 bg-blue-500 hover:bg-blue-400 text-white text-[10px] font-bold rounded-md">🔄 Refresh</button>
+            <span className="text-[11px] font-bold text-white">{signals.length} signals from /api/signals/universe</span>
+            <span className="text-[10px] text-slate-500">{BUCKET_ORDER.map(k => `${k} ${universe[k]?.length || 0}`).join(' · ')}</span>
           </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {BUCKET_ORDER.map(key => <SignalCard key={key} bucketKey={key} />)}
+          </div>
+        </div>
+      )}
 
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="w-6 h-6 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-xs text-slate-500">Loading...</p>
-            </div>
-          ) : movers.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-sm">
-              <div className="text-3xl mb-2">📈</div>
-              <p>No mover data available</p>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-white/[0.06] overflow-hidden">
-              <table className="w-full text-[11px]">
-                <thead className="bg-slate-900/80">
-                  <tr className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                    {['#', 'Ticker', 'Name', 'Price', 'Change %', 'Volume', 'Action'].map(h =>
-                      <th key={h} className="text-right py-2 px-2 first:text-left">{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {movers.map((stock, idx) => (
-                    <tr
-                      key={stock.ticker}
-                      onClick={() => onTickerClick && onTickerClick(stock.ticker)}
-                      className="hover:bg-white/[0.03] transition-colors cursor-pointer"
-                    >
-                      <td className="py-2 px-2 text-slate-500 font-mono">{idx + 1}</td>
-                      <td className="py-2 px-2 font-bold text-white">{stock.ticker}</td>
-                      <td className="py-2 px-2 text-slate-400 max-w-[140px] truncate">{stock.name || '—'}</td>
-                      <td className="py-2 px-2 text-right font-mono text-white">${fmt(stock.price)}</td>
-                      <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(stock.change)}`}>
-                        {stock.change >= 0 ? '+' : ''}{fmt(stock.change)}%
-                      </td>
-                      <td className="py-2 px-2 text-right font-mono text-slate-400">{stock.volume != null ? Number(stock.volume).toLocaleString() : '—'}</td>
-                      <td className="py-2 px-2 text-right">
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          stock.action === 'BUY' ? 'bg-emerald-500/15 text-emerald-400' :
-                          stock.action === 'SELL' ? 'bg-rose-500/15 text-rose-400' :
-                          'bg-amber-500/15 text-amber-400'
-                        }`}>{stock.action || 'HOLD'}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {activeSection === 'regime' && regimeLoading && (
+        <div className="text-center py-12">
+          <div className="w-6 h-6 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-2" />
+          <p className="text-xs text-slate-500">Loading regime forecasts...</p>
+        </div>
+      )}
+
+      {activeSection === 'regime' && !regimeLoading && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-white">7-day regime forecasts</span>
+            <span className="text-[10px] text-slate-500">{BUCKET_ORDER.map(k => `${k} ${regime[k] ? 'ready' : '—'}`).join(' · ')}</span>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {BUCKET_ORDER.map(key => <RegimeCard key={key} bucketKey={key} />)}
+          </div>
         </div>
       )}
     </div>

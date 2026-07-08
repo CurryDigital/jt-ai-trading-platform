@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api, pnlCl, fmtPct } from '../utils';
+import { api, pnlCl, fmtPct, fmtNum } from '../utils';
 
 // Research > Signals — multi-family setups across US · HK · Crypto · FX · Metals.
 // Signal families ARE the deployed strategies (shared vocabulary with Strategies).
@@ -98,9 +98,9 @@ export const SignalsTab = ({ onOpenStrategy }) => {
                 </div>
               </div>
               <div className="w-14 text-right flex-none">
-                <div className="font-mono text-[13px] font-bold text-white">{s.potential ?? '—'}</div>
+                <div className="font-mono text-[13px] font-bold text-white">{fmtNum(s.potential) ?? '—'}</div>
                 <div className="h-1 rounded bg-white/10 overflow-hidden mt-1">
-                  <div className="h-full" style={{ width: `${s.potential || 0}%`, background: color }} />
+                  <div className="h-full" style={{ width: `${Math.min(s.potential || 0, 100)}%`, background: color }} />
                 </div>
               </div>
             </div>

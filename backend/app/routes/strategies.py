@@ -304,20 +304,36 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
 # =============================================================================
 
 @router.get("/strategies/templates")
-def get_strategy_templates(asset_class: str = None):
-    from app.services.strategy_manager import StrategyManager
-    templates = StrategyManager().get_templates()
+def get_strategy_templates(asset_class: str = None, db: Session = Depends(get_db)):
+    query = "SELECT template_id, name, description, asset_class, min_win_rate, min_sharpe, max_holding_days FROM gold.strategy_templates"
+    params = {}
     if asset_class:
-        templates = [t for t in templates if t.asset_class == asset_class]
-    return [{"id": t.id, "name": t.name, "description": t.description,
-             "asset_class": t.asset_class, "min_win_rate": t.min_win_rate,
-             "min_sharpe": t.min_sharpe, "max_holding_days": t.max_holding_days} for t in templates]
+        query += " WHERE asset_class = :asset_class"
+        params["asset_class"] = asset_class.upper()
+    result = db.execute(text(query), params).fetchall()
+    return [{
+        "id": r.template_id,
+        "name": r.name,
+        "description": r.description,
+        "asset_class": r.asset_class,
+        "min_win_rate": float(r.min_win_rate) if r.min_win_rate is not None else None,
+        "min_sharpe": float(r.min_sharpe) if r.min_sharpe is not None else None,
+        "max_holding_days": r.max_holding_days
+    } for r in result]
 
 
 @router.get("/strategies/templates/{asset_class}")
-def get_templates_for_asset(asset_class: str):
-    from app.services.strategy_manager import StrategyManager
-    return StrategyManager().get_templates_by_asset(asset_class.upper())
+def get_templates_for_asset(asset_class: str, db: Session = Depends(get_db)):
+    result = db.execute(text("""
+        SELECT template_id, name, description, asset_class, min_win_rate, min_sharpe, max_holding_days
+        FROM gold.strategy_templates WHERE asset_class = :asset_class
+    """), {"asset_class": asset_class.upper()}).fetchall()
+    return {r.template_id: {
+        "id": r.template_id, "name": r.name, "description": r.description,
+        "asset_class": r.asset_class, "min_win_rate": float(r.min_win_rate) if r.min_win_rate is not None else None,
+        "min_sharpe": float(r.min_sharpe) if r.min_sharpe is not None else None,
+        "max_holding_days": r.max_holding_days
+    } for r in result}
 
 
 # =============================================================================
@@ -656,6 +672,40 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
 
+@router.get("/strategies/stats")
+def get_strategy_stats(db: Session = Depends(get_db)):
+    """Get actual performance stats for all deployed strategies."""
+    try:
+        result = db.execute(text("""
+            SELECT ps.strategy_id, sd.name as strategy_name, COUNT(*) as total_positions,
+                   SUM(CASE WHEN ps.trades_count > 0 THEN 1 ELSE 0 END) as active_positions,
+                   SUM(COALESCE(ps.invested_capital, 0)) as total_invested,
+                   SUM(COALESCE(ps.realized_pnl, 0)) as total_realized_pnl,
+                   SUM(COALESCE(ps.unrealized_pnl, 0)) as total_unrealized_pnl,
+                   SUM(ps.capital) as total_allocated,
+                   COUNT(CASE WHEN (COALESCE(ps.realized_pnl, 0) + COALESCE(ps.unrealized_pnl, 0)) > 0 THEN 1 END) as winning_positions,
+                   SUM(ps.trades_count) as total_trades
+            FROM consumption.portfolio_positions_current ps
+            LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
+            WHERE ps.status = 'ACTIVE' GROUP BY ps.strategy_id, sd.name
+        """)).fetchall()
+    except Exception as e:
+        logger.error(f"get_strategy_stats query error: {e}")
+        raise
+
+    stats = {}
+    for r in result:
+        total_pnl = (r.total_realized_pnl or 0) + (r.total_unrealized_pnl or 0)
+        win_rate = (r.winning_positions / r.active_positions * 100) if r.active_positions and r.active_positions > 0 else 0
+        stats[r.strategy_id] = {
+            "strategy_id": r.strategy_id, "strategy_name": r.strategy_name,
+            "total_positions": r.total_positions, "active_positions": r.active_positions,
+            "total_invested": float(r.total_invested or 0), "total_allocated": float(r.total_allocated or 0),
+            "total_pnl": total_pnl, "actual_win_rate": round(win_rate, 1), "total_trades": r.total_trades or 0,
+        }
+    return {"success": True, "stats": stats, "count": len(stats)}
+
+
 @router.get("/strategies/{strategy_id:path}")
 def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
     result = db.execute(text("""
@@ -676,7 +726,7 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
         "universe": tickers, "universe_count": len(tickers),
         "venue": result.venue, "status": result.status, "execution_mode": result.execution_mode,
         "signal_logic": result.signal_logic or "Entry conditions not specified",
-        "exit_logic": result.exit_logic or "Exit at +5% profit or -5% stop loss",
+        "exit_logic": result.exit_logic or "Exit at +5% profit target or -5% stop loss",
         "buy_signal": result.signal_logic or "BUY signal triggered by strategy logic",
         "sell_signal": result.exit_logic or "SELL at +5% profit target or -5% stop loss",
         "take_profit": "+5% profit target", "stop_loss": "-5% stop loss limit",
@@ -768,36 +818,6 @@ def export_strategy_results(strategy_id: str, format: str = "csv", min_win_rate:
         return StreamingResponse(io.BytesIO(output.getvalue().encode()), media_type="text/csv",
                                  headers={"Content-Disposition": f"attachment; filename={strategy_id}_screening.csv"})
     return {"strategy_id": strategy_id, "results": [{"rank": i + 1, "ticker": r.ticker} for i, r in enumerate(result)]}
-
-
-@router.get("/strategies/stats")
-def get_strategy_stats(db: Session = Depends(get_db)):
-    """Get actual performance stats for all deployed strategies."""
-    result = db.execute(text("""
-        SELECT ps.strategy_id, sd.name as strategy_name, COUNT(*) as total_positions,
-               SUM(CASE WHEN ps.trades_count > 0 THEN 1 ELSE 0 END) as active_positions,
-               SUM(COALESCE(ps.invested_capital, 0)) as total_invested,
-               SUM(COALESCE(ps.realized_pnl, 0)) as total_realized_pnl,
-               SUM(COALESCE(ps.unrealized_pnl, 0)) as total_unrealized_pnl,
-               SUM(ps.capital) as total_allocated,
-               COUNT(CASE WHEN (COALESCE(ps.realized_pnl, 0) + COALESCE(ps.unrealized_pnl, 0)) > 0 THEN 1 END) as winning_positions,
-               SUM(ps.trades_count) as total_trades
-        FROM consumption.portfolio_positions_current ps
-        LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
-        WHERE ps.status = 'ACTIVE' GROUP BY ps.strategy_id, sd.name
-    """)).fetchall()
-
-    stats = {}
-    for r in result:
-        total_pnl = (r.total_realized_pnl or 0) + (r.total_unrealized_pnl or 0)
-        win_rate = (r.winning_positions / r.active_positions * 100) if r.active_positions and r.active_positions > 0 else 0
-        stats[r.strategy_id] = {
-            "strategy_id": r.strategy_id, "strategy_name": r.strategy_name,
-            "total_positions": r.total_positions, "active_positions": r.active_positions,
-            "total_invested": float(r.total_invested or 0), "total_allocated": float(r.total_allocated or 0),
-            "total_pnl": total_pnl, "actual_win_rate": round(win_rate, 1), "total_trades": r.total_trades or 0,
-        }
-    return {"success": True, "stats": stats, "count": len(stats)}
 
 
 @router.post("/strategies/execute-order")

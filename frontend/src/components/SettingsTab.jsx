@@ -593,11 +593,15 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
                       <th className="text-left py-2">Data Type</th>
                       <th className="text-left py-2">Primary Source</th>
                       <th className="text-left py-2">Frequency</th>
+                      <th className="text-left py-2">Last Refreshed</th>
                       <th className="text-center py-2">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {dataSources.data_sources.map((ds, idx) => (
+                    {dataSources.data_sources.map((ds, idx) => {
+                      const lastRefreshed = ds.last_refreshed ? new Date(ds.last_refreshed) : null;
+                      const isStale = lastRefreshed && (Date.now() - lastRefreshed.getTime()) > 24 * 60 * 60 * 1000;
+                      return (
                       <tr key={idx} className="text-xs">
                         <td className="py-3 text-slate-400">{ds.category}</td>
                         <td className="py-3 text-white font-medium">{ds.data_type}</td>
@@ -612,6 +616,20 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
                           </span>
                         </td>
                         <td className="py-3 text-slate-400">{ds.frequency}</td>
+                        <td className="py-3">
+                          <div className="flex items-center gap-2">
+                            {lastRefreshed ? (
+                              <>
+                                <div className={`w-2 h-2 rounded-full ${isStale ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'}`} />
+                                <span className={`text-[11px] ${isStale ? 'text-amber-400' : 'text-slate-300'}`}>
+                                  {lastRefreshed.toLocaleString()}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">—</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-3 text-center">
                           <span className={`text-[10px] ${
                             ds.status?.includes('✅') ? 'text-emerald-400' :
@@ -623,7 +641,8 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
                           </span>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

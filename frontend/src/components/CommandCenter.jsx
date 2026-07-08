@@ -16,36 +16,60 @@ function EquityCurve({ data, color }) {
   if (!data || data.length < 2) {
     return <div className="h-32 flex items-center justify-center text-[11px] text-slate-600">No equity history yet</div>;
   }
+  const margin = { left: 42, right: 8, top: 8, bottom: 22 };
   const values = data.map(d => d.equity);
   const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
-  const w = 600, h = 128;
-  const x = (i) => (i / (values.length - 1)) * w;
-  const y = (v) => h - 8 - ((v - min) / range) * (h - 22);
+  const w = 600, h = 172;
+  const plotW = w - margin.left - margin.right;
+  const plotH = h - margin.top - margin.bottom;
+  const x = (i) => margin.left + (i / (values.length - 1)) * plotW;
+  const y = (v) => margin.top + plotH - ((v - min) / range) * plotH;
   const line = values.map((v, i) => `${x(i)},${y(v)}`).join(' ');
-  const area = `0,${h} ${line} ${w},${h}`;
+  const area = `${margin.left},${margin.top + plotH} ${line} ${margin.left + plotW},${margin.top + plotH}`;
   const id = 'jt-eq-grad';
+  const yTicks = [min, (min + max) / 2, max];
+  const monthTicks = data.map((d, i) => ({ i, label: d.d, date: new Date(d.d + 'T00:00:00') })).filter((d, i, arr) => {
+    if (i === 0) return true;
+    const prev = arr[i - 1].date;
+    return d.date.getMonth() !== prev.getMonth() || d.date.getFullYear() !== prev.getFullYear();
+  });
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full block" style={{ height: h }}>
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" className="w-full block" style={{ height: h }}>
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.28" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {[0.25, 0.5, 0.75].map(f => (
-        <line key={f} x1="0" y1={h * f} x2={w} y2={h * f} stroke="rgba(255,255,255,0.05)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      ))}
+      {[0, 0.5, 1].map(f => {
+        const gy = margin.top + plotH * f;
+        return <line key={f} x1={margin.left} y1={gy} x2={margin.left + plotW} y2={gy} stroke="rgba(255,255,255,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />;
+      })}
       <polygon points={area} fill={`url(#${id})`} />
       <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      <line x1={margin.left} y1={margin.top + plotH} x2={margin.left + plotW} y2={margin.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      {yTicks.map((v, i) => (
+        <text key={i} x={margin.left - 5} y={y(v) + 3} textAnchor="end" fill="rgba(148,163,184,0.7)" fontSize="8" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+          {fmtK(v)}
+        </text>
+      ))}
+      {monthTicks.map((t, i) => (
+        <text key={i} x={x(t.i)} y={h - 6} textAnchor="middle" fill="rgba(148,163,184,0.7)" fontSize="8" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+          {t.date.toLocaleDateString('en-US', { month: 'short' })}
+        </text>
+      ))}
     </svg>
   );
 }
 
 function Sparkline({ data, color }) {
-  if (!data || !data.length) return <div className="w-[70px] h-[22px]" />;
-  const w = 70, h = 22;
-  const min = Math.min(...data), max = Math.max(...data), range = (max - min) || 1;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - 2 - ((v - min) / range) * (h - 4)}`);
+  if (!data || !data.length) return <div className="w-[90px] h-[22px]" />;
+  const clean = data.filter(v => v != null);
+  if (clean.length < 2) return <div className="w-[90px] h-[22px]" />;
+  const w = 90, h = 22;
+  const min = Math.min(...clean), max = Math.max(...clean), range = (max - min) || 1;
+  const pts = clean.map((v, i) => `${(i / (clean.length - 1)) * w},${h - 2 - ((v - min) / range) * (h - 4)}`);
   return (
     <svg width={w} height={h} className="block">
       <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
@@ -88,6 +112,12 @@ const BreadthBar = ({ label, bd, accent }) => {
   );
 };
 
+function regimeColor(regime) {
+  if (regime === 'bull') return 'text-emerald-400';
+  if (regime === 'bear') return 'text-rose-400';
+  return 'text-slate-400';
+}
+
 function MarketBand({ navigateToTab }) {
   const [indices, setIndices] = useState([]);
   const [breadth, setBreadth] = useState({ us: null, hk: null });
@@ -104,7 +134,11 @@ function MarketBand({ navigateToTab }) {
         api.get('/api/markets/movers'),
       ]);
       if (!alive) return;
-      setIndices(idx?.data || []);
+      // /api/markets/indices returns { data: [...] }; some api.get wrappers may unwrap it.
+      // Accept either shape so every index card renders its own values.
+      const rawIdx = idx?.data || idx;
+      setIndices(Array.isArray(rawIdx) ? rawIdx : []);
+      // Breadth returns a { us: {...}, hk: {...} } map.
       setBreadth(brd || { us: null, hk: null });
       setSentiment(sent || null);
       setMovers(mov || { gainers: [], losers: [] });
@@ -114,8 +148,19 @@ function MarketBand({ navigateToTab }) {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
-  const fg = sentiment?.fear_greed;
-  const fgColor = fg == null ? 'text-slate-400' : fg >= 55 ? 'text-emerald-400' : fg >= 45 ? 'text-blue-400' : 'text-rose-400';
+  const us = sentiment?.us || sentiment;
+  const hk = sentiment?.hk;
+  const usFg = us?.fear_greed;
+  const usFgColor = usFg == null ? 'text-slate-400' : usFg >= 55 ? 'text-emerald-400' : usFg >= 45 ? 'text-blue-400' : 'text-rose-400';
+  const hkFg = hk?.fear_greed;
+  const hkFgColor = hkFg == null ? 'text-slate-400' : hkFg >= 55 ? 'text-emerald-400' : hkFg >= 45 ? 'text-blue-400' : 'text-rose-400';
+
+  const isHK = (ticker) => ticker != null && ticker.endsWith('.HK');
+  const regionMovers = (reg) => {
+    const gain = movers.gainers.filter(m => isHK(m.ticker) === (reg === 'HK')).slice(0, 3);
+    const lose = movers.losers.filter(m => isHK(m.ticker) === (reg === 'HK')).slice(0, 3);
+    return { gain, lose };
+  };
 
   return (
     <Panel title="Market Status" action={
@@ -125,50 +170,88 @@ function MarketBand({ navigateToTab }) {
       </span>
     }>
       <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/[0.05]">
-        {[['US', 'text-blue-400'], ['HK', 'text-rose-400']].map(([reg, accent]) => (
-          <div key={reg} className="p-2.5 flex items-center gap-3">
-            <span className={`font-mono text-lg font-black tracking-wide ${accent}`}>{reg}</span>
-            <div className="flex-1 grid grid-cols-2 gap-1">
-              {indices.filter(i => i.region === reg).map(i => (
-                <div key={i.sym} className="flex items-center justify-between gap-2 px-1">
-                  <div>
-                    <div className="text-[11px] font-bold text-white">{i.sym}</div>
-                    <div className="text-[10px] font-mono text-slate-400">{i.last != null ? i.last.toLocaleString() : '—'}</div>
-                    <div className={`text-[9px] font-mono ${pnlCl(i.change_pct)}`}>{i.change_pct != null ? fmtPct(i.change_pct) : '—'}</div>
+        {['US', 'HK'].map((reg) => {
+          const accent = reg === 'US' ? 'text-blue-400' : 'text-rose-400';
+          const bd = breadth[reg.toLowerCase()];
+          const { gain, lose } = regionMovers(reg);
+          const fg = reg === 'US' ? usFg : hkFg;
+          const fgColor = reg === 'US' ? usFgColor : hkFgColor;
+          const sent = reg === 'US' ? us : hk;
+          return (
+            <div key={reg} className="p-2.5">
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`font-mono text-sm font-black tracking-wide ${accent}`}>{reg}</span>
+                <span className="qr-label">{reg === 'US' ? 'US Markets' : 'HK Markets'}</span>
+              </div>
+
+              {(() => {
+                const regionIdx = indices.filter(i => i.region === reg);
+                const single = regionIdx.length === 1;
+                return (
+                  <div className={`grid gap-1 mb-2.5 ${single ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    {regionIdx.map(i => (
+                      <div key={i.sym} className={`flex items-center justify-between gap-2 px-1 ${single ? 'py-1' : ''}`}>
+                        <div>
+                          <div className="text-[11px] font-bold text-white">{i.sym}</div>
+                          <div className="text-[10px] font-mono text-slate-400">{i.last != null ? i.last.toLocaleString() : '—'}</div>
+                          <div className={`text-[9px] font-mono ${pnlCl(i.change_pct)}`}>{i.change_pct != null ? fmtPct(i.change_pct) : '—'}</div>
+                        </div>
+                        <Sparkline data={i.spark} color={(i.change_pct || 0) >= 0 ? '#34d399' : '#fb7185'} />
+                      </div>
+                    ))}
+                    {regionIdx.length === 0 && (
+                      <div className="col-span-2 text-[10px] text-slate-600">No index data yet</div>
+                    )}
                   </div>
-                  <Sparkline data={i.spark} color={(i.change_pct || 0) >= 0 ? '#34d399' : '#fb7185'} />
+                );
+              })()}
+
+              <BreadthBar label="Adv/Dec" bd={bd} accent={accent} />
+
+              <div className="mt-2.5 grid grid-cols-3 gap-2">
+                <div className="rounded bg-white/[0.03] px-2 py-1">
+                  <div className="qr-label">Fear / Greed</div>
+                  <div className={`font-mono text-base font-bold ${fgColor}`}>
+                    {fg ?? '—'}
+                    {sent?.fear_greed_label && (
+                      <span className="text-[9px] ml-1 text-slate-500">{sent.fear_greed_label}</span>
+                    )}
+                  </div>
                 </div>
-              ))}
-              {indices.filter(i => i.region === reg).length === 0 && (
-                <div className="col-span-2 text-[10px] text-slate-600">No index data yet</div>
+                <div className={`rounded px-2 py-1 ${reg === 'US' ? 'bg-white/[0.03]' : 'bg-transparent'}`}>
+                  <div className="qr-label">VIX</div>
+                  <div className="font-mono text-base font-bold text-white">{reg === 'US' ? (us?.vix ?? '—') : ' '}</div>
+                </div>
+                <div className="rounded bg-white/[0.03] px-2 py-1">
+                  <div className="qr-label">Regime</div>
+                  <div className={`font-mono text-base font-bold ${regimeColor(sent?.regime)}`}>{sent?.regime ?? '—'}</div>
+                </div>
+              </div>
+
+              {(gain.length > 0 || lose.length > 0) && (
+                <div className="mt-2.5">
+                  <div className="qr-label mb-1">Movers</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {gain.map(m => (
+                      <span key={m.ticker} className="flex items-baseline gap-1 flex-none">
+                        <span className="text-[11px] font-bold text-white">{m.ticker}</span>
+                        <span className={`text-[10px] font-mono ${pnlCl(m.change_pct)}`}>{fmtPct(m.change_pct)}</span>
+                      </span>
+                    ))}
+                    {gain.length > 0 && lose.length > 0 && <span className="text-[10px] text-slate-600">|</span>}
+                    {lose.map(m => (
+                      <span key={m.ticker} className="flex items-baseline gap-1 flex-none">
+                        <span className="text-[11px] font-bold text-white">{m.ticker}</span>
+                        <span className={`text-[10px] font-mono ${pnlCl(m.change_pct)}`}>{fmtPct(m.change_pct)}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      <div className="p-2.5 grid grid-cols-1 md:grid-cols-4 gap-3 border-t border-white/[0.05]">
-        <BreadthBar label="US Breadth" bd={breadth.us} accent="text-blue-400" />
-        <BreadthBar label="HK Breadth" bd={breadth.hk} accent="text-rose-400" />
-        <div className="rounded bg-white/[0.03] px-2 py-1">
-          <div className="qr-label">Fear / Greed</div>
-          <div className={`font-mono text-base font-bold ${fgColor}`}>{fg ?? '—'}<span className="text-[9px] ml-1 text-slate-500">{sentiment?.fear_greed_label || ''}</span></div>
-        </div>
-        <div className="rounded bg-white/[0.03] px-2 py-1">
-          <div className="qr-label">VIX</div>
-          <div className="font-mono text-base font-bold text-white">{sentiment?.vix ?? '—'}</div>
-        </div>
-      </div>
-      {(movers.gainers.length > 0 || movers.losers.length > 0) && (
-        <div className="flex items-center gap-3 px-3 py-1.5 border-t border-white/[0.05] overflow-x-auto">
-          <span className="qr-label flex-none">Movers</span>
-          {[...movers.gainers, ...movers.losers].map(m => (
-            <span key={m.ticker} className="flex items-baseline gap-1 flex-none">
-              <span className="text-[11px] font-bold text-white">{m.ticker}</span>
-              <span className={`text-[10px] font-mono ${pnlCl(m.change_pct)}`}>{fmtPct(m.change_pct)}</span>
-            </span>
-          ))}
-        </div>
-      )}
     </Panel>
   );
 }
@@ -230,13 +313,13 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
           <LinkBtn onClick={() => navigateToTab('execution')}>Portfolio →</LinkBtn>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-3">
-          <Panel title="Account Equity · 30 sessions" action={
+          <Panel title="Last 30 Sessions" action={
             ret30 != null ? <span className={`qr-num text-[11px] font-bold ${pnlCl(ret30)}`}>{fmtPct(ret30)}</span> : null
           }>
             <div className="px-3.5 pt-2.5 pb-1 flex items-end justify-between">
               <div>
                 <div className="font-mono text-2xl font-black text-white leading-none">{equity != null ? fmtK(equity) : '—'}</div>
-                <div className="text-[10px] text-slate-500 mt-1">{positions.length} open positions{account?.cash_pct != null ? ` · ${account.cash_pct}% cash` : ''}</div>
+                <div className="text-[10px] text-slate-500 mt-1">{positions.length} open positions{account?.cash_pct != null ? ` · ${Math.round(account.cash_pct)}% cash` : ''}</div>
               </div>
               <div className="text-right">
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">Day P&L</div>

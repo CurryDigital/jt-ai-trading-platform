@@ -49,20 +49,60 @@ def get_market_breadth_v2(regions: str = "US,HK", db: Session = Depends(get_db))
 
 
 @router.get("/sentiment")
-def get_market_sentiment_v2(db: Session = Depends(get_db)):
-    row_list = safe_query(db, """
-        SELECT fear_greed, fear_greed_label, vix, vix_change_pct, put_call
-        FROM consumption.market_sentiment LIMIT 1
-    """, label="markets_sentiment")
-    if not row_list:
-        return {"fear_greed": None, "fear_greed_label": None, "vix": None, "vix_change_pct": None, "put_call": None}
-    r = row_list[0]
-    return {
-        "fear_greed": r.fear_greed, "fear_greed_label": r.fear_greed_label,
-        "vix": float(r.vix) if r.vix is not None else None,
-        "vix_change_pct": float(r.vix_change_pct) if r.vix_change_pct is not None else None,
-        "put_call": float(r.put_call) if r.put_call is not None else None,
-    }
+def get_market_sentiment_v2(regions: str = "US,HK", db: Session = Depends(get_db)):
+    region_list = [r.strip().upper() for r in regions.split(",") if r.strip()]
+
+    # qr_etl added region + regime columns to consumption.market_sentiment.
+    # Query per-region; HK VIX/put_call are NULL because no dedicated HK feed is wired.
+    rows = safe_query(db, """
+        SELECT region, fear_greed, fear_greed_label, vix, vix_change_pct, put_call, regime
+        FROM consumption.market_sentiment
+        WHERE region = ANY(:regions)
+        ORDER BY region
+    """, {"regions": region_list}, label="markets_sentiment")
+    data = {}
+    for r in rows:
+        data[r.region.lower()] = {
+            "fear_greed": r.fear_greed,
+            "fear_greed_label": r.fear_greed_label,
+            "vix": float(r.vix) if r.vix is not None else None,
+            "vix_change_pct": float(r.vix_change_pct) if r.vix_change_pct is not None else None,
+            "put_call": float(r.put_call) if r.put_call is not None else None,
+            "regime": r.regime,
+        }
+
+    # Fallback: legacy flat source for US when the DE view is empty.
+    if "us" not in data:
+        try:
+            from app.main import get_market_sentiment
+            us = get_market_sentiment(country="US", db=db)
+            data["us"] = {
+                "fear_greed": us.get("fearGreed"),
+                "fear_greed_label": us.get("fearGreedLabel"),
+                "vix": us.get("vix"),
+                "vix_change_pct": None,
+                "put_call": None,
+                "regime": None,
+            }
+        except Exception:
+            pass
+
+    # Ensure requested regions always have a key (nulls render as "—" in the UI).
+    for reg in region_list:
+        reg_key = reg.lower()
+        if reg_key not in data:
+            data[reg_key] = {
+                "fear_greed": None, "fear_greed_label": None,
+                "vix": None, "vix_change_pct": None,
+                "put_call": None, "regime": None,
+            }
+
+    # Fallback: keep legacy flat keys for backwards compatibility if only one region present.
+    if len(data) == 1:
+        solo = next(iter(data.values()))
+        solo.update(data)
+        return solo
+    return data
 
 
 @router.get("/movers")

@@ -127,13 +127,14 @@ export function gatesFor(s, d) {
 }
 
 // ---- map /api/strategies/researcher rows to the bundle strategy shape ----
-const ASSET_MAP = { STOCK: 'EQUITY', EQUITY: 'EQUITY', QUANT: 'EQUITY', FX: 'FX', CRYPTO: 'CRYPTO', COMMODITY: 'FUTURE', FUTURE: 'FUTURE' };
+const ASSET_MAP = { STOCK: 'EQUITY', EQUITY: 'EQUITY', ETF: 'EQUITY', EQUITY_INDEX: 'EQUITY', QUANT: 'EQUITY', FX: 'FX', CRYPTO: 'CRYPTO', COMMODITY: 'FUTURE', COMMODITIES: 'FUTURE', FUTURE: 'FUTURE' };
 const HORIZON_BY_ASSET = { EQUITY: 'swing', FX: 'swing', CRYPTO: 'position', FUTURE: 'position' };
 const DEPLOYED_STATUS = new Set(['approved', 'active', 'live', 'deployed']);
 
 function stageFor(row) {
   const st = (row.status || '').toLowerCase();
   if (DEPLOYED_STATUS.has(st) || row.execution_mode === 'LIVE_TRADING') return 'deployed';
+  if (st === 'paper' || row.execution_mode === 'PAPER_TRADING') return 'golden';
   const p = (row.priority || '').toUpperCase();
   if (p === 'GOLDEN') return 'golden';
   if (p === 'NEAR_GOLDEN') return 'near_golden';
