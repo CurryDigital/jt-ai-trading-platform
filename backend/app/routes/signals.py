@@ -177,6 +177,15 @@ def get_signal_families(db: Session = Depends(get_db)):
     return {"data": data}
 
 
+def _pct(v):
+    # ETL currently writes hit_rate as a fraction (0.62); spec says percent.
+    # Normalize so the UI always receives percent.
+    if v is None:
+        return None
+    v = float(v)
+    return round(v * 100, 1) if v <= 1.5 else round(v, 1)
+
+
 @router.get("/performance")
 def get_signal_performance(markets: str = "US,HK,CRYPTO,FX,METAL", db: Session = Depends(get_db)):
     market_list = _market_list(markets)
@@ -187,8 +196,8 @@ def get_signal_performance(markets: str = "US,HK,CRYPTO,FX,METAL", db: Session =
     data = {}
     for r in rows:
         data.setdefault(r.market, []).append({
-            "family": r.family, "hit_rate": float(r.hit_rate) if r.hit_rate is not None else None,
-            "fwd_return_5d": float(r.fwd_return_5d) if r.fwd_return_5d is not None else None,
+            "family": r.family, "hit_rate": _pct(r.hit_rate),
+            "fwd_return_5d": round(float(r.fwd_return_5d), 2) if r.fwd_return_5d is not None else None,
             "n_trades": r.n_trades,
         })
     return {"data": data}
