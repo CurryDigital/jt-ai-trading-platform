@@ -84,10 +84,18 @@ def get_command_overview(db: Session = Depends(get_db)):
             WHERE approved_at IS NOT NULL AND status != 'DEPRECATED'
             ORDER BY sharpe_oos DESC NULLS LAST LIMIT 10
         """)).fetchall()
+        def _pct(v):
+            # win_rate_oos is stored as a fraction (0.6792) in current rows but
+            # some legacy rows hold percents (61.0) — normalize to percent.
+            if v is None:
+                return None
+            v = float(v)
+            return round(v * 100, 1) if v <= 1.5 else round(v, 1)
+
         deployed_health = [{
             "strategy_id": r.strategy_id, "name": r.name, "asset": r.asset,
-            "live_trades": r.live_trades, "live_win_rate": float(r.live_win_rate) if r.live_win_rate is not None else None,
-            "return_pct": float(r.sharpe_oos) if r.sharpe_oos is not None else None,
+            "live_trades": r.live_trades, "live_win_rate": _pct(r.live_win_rate),
+            "sharpe": round(float(r.sharpe_oos), 2) if r.sharpe_oos is not None else None,
         } for r in deployed_rows]
     except ProgrammingError as e:
         logger.warning(f"command_deployed_health: gold.strategy_registry missing approved_at column: {e}")

@@ -332,13 +332,13 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
           <div className="grid grid-cols-2 gap-2">
             {[
               { l: 'Open P&L', v: fmtK(openPnl), sub: (longMV + shortMV) > 0 ? fmtPct(openPnl / (longMV + shortMV) * 100) : null, pos: openPnl >= 0 },
-              { l: 'Buying Power', v: account?.buying_power != null ? fmtK(account.buying_power) : '—', sub: account?.cash_pct != null ? `${account.cash_pct}% cash` : null },
+              { l: 'Buying Power', v: account?.buying_power != null ? fmtK(account.buying_power) : '—', sub: account?.cash_pct != null ? `${Number(account.cash_pct).toFixed(1)}% cash` : null },
               { l: 'Gross Exp', v: gross != null ? `${gross.toFixed(0)}%` : '—', sub: null },
               { l: 'Net Exp', v: net != null ? `${net.toFixed(0)}%` : '—', sub: net >= 0 ? 'net long' : 'net short', pos: net >= 0 },
             ].map(k => (
-              <div key={k.l} className="qr-surface p-2.5">
+              <div key={k.l} className="qr-surface p-2.5 flex flex-col justify-center">
                 <div className="qr-label">{k.l}</div>
-                <div className={`font-mono text-base font-bold mt-0.5 ${k.pos === undefined ? 'text-white' : pnlCl(k.pos ? 1 : -1)}`}>{k.v}</div>
+                <div className={`font-mono text-lg font-bold mt-0.5 ${k.pos === undefined ? 'text-white' : pnlCl(k.pos ? 1 : -1)}`}>{k.v}</div>
                 {k.sub && <div className="text-[9px] text-slate-500 mt-0.5">{k.sub}</div>}
               </div>
             ))}
@@ -379,8 +379,8 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
                     </button>
                     <div className="text-[9px] text-slate-500 ml-3">{s.asset} · {s.live_trades ?? 0} live trades</div>
                   </td>
-                  <td className="py-1.5 px-2 text-right font-mono text-[10px] text-slate-400">WR {s.live_win_rate ?? '—'}%</td>
-                  <td className={`py-1.5 px-3 text-right font-mono text-[11px] font-bold ${pnlCl(s.return_pct)}`}>{s.return_pct != null ? fmtPct(s.return_pct) : '—'}</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-[10px] text-slate-400">WR {s.live_win_rate != null ? `${s.live_win_rate}%` : '—'}</td>
+                  <td className="py-1.5 px-3 text-right font-mono text-[11px] font-bold text-slate-200" title="Out-of-sample Sharpe ratio">SR {s.sharpe ?? '—'}</td>
                 </tr>
               ))}
               {deployedHealth.length === 0 && (
@@ -408,7 +408,7 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
                   <span className={`text-[8px] font-black tracking-wide px-1.5 py-0.5 rounded ${sv.tag}`}>{a.tag}</span>
                   <span className="text-[12px] font-bold text-white truncate">{a.title}</span>
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">{a.impact}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5 truncate" title={a.impact}>{a.impact}</div>
               </div>
               <span className="font-mono text-[10px] text-slate-600 flex-none">{a.age || fmtAge(a.created_at)}</span>
               <button
