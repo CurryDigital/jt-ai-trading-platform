@@ -8,12 +8,13 @@ import { api, usePoll, pnlCl, fmtPct, fmtNum } from '../utils';
 const MARKET_META = {
   US:     { label: 'United States', sub: 'US equities',    sym: 'US',  hex: '#3b82f6' },
   HK:     { label: 'Hong Kong',     sub: 'HK equities',    sym: 'HK',  hex: '#f43f5e' },
+  ETF:    { label: 'ETF',           sub: 'Exchange traded funds', sym: 'ETF', hex: '#8b5cf6' },
   CRYPTO: { label: 'Crypto',        sub: 'Digital assets', sym: 'CR',  hex: '#14b8a6' },
   FX:     { label: 'Forex',         sub: 'Currency pairs', sym: 'FX',  hex: '#0ea5e9' },
   METAL:  { label: 'Metals',        sub: 'Gold & silver',  sym: 'XAU', hex: '#eab308' },
 };
 const MARKETS = Object.keys(MARKET_META);
-const ROWS = [['US', 'HK'], ['CRYPTO', 'FX', 'METAL']];
+const ROWS = [['US', 'HK'], ['ETF', 'METAL'], ['CRYPTO', 'FX']];
 
 export const SignalsTab = ({ onOpenStrategy }) => {
   const [universe, setUniverse] = useState({});
@@ -111,7 +112,7 @@ export const SignalsTab = ({ onOpenStrategy }) => {
       <div className="flex items-end justify-between">
         <div>
           <h2 className="text-sm font-bold text-white">Signals</h2>
-          <p className="text-[10px] text-slate-500">Stock-level analysis — US · HK · Crypto · FX · Metals · click a row to open its strategy</p>
+          <p className="text-[10px] text-slate-500">Stock-level analysis — US · HK · ETF · Crypto · FX · Metals · click a row to open its strategy</p>
         </div>
         {asOf && <span className="text-[9px] text-slate-600">as of {new Date(asOf).toLocaleTimeString()}</span>}
       </div>
@@ -122,7 +123,7 @@ export const SignalsTab = ({ onOpenStrategy }) => {
         </div>
       ) : (
         ROWS.map((row, i) => (
-          <div key={i} className={`grid grid-cols-1 ${row.length === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-3`}>
+          <div key={i} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {row.map(market => <Column key={market} market={market} />)}
           </div>
         ))

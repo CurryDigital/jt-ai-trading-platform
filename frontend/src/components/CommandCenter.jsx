@@ -64,15 +64,22 @@ function EquityCurve({ data, color }) {
 }
 
 function Sparkline({ data, color }) {
-  if (!data || !data.length) return <div className="w-[90px] h-[22px]" />;
+  if (!data || !data.length) return <div className="w-full h-[22px]" />;
   const clean = data.filter(v => v != null);
-  if (clean.length < 2) return <div className="w-[90px] h-[22px]" />;
-  const w = 90, h = 22;
+  if (clean.length < 2) return <div className="w-full h-[22px]" />;
+  const h = 22;
   const min = Math.min(...clean), max = Math.max(...clean), range = (max - min) || 1;
-  const pts = clean.map((v, i) => `${(i / (clean.length - 1)) * w},${h - 2 - ((v - min) / range) * (h - 4)}`);
   return (
-    <svg width={w} height={h} className="block">
-      <polyline points={pts.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    <svg width="100%" height={h} className="block" preserveAspectRatio="none">
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={clean.map((v, i) => `${i / (clean.length - 1)},${1 - ((v - min) / range) * 0.82 - 0.09}`).join(' ')}
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   );
 }
@@ -173,68 +180,77 @@ function MarketBand({ navigateToTab }) {
 
               {(() => {
                 const regionIdx = indices.filter(i => i.region === reg);
-                const single = regionIdx.length === 1;
                 return (
-                  <div className={`grid gap-1 mb-2.5 ${single ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                  <div className="space-y-1 mb-2.5 min-h-[52px]">
                     {regionIdx.map(i => (
-                      <div key={i.sym} className={`flex items-center justify-between gap-2 px-1 ${single ? 'py-1' : ''}`}>
-                        <div>
+                      <div key={i.sym} className="flex items-center justify-between gap-3 px-1">
+                        <div className="flex-none">
                           <div className="text-[11px] font-bold text-white">{i.sym}</div>
                           <div className="text-[10px] font-mono text-slate-400">{i.last != null ? i.last.toLocaleString() : '—'}</div>
                           <div className={`text-[9px] font-mono ${pnlCl(i.change_pct)}`}>{i.change_pct != null ? fmtPct(i.change_pct) : '—'}</div>
                         </div>
-                        <Sparkline data={i.spark} color={(i.change_pct || 0) >= 0 ? '#34d399' : '#fb7185'} />
+                        <div className="flex-1 min-w-0">
+                          <Sparkline data={i.spark} color={(i.change_pct || 0) >= 0 ? '#34d399' : '#fb7185'} />
+                        </div>
                       </div>
                     ))}
                     {regionIdx.length === 0 && (
-                      <div className="col-span-2 text-[10px] text-slate-600">No index data yet</div>
+                      <div className="text-[10px] text-slate-600 flex items-center h-[52px]">No index data yet</div>
                     )}
                   </div>
                 );
               })()}
 
-              <BreadthBar label="Adv/Dec" bd={bd} accent={accent} />
+              <div className="h-[34px]">
+                <BreadthBar label="Adv/Dec" bd={bd} accent={accent} />
+              </div>
 
               <div className="mt-2.5 grid grid-cols-3 gap-2">
-                <div className="rounded bg-white/[0.03] px-2 py-1">
+                <div className="rounded bg-white/[0.03] px-2 h-[58px] flex flex-col justify-center">
                   <div className="qr-label">Fear / Greed</div>
-                  <div className={`font-mono text-base font-bold ${fgColor}`}>
-                    {fg ?? '—'}
-                    {sent?.fear_greed_label && (
-                      <span className="text-[9px] ml-1 text-slate-500">{sent.fear_greed_label}</span>
-                    )}
+                  <div className={`font-mono text-base font-bold leading-tight ${fgColor}`}>{fg ?? '—'}</div>
+                  <div className="text-[9px] text-slate-500 truncate h-[12px]">
+                    {sent?.fear_greed_label || '\u00A0'}
                   </div>
                 </div>
-                <div className={`rounded px-2 py-1 ${reg === 'US' ? 'bg-white/[0.03]' : 'bg-transparent'}`}>
+                <div className={`rounded px-2 h-[58px] flex flex-col justify-center ${reg === 'US' ? 'bg-white/[0.03]' : 'bg-white/[0.02]'}`}>
                   <div className="qr-label">VIX</div>
-                  <div className="font-mono text-base font-bold text-white">{reg === 'US' ? (us?.vix ?? '—') : ' '}</div>
+                  <div className="font-mono text-base font-bold leading-tight text-white">
+                    {reg === 'US' ? (us?.vix ?? '—') : 'N/A'}
+                  </div>
+                  <div className="text-[9px] text-slate-500 truncate h-[12px]">{reg === 'US' ? 'CBOE' : '\u00A0'}</div>
                 </div>
-                <div className="rounded bg-white/[0.03] px-2 py-1">
+                <div className="rounded bg-white/[0.03] px-2 h-[58px] flex flex-col justify-center">
                   <div className="qr-label">Regime</div>
-                  <div className={`font-mono text-base font-bold ${regimeColor(sent?.regime)}`}>{sent?.regime ?? '—'}</div>
+                  <div className={`font-mono text-base font-bold leading-tight ${regimeColor(sent?.regime)}`}>{sent?.regime ?? '—'}</div>
+                  <div className="text-[9px] text-slate-500 truncate h-[12px]">market</div>
                 </div>
               </div>
 
-              {(gain.length > 0 || lose.length > 0) && (
-                <div className="mt-2.5">
-                  <div className="qr-label mb-1">Movers</div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {gain.map(m => (
+              <div className="mt-2.5 space-y-1 min-h-[44px]">
+                <div className="flex items-center gap-2 h-[20px]">
+                  <span className="qr-label flex-none w-[60px] text-emerald-500">↑ Increase</span>
+                  <div className="flex-1 flex items-center gap-2 overflow-hidden">
+                    {gain.length > 0 ? gain.map(m => (
                       <span key={m.ticker} className="flex items-baseline gap-1 flex-none">
                         <span className="text-[11px] font-bold text-white">{m.ticker}</span>
                         <span className={`text-[10px] font-mono ${pnlCl(m.change_pct)}`}>{fmtPct(m.change_pct)}</span>
                       </span>
-                    ))}
-                    {gain.length > 0 && lose.length > 0 && <span className="text-[10px] text-slate-600">|</span>}
-                    {lose.map(m => (
-                      <span key={m.ticker} className="flex items-baseline gap-1 flex-none">
-                        <span className="text-[11px] font-bold text-white">{m.ticker}</span>
-                        <span className={`text-[10px] font-mono ${pnlCl(m.change_pct)}`}>{fmtPct(m.change_pct)}</span>
-                      </span>
-                    ))}
+                    )) : <span className="text-[10px] text-slate-600">—</span>}
                   </div>
                 </div>
-              )}
+                <div className="flex items-center gap-2 h-[20px]">
+                  <span className="qr-label flex-none w-[60px] text-rose-500">↓ Decrease</span>
+                  <div className="flex-1 flex items-center gap-2 overflow-hidden">
+                    {lose.length > 0 ? lose.map(m => (
+                      <span key={m.ticker} className="flex items-baseline gap-1 flex-none">
+                        <span className="text-[11px] font-bold text-white">{m.ticker}</span>
+                        <span className={`text-[10px] font-mono ${pnlCl(m.change_pct)}`}>{fmtPct(m.change_pct)}</span>
+                      </span>
+                    )) : <span className="text-[10px] text-slate-600">—</span>}
+                  </div>
+                </div>
+              </div>
             </div>
           );
         })}

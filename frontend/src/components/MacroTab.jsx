@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { api, usePoll, pnlCl, fmtPct } from '../utils';
 
-// Research > Macro — US & HK equities + Crypto/FX/Metals: regime, KPIs, sectors, calendar, news.
+// Research > Macro — US & HK equities + Crypto/FX/Metals + ETF strategy book summary.
+const ETF_META = { hex: '#8b5cf6' };
 const REGION_META = {
   US: { hex: '#3b82f6' },
   HK: { hex: '#f43f5e' },
@@ -160,30 +161,77 @@ function MiniMacroCard({ m }) {
   );
 }
 
-export const MacroTab = () => {
+function ETFMacroCard({ strategies, onOpenGolden }) {
+  const etf = (strategies || []).filter(s => s.asset_class === 'ETF');
+  const top = etf.slice(0, 3);
+  const meta = ETF_META;
+  return (
+    <div className="jt-surface-strong overflow-hidden" style={{ border: `1px solid ${meta.hex}44`, borderTop: `3px solid ${meta.hex}` }}>
+      <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.hex}24` }}>
+        <span className="font-mono text-lg font-black tracking-wide" style={{ color: meta.hex }}>ETF</span>
+        <div className="flex-1">
+          <div className="text-[13px] font-bold text-white">ETF Strategies</div>
+          <div className="text-[9px] text-slate-500">Golden strategy book</div>
+        </div>
+        <span className="font-mono text-[20px] font-bold text-white">{etf.length}</span>
+      </div>
+      <div className="px-3.5 py-3 border-t border-white/[0.05]">
+        {etf.length === 0 ? (
+          <div className="text-[11px] text-slate-500">No ETF strategies in the book.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {top.map(s => (
+              <div key={s.strategy_id} className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-300 truncate">{s.display_name || s.name}</span>
+                <span className="font-mono text-slate-400">{s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : '—'}</span>
+              </div>
+            ))}
+            {etf.length > 3 && <div className="text-[9px] text-slate-500">+{etf.length - 3} more</div>}
+          </div>
+        )}
+        <button
+          onClick={onOpenGolden}
+          className="mt-3 w-full px-3 py-1.5 rounded text-[10px] font-bold bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
+        >
+          View Golden
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export const MacroTab = ({ navigateToTab, setSubTab }) => {
   const [regions, setRegions] = useState([]);
   const [global, setGlobal] = useState([]);
   const [news, setNews] = useState({});
+  const [etfStrategies, setEtfStrategies] = useState([]);
   const [loading, setLoading] = useState(true);
 
   usePoll(async () => {
-    const [reg, glob, nws] = await Promise.all([
+    const [reg, glob, nws, book] = await Promise.all([
       api.get('/api/macro/regions'),
       api.get('/api/macro/global'),
       api.get('/api/news?markets=US,HK'),
+      api.get('/api/agents/paper/strategy-book-extended'),
     ]);
     setRegions(reg?.data || []);
     setGlobal(glob?.data || []);
     setNews(nws?.data || {});
+    setEtfStrategies(book?.strategies || []);
     setLoading(false);
   }, 900000); // 15 min — matches macro DE refresh cadence
+
+  const openGolden = () => {
+    setSubTab('strategies', 'golden');
+    navigateToTab('strategies');
+  };
 
   return (
     <div className="space-y-3">
       <div className="flex items-end justify-between">
         <div>
           <h2 className="text-sm font-bold text-white">Macro</h2>
-          <p className="text-[10px] text-slate-500">US &amp; HK equities · Crypto · FX · Metals — regime, KPIs &amp; catalysts</p>
+          <p className="text-[10px] text-slate-500">US &amp; HK equities · Crypto · FX · Metals · ETF strategies</p>
         </div>
       </div>
       {loading ? (
@@ -202,6 +250,11 @@ export const MacroTab = () => {
             {(global.length ? global : [{ key: 'CRYPTO' }, { key: 'FX' }, { key: 'METAL' }]).map(m => (
               <MiniMacroCard key={m.key} m={m} />
             ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+            <div className="lg:col-span-1">
+              <ETFMacroCard strategies={etfStrategies} onOpenGolden={openGolden} />
+            </div>
           </div>
         </>
       )}

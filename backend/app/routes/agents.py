@@ -19,7 +19,7 @@ from app.db.session import SessionLocal
 from app.services.agent_events import log_agent_event
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/agents", tags=["agents"])
+router = APIRouter(prefix="/api", tags=["agents"])
 
 # ── Dependency ───────────────────────────────────────────────────────────
 
@@ -748,16 +748,24 @@ def get_paper_strategy_book_extended(db: Session = Depends(get_db)):
                 "exit_logic": r.exit_logic,
                 "source": r.source,
                 "sharpe_ratio": float(r.sharpe_ratio) if r.sharpe_ratio else None,
+                "returns": float(r.returns) if r.returns else None,
                 "win_rate": float(r.win_rate) if r.win_rate else None,
+                "max_drawdown": float(r.max_drawdown) if r.max_drawdown else None,
+                "trade_count": int(r.trade_count) if r.trade_count is not None else None,
+                "turnover": float(r.turnover) if r.turnover else None,
+                "profit_factor": float(r.profit_factor) if r.profit_factor else None,
+                "cvar_95": float(r.cvar_95) if r.cvar_95 else None,
                 "backtest_date": r.backtest_date.isoformat() if r.backtest_date else None,
                 "last_direction": r.last_direction,
                 "last_entry_price": float(r.last_entry_price) if r.last_entry_price else None,
                 "last_traded_at": r.last_traded_at.isoformat() if r.last_traded_at else None,
                 "min_nav_usd": r.min_nav_usd,
-                # annual_pnl values are decimal fractions (e.g. 0.0934 = 9.34% return)
                 "annual_pnl_2024": float(r.annual_pnl_2024) if r.annual_pnl_2024 else None,
                 "annual_pnl_2025": float(r.annual_pnl_2025) if r.annual_pnl_2025 else None,
                 "annual_pnl_2026": float(r.annual_pnl_2026) if r.annual_pnl_2026 else None,
+                "live_pnl": float(r.live_pnl) if r.live_pnl is not None else None,
+                "live_win_rate": float(r.live_win_rate) if r.live_win_rate is not None else None,
+                "live_trades": int(r.live_trades) if r.live_trades is not None else None,
             })
         return {"strategies": strategies, "count": len(strategies)}
     except Exception as e:

@@ -416,7 +416,7 @@ const StrategyLab = () => {
                       
                       <td className="p-3 text-center">
                         {s.max_drawdown !== null && s.max_drawdown !== undefined ? (
-                          <span className="font-mono text-rose-400">{formatNumber(s.max_drawdown, 1)}%</span>
+                          <span className="font-mono text-rose-400">{formatPercent(s.max_drawdown)}%</span>
                         ) : (
                           <span className="text-slate-600">—</span>
                         )}

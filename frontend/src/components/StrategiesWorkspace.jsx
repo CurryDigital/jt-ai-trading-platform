@@ -64,7 +64,7 @@ function Metric({ label, value, color, big }) {
 // yearly_backtest map) — replaces the old fabricated quarter bars.
 function YearlyBars({ yearly }) {
   const years = Object.keys(yearly || {}).sort();
-  const entries = years.map((y) => ({ y, v: yearly[y]?.return_pct })).filter((e) => e.v != null);
+  const entries = years.map((y) => ({ y, v: yearly[y]?.return_pct })).filter((e) => e.v != null).map((e) => ({ ...e, v: Number(e.v) * 100 }));
   if (!entries.length) {
     return <div style={{ padding: '6px 0', fontSize: 9, color: 'var(--text-faint)', textAlign: 'center' }}>No annual backtest data yet</div>;
   }

@@ -15,10 +15,19 @@ const ASSET_MAP = { STOCK: 'EQUITY', EQUITY: 'EQUITY', ETF: 'EQUITY', EQUITY_IND
 const HORIZON_BY_ASSET = { EQUITY: 'swing', FX: 'swing', CRYPTO: 'position', FUTURE: 'position' };
 const DEPLOYED_STATUS = new Set(['approved', 'active', 'live', 'deployed']);
 
+function normalizeMode(row) {
+  const em = (row.execution_mode || '').toUpperCase();
+  if (em === 'LIVE_TRADING' || em === 'LIVE') return 'LIVE_TRADING';
+  if (em === 'PAPER_TRADING' || em === 'PAPER') return 'PAPER_TRADING';
+  if (em === 'SIMULATION' || em === 'SIM') return 'SIMULATION';
+  return null;
+}
+
 function stageFor(row) {
   const st = (row.status || '').toLowerCase();
-  if (DEPLOYED_STATUS.has(st) || row.execution_mode === 'LIVE_TRADING') return 'deployed';
-  if (st === 'paper' || row.execution_mode === 'PAPER_TRADING') return 'golden';
+  const mode = normalizeMode(row);
+  if (DEPLOYED_STATUS.has(st) || mode === 'LIVE_TRADING') return 'deployed';
+  if (st === 'paper' || mode === 'PAPER_TRADING') return 'golden';
   const p = (row.priority || '').toUpperCase();
   if (p === 'GOLDEN') return 'golden';
   if (p === 'NEAR_GOLDEN') return 'near_golden';
@@ -38,7 +47,7 @@ function returnsFor(row) {
     const years = Object.keys(yb).sort();
     for (let i = years.length - 1; i >= 0; i--) {
       const v = yb[years[i]]?.return_pct;
-      if (v != null) return +Number(v).toFixed(1);
+      if (v != null) return +Number(v * 100).toFixed(1);
     }
   }
   return null;
@@ -48,8 +57,8 @@ export function mapApiToBook(rows) {
   return (rows || []).map((row) => {
     const asset = ASSET_MAP[(row.asset_class || '').toUpperCase()] || 'EQUITY';
     const stage = stageFor(row);
-    const wr = row.win_rate != null ? +Number(row.win_rate).toFixed(0) : null;
-    const dd = row.max_drawdown != null ? -Math.abs(+Number(row.max_drawdown).toFixed(1)) : null;
+    const wr = row.win_rate != null ? +Number(row.win_rate * 100).toFixed(0) : null;
+    const dd = row.max_drawdown != null ? -Math.abs(+Number(row.max_drawdown * 100).toFixed(1)) : null;
     const deployed = stage === 'deployed';
     return {
       id: row.id,
@@ -67,7 +76,7 @@ export function mapApiToBook(rows) {
       returns: returnsFor(row),
       sharpe: row.sharpe_ratio != null ? +Number(row.sharpe_ratio).toFixed(2) : 0,
       dd,
-      mode: row.execution_mode || (deployed ? 'LIVE_TRADING' : stage === 'golden' ? 'PAPER_TRADING' : 'SIMULATION'),
+      mode: normalizeMode(row) || (deployed ? 'LIVE_TRADING' : stage === 'golden' ? 'PAPER_TRADING' : 'SIMULATION'),
       signal_family_key: row.signal_family_key || null,
       _api: row,
     };

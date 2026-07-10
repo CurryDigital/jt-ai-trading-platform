@@ -96,6 +96,8 @@ const MODE_STYLE = {
   LIVE_TRADING:   { label: 'LIVE', color: '#fb7185', bg: 'rgba(244,63,94,0.15)', ring: 'rgba(244,63,94,0.4)', pulse: true },
   PAPER_TRADING:  { label: 'PAPER', color: '#fcd34d', bg: 'rgba(245,158,11,0.15)', ring: 'rgba(245,158,11,0.35)' },
   SIMULATION:     { label: 'SIM', color: '#93c5fd', bg: 'rgba(59,130,246,0.15)', ring: 'rgba(59,130,246,0.35)' },
+  PAPER:          { label: 'PAPER', color: '#fcd34d', bg: 'rgba(245,158,11,0.15)', ring: 'rgba(245,158,11,0.35)' },
+  SIM:            { label: 'SIM', color: '#93c5fd', bg: 'rgba(59,130,246,0.15)', ring: 'rgba(59,130,246,0.35)' },
 };
 
 export const ModeBadge = ({ mode = 'SIMULATION', size = 'sm' }) => {

@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import all route modules
-from app.routes import market, stocks, fx, crypto, strategies, positions
+from app.routes import market, stocks, fx, crypto, strategies, positions, agents
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex
 from app.services.ib_web_service import ib_web_service
 
@@ -27,7 +27,7 @@ app.add_middleware(
 )
 
 # Include all routers (routes already have /api prefix)
-routers = [market, stocks, fx, crypto, strategies, positions, 
+routers = [market, stocks, fx, crypto, strategies, positions, agents,
            performance, execution, ibkr, alerts, metadata, hkex]
 for router_module in routers:
     if hasattr(router_module, 'router'):

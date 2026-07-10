@@ -104,7 +104,8 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
             SELECT strategy_id as id, name, asset_class, universe_tickers,
                    execution_mode, status, sharpe_oos, max_drawdown_oos,
                    trade_count_oos, win_rate_oos, conviction_score,
-                   assigned_capital, in_market_capital, signal_logic, exit_logic
+                   assigned_capital, in_market_capital, signal_logic, exit_logic,
+                   priority
             FROM gold.strategy_registry
             WHERE status != 'DEPRECATED'
         """
@@ -118,53 +119,67 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
         query += " ORDER BY sharpe_oos DESC NULLS LAST"
 
         result = safe_query(db, query, params, label="route_researcher_strategies")
-        
-        # Fetch yearly backtest data from gold.strategy_backtest_runs
+
+        # Latest OOS metrics per strategy come from the most recent backtest run,
+        # not the registry snapshot. Registry OOS fields are stale after each new
+        # backtest, so we overlay the latest backtest row on top of registry data.
+        latest_backtest_data = {}
         yearly_backtest_data = {}
         try:
-            yearly_bt = safe_query(db, """
-                SELECT strategy_id,
+            all_bt = safe_query(db, """
+                SELECT DISTINCT ON (strategy_id)
+                       strategy_id,
                        annual_pnl_2024 as pnl_2024,
                        annual_pnl_2025 as pnl_2025,
                        annual_pnl_2026 as pnl_2026,
                        trade_count_oos,
                        sharpe_oos,
                        max_drawdown_oos,
-                       win_rate_oos
+                       win_rate_oos,
+                       returns_oos
                 FROM gold.strategy_backtest_runs
                 WHERE strategy_id IS NOT NULL
-            """, {}, label="route_yearly_bt")
-            for yb in yearly_bt:
+                ORDER BY strategy_id, created_at DESC
+            """, {}, label="route_latest_bt")
+            for yb in all_bt:
                 sid = yb.strategy_id
-                if sid:
-                    if sid not in yearly_backtest_data:
-                        yearly_backtest_data[sid] = {}
-                    if yb.pnl_2024 is not None:
-                        yearly_backtest_data[sid]['2024'] = {
-                            'return_pct': float(yb.pnl_2024),
-                            'trades': int(yb.trade_count_oos) if yb.trade_count_oos else 0,
-                            'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos else None,
-                            'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos else None,
-                            'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos else None
-                        }
-                    if yb.pnl_2025 is not None:
-                        yearly_backtest_data[sid]['2025'] = {
-                            'return_pct': float(yb.pnl_2025),
-                            'trades': int(yb.trade_count_oos) if yb.trade_count_oos else 0,
-                            'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos else None,
-                            'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos else None,
-                            'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos else None
-                        }
-                    if yb.pnl_2026 is not None:
-                        yearly_backtest_data[sid]['2026'] = {
-                            'return_pct': float(yb.pnl_2026),
-                            'trades': int(yb.trade_count_oos) if yb.trade_count_oos else 0,
-                            'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos else None,
-                            'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos else None,
-                            'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos else None
-                        }
+                if not sid:
+                    continue
+                latest_backtest_data[sid] = {
+                    'trade_count_oos': int(yb.trade_count_oos) if yb.trade_count_oos is not None else 0,
+                    'sharpe_oos': float(yb.sharpe_oos) if yb.sharpe_oos is not None else None,
+                    'max_drawdown_oos': float(yb.max_drawdown_oos) if yb.max_drawdown_oos is not None else None,
+                    'win_rate_oos': float(yb.win_rate_oos) if yb.win_rate_oos is not None else None,
+                    'returns_oos': float(yb.returns_oos) if yb.returns_oos is not None else None,
+                }
+                if sid not in yearly_backtest_data:
+                    yearly_backtest_data[sid] = {}
+                if yb.pnl_2024 is not None:
+                    yearly_backtest_data[sid]['2024'] = {
+                        'return_pct': float(yb.pnl_2024),
+                        'trades': int(yb.trade_count_oos) if yb.trade_count_oos is not None else 0,
+                        'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos is not None else None,
+                        'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos is not None else None,
+                        'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos is not None else None
+                    }
+                if yb.pnl_2025 is not None:
+                    yearly_backtest_data[sid]['2025'] = {
+                        'return_pct': float(yb.pnl_2025),
+                        'trades': int(yb.trade_count_oos) if yb.trade_count_oos is not None else 0,
+                        'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos is not None else None,
+                        'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos is not None else None,
+                        'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos is not None else None
+                    }
+                if yb.pnl_2026 is not None:
+                    yearly_backtest_data[sid]['2026'] = {
+                        'return_pct': float(yb.pnl_2026),
+                        'trades': int(yb.trade_count_oos) if yb.trade_count_oos is not None else 0,
+                        'sharpe': float(yb.sharpe_oos) if yb.sharpe_oos is not None else None,
+                        'max_drawdown': float(yb.max_drawdown_oos) if yb.max_drawdown_oos is not None else None,
+                        'win_rate': float(yb.win_rate_oos) if yb.win_rate_oos is not None else None
+                    }
         except Exception as e:
-            logger.error(f"Yearly backtest fetch error: {e}")
+            logger.error(f"Backtest overlay fetch error: {e}")
         
         # Fetch top 5 signals by confidence from gold.strategy_signals
         top_signals_data = {}
@@ -204,6 +219,10 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 tickers = tickers.split(",") if tickers else []
             elif tickers is None:
                 tickers = []
+            elif hasattr(tickers, '__iter__') and not isinstance(tickers, (str, bytes)):
+                tickers = list(tickers)
+            else:
+                tickers = []
             
             sid = row.id
             strategy_signals = top_signals_data.get(sid, [])
@@ -211,13 +230,38 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 {'ticker': t, 'signal': 'HOLD', 'confidence': None, 'strength': None} for t in tickers[:5]
             ]
             yearly_data = yearly_backtest_data.get(sid, {})
+            oos = latest_backtest_data.get(sid, {})
+            
+            # Backtest row is the source of truth for OOS metrics; fallback to registry only
+            # when no backtest run exists. Preserve nulls so the frontend can distinguish
+            # genuinely missing metrics from zeros; coerce None to 0 only for trade_count.
+            trade_count = oos.get('trade_count_oos') if oos.get('trade_count_oos') is not None else (
+                int(row.trade_count_oos) if row.trade_count_oos is not None else 0
+            )
+            sharpe = oos.get('sharpe_oos') if 'sharpe_oos' in oos else (
+                float(row.sharpe_oos) if row.sharpe_oos is not None else None
+            )
+            max_drawdown = oos.get('max_drawdown_oos') if 'max_drawdown_oos' in oos else (
+                float(row.max_drawdown_oos) if row.max_drawdown_oos is not None else None
+            )
+            win_rate = oos.get('win_rate_oos') if 'win_rate_oos' in oos else (
+                float(row.win_rate_oos) if row.win_rate_oos is not None else None
+            )
+            returns_oos = oos.get('returns_oos')
             
             strategies.append({
                 "id": sid, "name": row.name,
                 "asset_class": row.asset_class,
-                "sharpe_ratio": float(row.sharpe_oos) if row.sharpe_oos else 0,
-                "max_drawdown": float(row.max_drawdown_oos) if row.max_drawdown_oos else 0,
-                "win_rate": float(row.win_rate_oos) if row.win_rate_oos else 0,
+                "sharpe_ratio": sharpe,
+                "max_drawdown": max_drawdown,
+                "win_rate": win_rate,
+                "profit_factor": None,
+                "backtest_trades": trade_count,
+                "trade_count_oos": trade_count,
+                "returns_oos": returns_oos,
+                "time_horizon": None,
+                "direction": None,
+                "venue": None,
                 "universe": tickers, "universe_count": len(tickers),
                 "status": row.status, "source": "trade_algo_researcher",
                 "execution_mode": row.execution_mode,
@@ -227,7 +271,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "signal_logic": row.signal_logic,
                 "exit_logic": row.exit_logic,
                 "entry_logic": row.signal_logic,
-                "priority": None,
+                "priority": row.priority if row.priority else None,
                 "version": None,
                 "top_tickers": top_tickers,
                 "yearly_backtest": yearly_data,
