@@ -11,7 +11,7 @@ from app.db.safe_query import safe_query
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
 
-MARKETS = ["US", "HK", "CRYPTO", "FX", "METAL"]
+MARKETS = ["US", "HK", "ETF", "CRYPTO", "FX", "METAL"]
 
 
 def _now_iso():
@@ -23,7 +23,7 @@ def _market_list(markets: str):
 
 
 @router.get("/universe")
-def get_signal_universe(markets: str = "US,HK,CRYPTO,FX,METAL", limit: int = 8, db: Session = Depends(get_db)):
+def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int = 8, db: Session = Depends(get_db)):
     market_list = _market_list(markets)
     rows = safe_query(db, """
         SELECT market, ticker, name, families, direction, potential, change_pct, note

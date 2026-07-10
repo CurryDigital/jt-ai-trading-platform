@@ -22,6 +22,7 @@ const SignalsTab = lazy(() => import('./components/SignalsTab').then(m => ({ def
 const MacroTab = lazy(() => import('./components/MacroTab').then(m => ({ default: m.MacroTab })));
 const AnalyticsTab = lazy(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })));
 const StrategiesWorkspace = lazy(() => import('./components/StrategiesWorkspace').then(m => ({ default: m.StrategiesWorkspace })));
+const GoldenStrategies = lazy(() => import('./components/GoldenStrategies').then(m => ({ default: m.GoldenStrategies })));
 
 const TabFallback = () => (
   <div className="qr-surface px-3 py-8 flex items-center justify-center gap-2 text-[11px] text-slate-500">
@@ -42,6 +43,7 @@ const Icon = {
   Markets: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>),
   Settings: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>),
   Strategies: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>),
+  Golden: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3l4 1.5L12 3l3 1.5L19 3v18l-4-1.5L12 21l-3-1.5L5 21V3z" /></svg>),
 };
 
 // =================================================================
@@ -837,6 +839,7 @@ export default function App() {
       { id: 'lab',              label: 'Lab',         short: 'Lab',  IconComponent: Icon.Lab,         key: 'q' },
       { id: 'strategies',       label: 'Pipeline',    short: 'Pipe', IconComponent: Icon.Strategies,  key: 'w' },
       { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance, key: 'e' },
+      { id: 'golden',          label: 'Golden',      short: 'Gld',  IconComponent: Icon.Golden,      key: 'r' },
     ],
     execution: [
       { id: 'portfolio',        label: 'Live',        short: 'Live', IconComponent: Icon.Portfolio,   key: 'q' },
@@ -1065,7 +1068,7 @@ export default function App() {
         {/* Research tab — find trade ideas */}
         {currentTab === 'research' && (
           <>
-            {activeSubTab === 'macro'            && <MacroTab />}
+            {activeSubTab === 'macro'            && <MacroTab navigateToTab={navigateToTab} setSubTab={setSubTab} />}
             {activeSubTab === 'signals'          && <SignalsTab onOpenStrategy={openStrategyDetail} />}
             {activeSubTab === 'analytics'        && <AnalyticsTab />}
             {activeSubTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
@@ -1078,6 +1081,7 @@ export default function App() {
             {activeSubTab === 'lab'              && <StrategyLab />}
             {activeSubTab === 'strategies'       && <StrategiesWorkspace sub="pipeline" onOpen={openStrategyDetail} />}
             {activeSubTab === 'performance'      && <StrategiesWorkspace sub="performance" onOpen={openStrategyDetail} />}
+            {activeSubTab === 'golden'           && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
           </>
         )}
 

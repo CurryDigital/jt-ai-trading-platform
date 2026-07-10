@@ -57,3 +57,25 @@ def put_settings_section(section: str, payload: dict, db: Session = Depends(get_
         label="settings_audit")
     db.commit()
     return {"section": section, "updated": payload}
+
+
+@router.get("/data-sources")
+def get_data_sources(db: Session = Depends(get_db)):
+    """Return real-time ingestion metadata for the Settings Data Sources tab."""
+    rows = safe_query(db, """
+        SELECT id, category, data_type, primary_source, frequency, last_refreshed, status
+        FROM consumption.settings_data_sources
+        ORDER BY category, data_type, primary_source
+    """, label="settings_data_sources")
+    return [
+        {
+            "id": r.id,
+            "category": r.category,
+            "data_type": r.data_type,
+            "primary_source": r.primary_source,
+            "frequency": r.frequency,
+            "last_refreshed": r.last_refreshed.isoformat() if r.last_refreshed else None,
+            "status": r.status,
+        }
+        for r in rows
+    ]
