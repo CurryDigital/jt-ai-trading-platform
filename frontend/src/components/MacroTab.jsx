@@ -14,16 +14,45 @@ const GLOBAL_META = {
 };
 const DAY2 = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
+// Thresholds match the backend regime model (research.py): ≥55 RISK_ON, ≤45 RISK_OFF.
 function regimeOf(avg) {
   if (avg == null) return { label: '—', cls: 'text-slate-500' };
-  if (avg >= 60) return { label: 'Risk-On', cls: 'text-emerald-400' };
-  if (avg >= 50) return { label: 'Neutral', cls: 'text-amber-400' };
+  if (avg >= 55) return { label: 'Risk-On', cls: 'text-emerald-400' };
+  if (avg > 45) return { label: 'Neutral', cls: 'text-amber-400' };
   return { label: 'Risk-Off', cls: 'text-rose-400' };
 }
 function avgOf(arr) {
   const vals = (arr || []).filter(v => v != null);
   return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
 }
+
+// Turns the 7-day forecast series into a one-line trading instruction.
+function regimeReading(regime7) {
+  const vals = (regime7 || []).filter(v => v != null);
+  if (vals.length < 2) return null;
+  const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  const delta = vals[vals.length - 1] - vals[0];
+  const trend = delta >= 2 ? { arrow: '↗', word: 'strengthening', cls: 'text-emerald-400' }
+    : delta <= -2 ? { arrow: '↘', word: 'fading', cls: 'text-rose-400' }
+    : { arrow: '→', word: 'steady', cls: 'text-slate-400' };
+  const bias = avg >= 55
+    ? 'risk-on bias — long setups favored; adds OK'
+    : avg > 45
+      ? 'no regime edge — trade individual setups, keep sizing normal'
+      : 'risk-off bias — reduce exposure, tighten stops, favor defensive';
+  return { avg, trend, bias };
+}
+
+const RegimeReading = ({ regime7 }) => {
+  const r = regimeReading(regime7);
+  if (!r) return null;
+  return (
+    <div className="mt-2 pt-2 border-t border-white/[0.04] text-[9px] leading-relaxed">
+      <span className={`font-mono font-bold ${r.trend.cls}`}>{r.trend.arrow} {r.trend.word}</span>
+      <span className="text-slate-400"> · {r.bias}</span>
+    </div>
+  );
+};
 function heatBg(v) {
   if (v == null) return 'bg-white/[0.03]';
   const a = Math.min(1, Math.abs(v) / 1.5);
@@ -34,10 +63,10 @@ const Regime7Bar = ({ regime7 }) => (
   <div className="flex items-end justify-between gap-1">
     {(regime7 || Array(7).fill(null)).map((on, i) => (
       <div key={i} className="flex-1 flex flex-col items-center gap-1">
-        <span className={`font-mono text-[9px] font-bold ${on == null ? 'text-slate-600' : on >= 60 ? 'text-emerald-400' : on >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>{on ?? '—'}</span>
+        <span className={`font-mono text-[9px] font-bold ${on == null ? 'text-slate-600' : on >= 55 ? 'text-emerald-400' : on > 45 ? 'text-amber-400' : 'text-rose-400'}`}>{on != null ? Math.round(on) : '—'}</span>
         <div className="relative w-[60%] h-11 rounded bg-white/[0.05] flex flex-col justify-end overflow-hidden">
           <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-white/20 pointer-events-none" />
-          {on != null && <div className={`${on >= 60 ? 'bg-emerald-500' : on >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ height: `${on}%` }} />}
+          {on != null && <div className={`${on >= 55 ? 'bg-emerald-500' : on > 45 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ height: `${on}%` }} />}
         </div>
         <span className="text-[8px] text-slate-600">{DAY2[i]}</span>
       </div>
@@ -77,9 +106,11 @@ function MacroRegionCard({ m, newsForRegion }) {
 
       <div className="px-3.5 py-3 border-t border-white/[0.05]">
         <div className="flex justify-between text-[9px] uppercase tracking-wide text-slate-500 mb-2">
-          <span>7-Day Regime · risk-on %</span><span className="normal-case text-slate-600">50 = neutral</span>
+          <span title="Model-forecast probability that each of the next 7 days favors risk-on positioning">7-Day Regime Forecast · P(risk-on) %</span>
+          <span className="normal-case text-slate-600">≥55 risk-on · 45–55 neutral · ≤45 risk-off</span>
         </div>
         <Regime7Bar regime7={m.regime_7d} />
+        <RegimeReading regime7={m.regime_7d} />
       </div>
 
       <div className="px-3.5 py-3 border-t border-white/[0.05]">
@@ -138,7 +169,7 @@ function MiniMacroCard({ m }) {
           <div className="text-[13px] font-bold text-white">{meta.label}</div>
           <div className="text-[9px] text-slate-500">{meta.sub}</div>
         </div>
-        <span className={`qr-chip ${avg == null ? 'qr-chip-slate' : avg >= 60 ? 'qr-chip-emerald' : avg >= 50 ? 'qr-chip-amber' : 'qr-chip-rose'}`}>{r.label}{avg != null ? ` ${avg}%` : ''}</span>
+        <span className={`qr-chip ${avg == null ? 'qr-chip-slate' : avg >= 55 ? 'qr-chip-emerald' : avg > 45 ? 'qr-chip-amber' : 'qr-chip-rose'}`}>{r.label}{avg != null ? ` ${avg}%` : ''}</span>
       </div>
       <div className="flex border-t border-white/[0.05]">
         {(m.kpis && m.kpis.length ? m.kpis : [['—', '—']]).map(([l, v], i) => (
@@ -149,7 +180,12 @@ function MiniMacroCard({ m }) {
         ))}
       </div>
       <div className="px-3.5 py-3 border-t border-white/[0.05]">
+        <div className="flex justify-between text-[9px] uppercase tracking-wide text-slate-500 mb-2">
+          <span title="Model-forecast probability that each of the next 7 days favors risk-on positioning">7-Day Regime Forecast · P(risk-on) %</span>
+          <span className="normal-case text-slate-600">≥55 on · ≤45 off</span>
+        </div>
         <Regime7Bar regime7={m.regime_7d} />
+        <RegimeReading regime7={m.regime_7d} />
       </div>
       {m.news && (
         <div className="flex items-start gap-2.5 px-3.5 py-2.5 border-t border-white/[0.05]">
@@ -241,20 +277,15 @@ export const MacroTab = ({ navigateToTab, setSubTab }) => {
         </div>
       ) : (
         <>
+          {/* 2×2×2: [US, HK] · [Crypto, FX] · [Metals, ETF] */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 items-start">
             {(regions.length ? regions : [{ key: 'US' }, { key: 'HK' }]).map(m => (
               <MacroRegionCard key={m.key} m={m} newsForRegion={news[m.key]} />
             ))}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             {(global.length ? global : [{ key: 'CRYPTO' }, { key: 'FX' }, { key: 'METAL' }]).map(m => (
               <MiniMacroCard key={m.key} m={m} />
             ))}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-            <div className="lg:col-span-1">
-              <ETFMacroCard strategies={etfStrategies} onOpenGolden={openGolden} />
-            </div>
+            <ETFMacroCard strategies={etfStrategies} onOpenGolden={openGolden} />
           </div>
         </>
       )}
