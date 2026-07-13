@@ -2,8 +2,12 @@
 
 See design-bundle handoff/API_SPEC_v2.md §3-4 and DB_CHANGES_v2.md §4.
 """
+import json
+
 from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
@@ -22,24 +26,72 @@ def _market_list(markets: str):
     return [m.strip() for m in markets.split(",") if m.strip()] or MARKETS
 
 
+def _human_note(note):
+    """Some ETL rows ship raw JSON blobs in note/reasoning — render them readable."""
+    if not note or not note.strip().startswith("{"):
+        return note
+    try:
+        d = json.loads(note)
+    except (ValueError, TypeError):
+        return note[:80]
+    if not isinstance(d, dict):
+        return note[:80]
+    parts = [f"{k.replace('_', ' ')}: {v}" for k, v in d.items() if v is not None]
+    return (" · ".join(parts) or "—")[:80]
+
+
+def _crypto_base(ticker: str) -> str:
+    """ADAUSDT / ADA-USD / ADAUSD all refer to the same asset — dedupe key."""
+    t = (ticker or "").upper()
+    for suf in ("USDT", "-USD", "USD"):
+        if t.endswith(suf) and len(t) > len(suf):
+            return t[: -len(suf)]
+    return t
+
+
 @router.get("/universe")
 def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int = 8, db: Session = Depends(get_db)):
     market_list = _market_list(markets)
-    rows = safe_query(db, """
-        SELECT market, ticker, name, families, direction, potential, change_pct, note
-        FROM consumption.signal_setups WHERE market = ANY(:markets)
-        ORDER BY market, potential DESC
-    """, {"markets": market_list}, label="signal_universe")
+    # Forecast horizons (fwd_5d / fwd_20d / fwd_1q, signed percent) are a pending
+    # qr_etl backfill on consumption.signal_setups — select them opportunistically
+    # and degrade to the base columns until they exist (DB_CHANGES_v2.md §4).
+    has_horizons = True
+    try:
+        rows = db.execute(text("""
+            SELECT market, ticker, name, families, direction, potential, change_pct, note,
+                   fwd_5d, fwd_20d, fwd_1q
+            FROM consumption.signal_setups WHERE market = ANY(:markets)
+            ORDER BY market, potential DESC
+        """), {"markets": market_list}).fetchall()
+    except ProgrammingError:
+        db.rollback()
+        has_horizons = False
+        rows = safe_query(db, """
+            SELECT market, ticker, name, families, direction, potential, change_pct, note
+            FROM consumption.signal_setups WHERE market = ANY(:markets)
+            ORDER BY market, potential DESC
+        """, {"markets": market_list}, label="signal_universe")
     data = {}
     for r in rows:
-        bucket = data.setdefault(r.market, [])
+        # qr_etl misclassifies some HK-listed tickers (e.g. 2800.HK) as US —
+        # reclassify by suffix until fixed upstream (knowledge/research_signals.md).
+        market = r.market
+        if market == "US" and (r.ticker or "").upper().endswith(".HK"):
+            market = "HK"
+        if market not in market_list:
+            continue
+        bucket = data.setdefault(market, [])
         if len(bucket) >= limit:
             continue
         bucket.append({
             "ticker": r.ticker, "name": r.name,
             "families": list(r.families) if r.families is not None else [],
             "direction": r.direction, "potential": float(r.potential) if r.potential is not None else None,
-            "change_pct": float(r.change_pct) if r.change_pct is not None else None, "note": r.note,
+            "change_pct": float(r.change_pct) if r.change_pct is not None else None,
+            "note": _human_note(r.note),
+            "fwd_5d": float(r.fwd_5d) if has_horizons and r.fwd_5d is not None else None,
+            "fwd_20d": float(r.fwd_20d) if has_horizons and r.fwd_20d is not None else None,
+            "fwd_1q": float(r.fwd_1q) if has_horizons and r.fwd_1q is not None else None,
         })
 
     # Fallback: if signal_setups is missing a requested market, derive from the
@@ -67,19 +119,23 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
                     else:
                         families = [str(r.strategy_signals)]
                 potential = float(r.signal_strength) if r.signal_strength is not None else float(r.top_strategy_score or 0)
-                # If the scoring field is not populated, still surface the signal
-                # with a small non-zero potential so the UI shows a populated card.
-                if potential < 0.01 and r.signal in ('BUY', 'SELL'):
-                    potential = 0.5
+                # No fake scores: when the scoring field isn't populated, send null —
+                # the UI shows the row without a score rather than a misleading 0.50.
+                if potential < 0.01:
+                    potential = None
                 bucket.append({
                     "ticker": r.ticker, "name": r.name,
                     "families": families,
-                    "direction": r.signal, "potential": round(potential, 2),
+                    "direction": r.signal,
+                    "potential": round(potential, 2) if potential is not None else None,
                     "change_pct": float(r.change_pct) if r.change_pct is not None else None,
                     "note": f"trend: {r.trend or '—'}",
                 })
 
         elif market == "CRYPTO":
+            # Over-fetch then dedupe: consumption.crypto mixes ticker formats
+            # (ADAUSDT vs ADA-USD) — keep the strongest row per base asset so the
+            # card never shows conflicting BUY/SELL for the same coin.
             crypto_rows = safe_query(db, """
                 SELECT DISTINCT ON (ticker)
                        ticker, close_price, log_return, rsi_14, prophet_forecast, volume_24h
@@ -87,11 +143,9 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
                 WHERE close_price > 0 AND (log_return IS NOT NULL OR prophet_forecast IS NOT NULL)
                 ORDER BY ticker, date DESC
                 LIMIT :limit
-            """, {"limit": limit}, label="signal_universe_crypto")
+            """, {"limit": limit * 3}, label="signal_universe_crypto")
+            best = {}
             for r in crypto_rows:
-                bucket = data.setdefault("CRYPTO", [])
-                if len(bucket) >= limit:
-                    break
                 if r.prophet_forecast is not None and r.prophet_forecast > 0 and r.close_price and r.close_price > 0:
                     direction = "BUY" if r.prophet_forecast > r.close_price else "SELL"
                     potential = abs(r.prophet_forecast - r.close_price) / r.close_price * 100
@@ -102,13 +156,18 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
                 potential = min(potential, 100.0)
                 if potential < 0.01:
                     potential = 0.01
-                bucket.append({
+                row = {
                     "ticker": r.ticker, "name": r.ticker,
                     "families": ["momentum"],
                     "direction": direction, "potential": round(potential, 2),
                     "change_pct": round((r.log_return or 0) * 100, 2),
                     "note": f"RSI {round(r.rsi_14, 1)}" if r.rsi_14 is not None else "—",
-                })
+                }
+                base = _crypto_base(r.ticker)
+                if base not in best or (row["potential"] or 0) > (best[base]["potential"] or 0):
+                    best[base] = row
+            ranked = sorted(best.values(), key=lambda x: x["potential"] or 0, reverse=True)
+            data.setdefault("CRYPTO", []).extend(ranked[:limit])
 
         elif market == "FX":
             fx_rows = safe_query(db, """
@@ -158,7 +217,7 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
                     "families": list(r.strategy_tags.keys()) if r.strategy_tags else ["tactical"],
                     "direction": r.action, "potential": round(potential, 2),
                     "change_pct": float(r.daily_change) if r.daily_change is not None else None,
-                    "note": (r.reasoning or "")[:80] or "—",
+                    "note": _human_note(r.reasoning) or "—",
                 })
 
     return {"data": data, "as_of": _now_iso() if any(data.values()) else None}
