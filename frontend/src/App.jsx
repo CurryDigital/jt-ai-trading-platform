@@ -1071,7 +1071,7 @@ export default function App() {
             {activeSubTab === 'macro'            && <MacroTab navigateToTab={navigateToTab} setSubTab={setSubTab} />}
             {activeSubTab === 'signals'          && <SignalsTab onOpenStrategy={openStrategyDetail} />}
             {activeSubTab === 'analytics'        && <AnalyticsTab />}
-            {activeSubTab === 'research'         && <ResearchTab key="research-tab" onTickerClick={() => {}} />}
+            {activeSubTab === 'research'         && <ResearchTab key="research-tab" onOpenStrategy={openStrategyDetail} />}
           </>
         )}
 
