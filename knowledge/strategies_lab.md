@@ -4,8 +4,9 @@
 registry with backtest-vs-live comparison, filter by asset class / win rate /
 search, and one-click deploy a strategy into a capital pool.
 
-**Component:** `frontend/src/components/StrategyLab.jsx` — refresh 60s (live
-stats), strategies on mount + after deploy.
+**Component:** `frontend/src/components/StrategyLab.jsx` — `usePoll` 60s
+(strategies + live stats), visibility-paused. One-click deploy asks for
+confirmation (guards against an accidental $100k pool).
 
 ## APIs
 
@@ -29,9 +30,13 @@ per strategy overlays stale registry OOS fields) + `gold.strategy_signals` +
 `gold.signal_families` + `gold.strategy_templates`.
 
 ### `GET /api/strategies/stats`
-`{ "stats": { "<id>": { actualWinRate, totalTrades, totalPnL, activePositions, totalInvested } } }`
-Live per-strategy stats from `consumption.portfolio_positions_current` +
-`gold.trade_executions`.
+`{ "success":true, "stats": { "<id>": { strategy_id, strategy_name,
+total_positions, active_positions, total_invested, total_allocated,
+total_pnl, actual_win_rate, total_trades } }, "count":N }`
+Fields are **snake_case**; `actual_win_rate` is already a **percent** (0–100,
+`winning/active × 100`), not a fraction. Live per-strategy stats from
+`consumption.portfolio_positions_current`. (The Lab previously read camelCase
+keys here — `actualWinRate` etc. — so the entire Live column was blank; fixed.)
 
 ### `POST /api/strategies/deploy-with-pool`
 Body `{ strategy_id, tickers[], total_pool }` → creates the capital pool and

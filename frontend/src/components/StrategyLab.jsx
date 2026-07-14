@@ -1,125 +1,102 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
+import { api, usePoll } from '../utils';
 
 /**
- * Strategy Lab - Advanced Strategy Screener with Backtest vs Live Comparison
- * Uses REAL data only - no placeholders
+ * Strategy Lab — backtest screener with live-performance comparison.
+ * Real data only; no placeholders. Backtest metrics come from
+ * /api/strategies/researcher, live metrics from /api/strategies/stats.
  */
+
+const ASSET_CLASSES = [
+  { id: 'ALL', label: 'All' },
+  { id: 'EQUITY', label: 'Equity' },
+  { id: 'ETF', label: 'ETF' },
+  { id: 'FX', label: 'FX' },
+  { id: 'CRYPTO', label: 'Crypto' },
+  { id: 'COMMODITY', label: 'Commodity' },
+];
+
+const CLASS_CHIP = {
+  EQUITY: 'bg-blue-500/20 text-blue-300',
+  ETF: 'bg-violet-500/20 text-violet-300',
+  FX: 'bg-sky-500/20 text-sky-300',
+  CRYPTO: 'bg-teal-500/20 text-teal-300',
+  COMMODITY: 'bg-amber-500/20 text-amber-300',
+};
+
+const DEFAULT_POOL = 100000;
+
+const normalizeAssetClass = (raw) => {
+  const v = (raw || '').toUpperCase();
+  if (['STOCK', 'EQUITY', 'EQUITY_INDEX', 'QUANT'].includes(v)) return 'EQUITY';
+  if (v === 'ETF') return 'ETF';
+  if (v === 'FX') return 'FX';
+  if (v === 'CRYPTO') return 'CRYPTO';
+  if (['COMMODITY', 'COMMODITIES', 'FUTURE'].includes(v)) return 'COMMODITY';
+  return 'EQUITY';
+};
+
+const num = (n, d = 1) => (n == null || isNaN(n) ? null : Number(n).toFixed(d));
+const pct = (n) => (n == null || isNaN(n) ? null : (Number(n) * 100).toFixed(1)); // fraction → percent
+const money = (n) => {
+  if (n == null || isNaN(n)) return null;
+  const a = Math.abs(n);
+  if (a >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (a >= 1e3) return `$${(n / 1e3).toFixed(1)}k`;
+  return `$${n.toFixed(0)}`;
+};
 
 const StrategyLab = () => {
   const [strategies, setStrategies] = useState([]);
   const [liveStats, setLiveStats] = useState({});
   const [loading, setLoading] = useState(true);
-  
-  // Filter states
+
   const [activeAssetClass, setActiveAssetClass] = useState('ALL');
   const [sortBy, setSortBy] = useState('win_rate');
   const [sortDirection, setSortDirection] = useState('desc');
   const [minWinRate, setMinWinRate] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Expanded strategy for detailed view
   const [expandedStrategy, setExpandedStrategy] = useState(null);
-  
-  // Deploy state
+
   const [deployingId, setDeployingId] = useState(null);
   const [deployResult, setDeployResult] = useState(null);
 
-  const assetClasses = [
-    { id: 'ALL', label: 'All Strategies', icon: '📊' },
-    { id: 'EQUITY', label: 'Equity', icon: '📈' },
-    { id: 'ETF', label: 'ETF', icon: '📋' },
-    { id: 'FX', label: 'FX', icon: '💱' },
-    { id: 'CRYPTO', label: 'Crypto', icon: '₿' },
-    { id: 'COMMODITY', label: 'Commodity', icon: '🛢️' },
-  ];
-
-  const normalizeAssetClass = (raw) => {
-    const v = (raw || '').toUpperCase();
-    if (v === 'STOCK' || v === 'EQUITY' || v === 'EQUITY_INDEX' || v === 'QUANT') return 'EQUITY';
-    if (v === 'ETF') return 'ETF';
-    if (v === 'FX') return 'FX';
-    if (v === 'CRYPTO') return 'CRYPTO';
-    if (v === 'COMMODITY' || v === 'COMMODITIES' || v === 'FUTURE') return 'COMMODITY';
-    return 'EQUITY';
+  const fetchStrategies = async () => {
+    const data = await api.get('/api/strategies/researcher');
+    setStrategies(data?.strategies || []);
   };
-
-  useEffect(() => {
-    fetchStrategies(true);
-    fetchLiveStats();
-    
-    // Refresh every 60 seconds
-    const interval = setInterval(() => {
-      fetchLiveStats();
-    }, 60000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchStrategies = async (isInitial = false) => {
-    if (isInitial) setLoading(true);
-    try {
-      const res = await fetch('/api/strategies/researcher');
-      if (res.ok) {
-        const data = await res.json();
-        setStrategies(data.strategies || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch strategies:', e);
-    }
-    if (isInitial) setLoading(false);
-  };
-
   const fetchLiveStats = async () => {
-    try {
-      const res = await fetch('/api/strategies/stats');
-      if (res.ok) {
-        const data = await res.json();
-        setLiveStats(data.stats || {});
-      }
-    } catch (e) {
-      console.error('Failed to fetch live stats:', e);
-    }
+    const data = await api.get('/api/strategies/stats');
+    setLiveStats(data?.stats || {});
   };
 
-  // One-click deploy using strategy's universe tickers
+  usePoll(async () => {
+    await Promise.all([fetchStrategies(), fetchLiveStats()]);
+    setLoading(false);
+  }, 60000);
+
   const handleDeploy = async (strategy) => {
-    if (deployingId) return; // Prevent double clicks
-    
+    if (deployingId) return;
+    const tickers = strategy.universe || [];
+    if (tickers.length === 0) {
+      setDeployResult({ success: false, error: 'No tickers configured', strategyId: strategy.id });
+      setTimeout(() => setDeployResult(null), 3000);
+      return;
+    }
+    if (!window.confirm(`Deploy "${strategy.name}" with a ${money(DEFAULT_POOL)} capital pool across ${tickers.length} ticker(s)?`)) return;
+
     setDeployingId(strategy.id);
     setDeployResult(null);
-    
     try {
-      // Use strategy's universe tickers, fallback to empty array
-      const tickers = strategy.universe || [];
-      
-      if (tickers.length === 0) {
-        setDeployResult({ success: false, error: 'No tickers configured for this strategy' });
-        return;
-      }
-      
       const res = await fetch('/api/strategies/deploy-with-pool', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          strategy_id: strategy.id, 
-          tickers: tickers, 
-          total_pool: 100000 // Default $100k pool
-        })
+        body: JSON.stringify({ strategy_id: strategy.id, tickers, total_pool: DEFAULT_POOL }),
       });
-      
       const data = res.ok ? await res.json().catch(() => ({})) : { success: false, error: res.statusText || 'Deploy failed' };
       setDeployResult({ ...data, strategyId: strategy.id });
-
-      // Clear result after 3 seconds
-      setTimeout(() => {
-        setDeployResult(null);
-      }, 3000);
-
-      // Refresh if successful
-      if (data.success) {
-        fetchStrategies(false);
-        fetchLiveStats();
-      }
+      setTimeout(() => setDeployResult(null), 3000);
+      if (data.success) { fetchStrategies(); fetchLiveStats(); }
     } catch (e) {
       setDeployResult({ success: false, error: e.message, strategyId: strategy.id });
     } finally {
@@ -127,431 +104,203 @@ const StrategyLab = () => {
     }
   };
 
-  // Merge backtest and live data
-  const mergedStrategies = useMemo(() => {
-    return strategies.map(s => {
-      const live = liveStats[s.id] || {};
-      return {
-        ...s,
-        // Live/current year metrics (from actual trades)
-        live_wr: live.actualWinRate,
-        live_trades: live.totalTrades,
-        live_pnl: live.totalPnL,
-        live_positions: live.activePositions,
-        live_invested: live.totalInvested,
-      };
-    });
-  }, [strategies, liveStats]);
+  const merged = useMemo(() => strategies.map(s => {
+    const live = liveStats[s.id] || {};
+    return {
+      ...s,
+      live_wr: live.actual_win_rate,       // already a percent (0–100)
+      live_trades: live.total_trades,
+      live_pnl: live.total_pnl,
+      live_positions: live.active_positions,
+      live_invested: live.total_invested,
+    };
+  }), [strategies, liveStats]);
 
-  // Filter and sort
-  const filteredStrategies = useMemo(() => {
-    let filtered = mergedStrategies;
-
-    // Asset class filter
-    if (activeAssetClass !== 'ALL') {
-      filtered = filtered.filter(s => normalizeAssetClass(s.asset_class) === activeAssetClass);
-    }
-    
-    // Min win rate filter (backtest)
-    if (minWinRate > 0) {
-      filtered = filtered.filter(s => (s.win_rate || 0) * 100 >= minWinRate);
-    }
-    
-    // Search filter
+  const filtered = useMemo(() => {
+    let rows = merged;
+    if (activeAssetClass !== 'ALL') rows = rows.filter(s => normalizeAssetClass(s.asset_class) === activeAssetClass);
+    if (minWinRate > 0) rows = rows.filter(s => (s.win_rate || 0) * 100 >= minWinRate);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(s => 
-        s.name?.toLowerCase().includes(q) ||
-        s.id?.toLowerCase().includes(q) ||
-        s.description?.toLowerCase().includes(q)
-      );
+      rows = rows.filter(s => s.name?.toLowerCase().includes(q) || s.id?.toLowerCase().includes(q) || s.description?.toLowerCase().includes(q));
     }
-    
-    // Sort
-    filtered = [...filtered].sort((a, b) => {
-      let valA, valB;
-      
-      switch (sortBy) {
-        case 'win_rate':
-          valA = a.win_rate || 0;
-          valB = b.win_rate || 0;
-          break;
-        case 'profit_factor':
-          valA = a.profit_factor || 0;
-          valB = b.profit_factor || 0;
-          break;
-        case 'max_drawdown':
-          valA = a.max_drawdown || 0;
-          valB = b.max_drawdown || 0;
-          break;
-        case 'sharpe':
-          valA = a.sharpe_ratio || 0;
-          valB = b.sharpe_ratio || 0;
-          break;
-        case 'backtest_trades':
-          valA = a.backtest_trades || 0;
-          valB = b.backtest_trades || 0;
-          break;
-        case 'live_wr':
-          valA = a.live_wr || 0;
-          valB = b.live_wr || 0;
-          break;
-        case 'live_pnl':
-          valA = a.live_pnl || 0;
-          valB = b.live_pnl || 0;
-          break;
-        default:
-          valA = a.win_rate || 0;
-          valB = b.win_rate || 0;
-      }
-      
-      return sortDirection === 'desc' ? valB - valA : valA - valB;
-    });
-    
-    return filtered;
-  }, [mergedStrategies, activeAssetClass, minWinRate, searchQuery, sortBy, sortDirection]);
+    const field = {
+      win_rate: s => s.win_rate || 0,
+      profit_factor: s => s.profit_factor || 0,
+      max_drawdown: s => s.max_drawdown || 0,
+      sharpe: s => s.sharpe_ratio || 0,
+      backtest_trades: s => s.backtest_trades || 0,
+      live_wr: s => s.live_wr || 0,
+      live_pnl: s => s.live_pnl || 0,
+    }[sortBy] || (s => s.win_rate || 0);
+    return [...rows].sort((a, b) => (sortDirection === 'desc' ? field(b) - field(a) : field(a) - field(b)));
+  }, [merged, activeAssetClass, minWinRate, searchQuery, sortBy, sortDirection]);
 
-  // Format helpers - return null if no data
-  const formatNumber = (num, decimals = 1) => {
-    if (num === null || num === undefined || isNaN(num)) return null;
-    return num.toFixed(decimals);
-  };
-
-  const formatPercent = (num) => {
-    if (num === null || num === undefined || isNaN(num)) return null;
-    return (num * 100).toFixed(1);
-  };
-
-  const formatCurrency = (num) => {
-    if (num === null || num === undefined || isNaN(num)) return null;
-    if (Math.abs(num) >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
-    if (Math.abs(num) >= 1000) return `$${(num / 1000).toFixed(1)}k`;
-    return `$${num.toFixed(0)}`;
-  };
+  const Cell = ({ v }) => v != null ? <span className="font-mono text-slate-300">{v}</span> : <span className="text-slate-600">—</span>;
 
   return (
-    <div className="strategy-lab space-y-4">
-      {/* Header */}
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-bold text-white">Strategy Lab</h2>
-          <p className="text-[10px] text-slate-500 mt-0.5">
-            {filteredStrategies.length} strategies · real backtest data only
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => { fetchStrategies(true); fetchLiveStats(); }}
-            className="qr-btn-ghost"
-          >
-            Refresh
-          </button>
+          <p className="text-[10px] text-slate-500 mt-0.5">{filtered.length} strategies · backtest vs. live · real data only</p>
         </div>
       </div>
 
-      {/* Asset Class Filter Tabs */}
-      <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-900/50 border border-white/[0.05] overflow-x-auto w-fit">
-        {assetClasses.map(ac => (
-          <button
-            key={ac.id}
-            onClick={() => setActiveAssetClass(ac.id)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-bold whitespace-nowrap transition-colors ${
-              activeAssetClass === ac.id
-                ? 'bg-white/[0.08] text-white'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>{ac.icon}</span>
-            {ac.label}
-            <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${
-              activeAssetClass === ac.id ? 'bg-white/20' : 'bg-slate-800'
-            }`}>
-              {ac.id === 'ALL' 
-                ? strategies.length 
-                : strategies.filter(s => normalizeAssetClass(s.asset_class) === ac.id).length}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Search and Sort Controls */}
-      <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10 space-y-4">
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Search */}
-          <div className="relative flex-1 min-w-[200px]">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">🔍</span>
-            <input
-              type="text"
-              placeholder="Search strategies..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-white/10 rounded-lg text-white text-sm placeholder-slate-500 focus:border-blue-500/50 focus:outline-none"
-            />
-          </div>
-          
-          {/* Sort Dropdown */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-400">Sort By:</label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500/50 focus:outline-none"
-            >
-              <option value="win_rate">Win Rate</option>
-              <option value="profit_factor">Profit Factor</option>
-              <option value="max_drawdown">Max Drawdown</option>
-              <option value="sharpe">Sharpe Ratio</option>
-              <option value="backtest_trades">Backtest Trades</option>
-              <option value="live_wr">Live Win Rate</option>
-              <option value="live_pnl">Live P&L</option>
-            </select>
+      {/* Asset-class filter */}
+      <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-900/60 border border-white/[0.06] w-fit overflow-x-auto">
+        {ASSET_CLASSES.map(ac => {
+          const count = ac.id === 'ALL' ? strategies.length : strategies.filter(s => normalizeAssetClass(s.asset_class) === ac.id).length;
+          return (
             <button
-              onClick={() => setSortDirection(d => d === 'desc' ? 'asc' : 'desc')}
-              className="px-3 py-2 bg-slate-800 border border-white/10 rounded-lg text-slate-400 hover:text-white"
+              key={ac.id}
+              onClick={() => setActiveAssetClass(ac.id)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-bold whitespace-nowrap transition-colors ${activeAssetClass === ac.id ? 'bg-white/[0.08] text-white' : 'text-slate-400 hover:text-slate-200'}`}
             >
-              {sortDirection === 'desc' ? '↓' : '↑'}
+              {ac.label}
+              <span className={`px-1.5 py-0.5 rounded text-[9px] ${activeAssetClass === ac.id ? 'bg-white/20' : 'bg-slate-800'}`}>{count}</span>
             </button>
-          </div>
-          
-          {/* Min Win Rate */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-slate-400">Min WR:</label>
-            <select
-              value={minWinRate}
-              onChange={(e) => setMinWinRate(Number(e.target.value))}
-              className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-            >
-              <option value={0}>Any</option>
-              <option value={50}>50%+</option>
-              <option value={55}>55%+</option>
-              <option value={60}>60%+</option>
-              <option value={65}>65%+</option>
-            </select>
-          </div>
+          );
+        })}
+      </div>
+
+      {/* Controls */}
+      <div className="jt-surface-strong px-3 py-2.5 flex flex-wrap items-center gap-3">
+        <input
+          type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search strategies…"
+          className="flex-1 min-w-[180px] bg-slate-900/60 border border-white/[0.08] rounded-md px-3 py-1.5 text-[11px] text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50"
+        />
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-slate-400">Sort</label>
+          <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="bg-slate-900/60 border border-white/[0.08] rounded-md px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-blue-500/50">
+            <option value="win_rate">Win Rate</option>
+            <option value="profit_factor">Profit Factor</option>
+            <option value="max_drawdown">Max Drawdown</option>
+            <option value="sharpe">Sharpe Ratio</option>
+            <option value="backtest_trades">Backtest Trades</option>
+            <option value="live_wr">Live Win Rate</option>
+            <option value="live_pnl">Live P&amp;L</option>
+          </select>
+          <button onClick={() => setSortDirection(d => d === 'desc' ? 'asc' : 'desc')} className="px-2.5 py-1.5 bg-slate-900/60 border border-white/[0.08] rounded-md text-slate-400 hover:text-white text-[11px]">
+            {sortDirection === 'desc' ? '↓' : '↑'}
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-slate-400">Min WR</label>
+          <select value={minWinRate} onChange={e => setMinWinRate(Number(e.target.value))} className="bg-slate-900/60 border border-white/[0.08] rounded-md px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-blue-500/50">
+            <option value={0}>Any</option>
+            <option value={50}>50%+</option>
+            <option value={55}>55%+</option>
+            <option value={60}>60%+</option>
+            <option value={65}>65%+</option>
+          </select>
         </div>
       </div>
 
-      {/* Strategy Table - Compact View */}
       {loading ? (
-        <div className="text-center py-12">
-          <div className="w-8 h-8 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-sm text-slate-500">Loading strategies...</p>
+        <div className="qr-surface px-3 py-10 flex items-center justify-center gap-2 text-[11px] text-slate-500">
+          <div className="w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+          Loading strategies…
         </div>
-      ) : filteredStrategies.length === 0 ? (
-        <div className="text-center py-12 text-slate-500">
-          <div className="text-4xl mb-4">🧪</div>
-          <p>No strategies match your filters</p>
-        </div>
+      ) : filtered.length === 0 ? (
+        <div className="qr-surface px-3 py-10 text-center text-[11px] text-slate-500">No strategies match your filters</div>
       ) : (
-        <div className="rounded-xl border border-white/10 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-900/80 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+        <div className="jt-surface-strong overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead className="text-[9px] font-black text-slate-500 uppercase tracking-wide border-b border-white/[0.08]">
               <tr>
-                <th className="text-left p-3">Strategy</th>
-                <th className="text-center p-3">Class</th>
-                <th className="text-center p-3 cursor-pointer hover:text-white" onClick={() => { setSortBy('win_rate'); setSortDirection('desc'); }}>
-                  WR ↕
-                </th>
-                <th className="text-center p-3">PF</th>
-                <th className="text-center p-3">MDD</th>
-                <th className="text-center p-3">Sharpe</th>
-                <th className="text-center p-3">Trades</th>
-                <th className="text-center p-3 bg-emerald-900/20">Live WR</th>
-                <th className="text-center p-3 bg-emerald-900/20">Live P&L</th>
-                <th className="text-right p-3">Action</th>
+                <th className="text-left p-2.5">Strategy</th>
+                <th className="text-center p-2.5">Class</th>
+                <th className="text-center p-2.5">WR</th>
+                <th className="text-center p-2.5">PF</th>
+                <th className="text-center p-2.5">MDD</th>
+                <th className="text-center p-2.5">Sharpe</th>
+                <th className="text-center p-2.5">Trades</th>
+                <th className="text-center p-2.5 bg-emerald-900/20">Live WR</th>
+                <th className="text-center p-2.5 bg-emerald-900/20">Live P&amp;L</th>
+                <th className="text-right p-2.5" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
-              {filteredStrategies.map((s, idx) => {
+            <tbody>
+              {filtered.map((s, idx) => {
                 const isExpanded = expandedStrategy === s.id;
-                
+                const ac = normalizeAssetClass(s.asset_class);
                 return (
                   <React.Fragment key={s.id}>
-                    <tr 
-                      className="hover:bg-white/5 transition-colors cursor-pointer"
-                      onClick={() => setExpandedStrategy(isExpanded ? null : s.id)}
-                    >
-                      <td className="p-3">
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-slate-500 font-mono">#{idx + 1}</span>
+                    <tr className="border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer" onClick={() => setExpandedStrategy(isExpanded ? null : s.id)}>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-[10px] text-slate-600 font-mono">#{idx + 1}</span>
                           <div>
                             <div className="font-bold text-white">{s.name}</div>
-                            <div className="text-[10px] text-slate-500">{s.id}</div>
+                            <div className="text-[9px] text-slate-500">{s.id}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="p-3 text-center">
-                        {(() => {
-                          const ac = normalizeAssetClass(s.asset_class);
-                          const cls = ac === 'EQUITY' ? 'bg-blue-500/20 text-blue-400' :
-                                      ac === 'ETF' ? 'bg-indigo-500/20 text-indigo-400' :
-                                      ac === 'FX' ? 'bg-purple-500/20 text-purple-400' :
-                                      ac === 'CRYPTO' ? 'bg-amber-500/20 text-amber-400' :
-                                      'bg-rose-500/20 text-rose-400';
-                          return (
-                            <span className={`text-[10px] px-2 py-1 rounded ${cls}`}>
-                              {s.asset_class}
-                            </span>
-                          );
-                        })()}
+                      <td className="p-2.5 text-center">
+                        <span className={`text-[9px] px-2 py-0.5 rounded font-bold ${CLASS_CHIP[ac] || 'bg-slate-500/20 text-slate-300'}`} title={s.asset_class || ''}>{ac}</span>
                       </td>
-                      
-                      {/* Backtest Metrics - Real data only */}
-                      <td className="p-3 text-center">
-                        {s.win_rate !== null && s.win_rate !== undefined ? (
-                          <span className="font-mono text-slate-300">{formatPercent(s.win_rate)}%</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
+                      <td className="p-2.5 text-center"><Cell v={pct(s.win_rate) != null ? `${pct(s.win_rate)}%` : null} /></td>
+                      <td className="p-2.5 text-center"><Cell v={num(s.profit_factor, 2)} /></td>
+                      <td className="p-2.5 text-center">{s.max_drawdown != null ? <span className="font-mono text-rose-400">{pct(s.max_drawdown)}%</span> : <span className="text-slate-600">—</span>}</td>
+                      <td className="p-2.5 text-center"><Cell v={num(s.sharpe_ratio, 2)} /></td>
+                      <td className="p-2.5 text-center"><Cell v={s.backtest_trades != null ? String(s.backtest_trades) : null} /></td>
+                      <td className="p-2.5 text-center bg-emerald-900/10">
+                        {s.live_wr != null ? <span className="font-mono font-bold text-emerald-400">{num(s.live_wr, 1)}%</span> : <span className="text-slate-600">—</span>}
                       </td>
-                      
-                      <td className="p-3 text-center">
-                        {s.profit_factor !== null && s.profit_factor !== undefined ? (
-                          <span className="font-mono text-slate-300">{formatNumber(s.profit_factor, 2)}</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
+                      <td className="p-2.5 text-center bg-emerald-900/10">
+                        {s.live_pnl != null ? <span className={`font-mono font-bold ${s.live_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{s.live_pnl >= 0 ? '+' : ''}{money(s.live_pnl)}</span> : <span className="text-slate-600">—</span>}
                       </td>
-                      
-                      <td className="p-3 text-center">
-                        {s.max_drawdown !== null && s.max_drawdown !== undefined ? (
-                          <span className="font-mono text-rose-400">{formatPercent(s.max_drawdown)}%</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-3 text-center">
-                        {s.sharpe_ratio !== null && s.sharpe_ratio !== undefined ? (
-                          <span className="font-mono text-slate-300">{formatNumber(s.sharpe_ratio, 2)}</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-3 text-center">
-                        {s.backtest_trades !== null && s.backtest_trades !== undefined ? (
-                          <span className="font-mono text-slate-300">{s.backtest_trades}</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      
-                      {/* Live Metrics */}
-                      <td className="p-3 text-center bg-emerald-900/10">
-                        {s.live_wr !== null && s.live_wr !== undefined ? (
-                          <span className="font-mono font-bold text-emerald-400">
-                            {formatNumber(s.live_wr, 1)}%
-                          </span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-3 text-center bg-emerald-900/10">
-                        {s.live_pnl !== null && s.live_pnl !== undefined ? (
-                          <span className={`font-mono font-bold ${
-                            s.live_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                          }`}>
-                            {s.live_pnl >= 0 ? '+' : ''}{formatCurrency(s.live_pnl)}
-                          </span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      
-                      <td className="p-3 text-right">
-                        <span className="text-xs text-slate-400">
-                          {isExpanded ? '▼' : '▶'}
-                        </span>
-                      </td>
+                      <td className="p-2.5 text-right text-slate-500">{isExpanded ? '▼' : '▶'}</td>
                     </tr>
-                    
-                    {/* Expanded Detail Row */}
+
                     {isExpanded && (
                       <tr className="bg-slate-900/30">
-                        <td colSpan={11} className="p-4">
+                        <td colSpan={10} className="p-4">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Strategy Details */}
                             <div className="space-y-3">
-                              <h4 className="text-xs font-bold text-slate-400 uppercase">Strategy Details</h4>
-                              <p className="text-sm text-slate-300">{s.description || 'No description available'}</p>
-                              
-                              <div className="grid grid-cols-2 gap-2 text-xs">
-                                <div className="bg-slate-800/50 p-2 rounded">
-                                  <span className="text-slate-500 block">Time Horizon</span>
-                                  <span className="text-white">{s.time_horizon || '—'}</span>
-                                </div>
-                                <div className="bg-slate-800/50 p-2 rounded">
-                                  <span className="text-slate-500 block">Direction</span>
-                                  <span className="text-white">{s.direction || '—'}</span>
-                                </div>
-                                <div className="bg-slate-800/50 p-2 rounded">
-                                  <span className="text-slate-500 block">Venue</span>
-                                  <span className="text-white">{s.venue || '—'}</span>
-                                </div>
-                                <div className="bg-slate-800/50 p-2 rounded">
-                                  <span className="text-slate-500 block">Universe Count</span>
-                                  <span className="text-white">{s.universe_count || '—'}</span>
-                                </div>
+                              <h4 className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Details</h4>
+                              <p className="text-[12px] text-slate-300">{s.description || 'No description available'}</p>
+                              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                {[['Time Horizon', s.time_horizon], ['Direction', s.direction], ['Venue', s.venue], ['Universe', s.universe_count || (s.universe || []).length]].map(([k, v]) => (
+                                  <div key={k} className="bg-slate-800/50 p-2 rounded">
+                                    <span className="text-slate-500 block text-[9px]">{k}</span>
+                                    <span className="text-white">{v ?? '—'}</span>
+                                  </div>
+                                ))}
                               </div>
-                              
                               {s.universe && s.universe.length > 0 && (
                                 <div>
-                                  <span className="text-xs text-slate-500 block mb-1">Asset Universe</span>
+                                  <span className="text-[9px] text-slate-500 block mb-1">Asset Universe</span>
                                   <div className="flex flex-wrap gap-1">
-                                    {s.universe.slice(0, 10).map(t => (
-                                      <span key={t} className="text-[10px] px-2 py-0.5 bg-slate-800 rounded text-slate-400">
-                                        {t}
-                                      </span>
-                                    ))}
-                                    {s.universe.length > 10 && (
-                                      <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded text-slate-500">
-                                        +{s.universe.length - 10}
-                                      </span>
-                                    )}
+                                    {s.universe.slice(0, 10).map(t => <span key={t} className="text-[10px] px-2 py-0.5 bg-slate-800 rounded text-slate-400">{t}</span>)}
+                                    {s.universe.length > 10 && <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded text-slate-500">+{s.universe.length - 10}</span>}
                                   </div>
                                 </div>
                               )}
                             </div>
-                            
-                            {/* Entry/Exit Logic */}
                             <div className="space-y-3">
-                              <h4 className="text-xs font-bold text-slate-400 uppercase">Logic</h4>
-                              
+                              <h4 className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Logic</h4>
                               <div className="bg-slate-800/50 p-3 rounded">
-                                <span className="text-[10px] text-slate-500 block mb-1">Entry Logic</span>
-                                <span className="text-sm text-white font-mono">{s.entry_logic || '—'}</span>
+                                <span className="text-[9px] text-slate-500 block mb-1">Entry</span>
+                                <span className="text-[12px] text-white font-mono">{s.entry_logic || '—'}</span>
                               </div>
-                              
                               <div className="bg-slate-800/50 p-3 rounded">
-                                <span className="text-[10px] text-slate-500 block mb-1">Exit Logic</span>
-                                <span className="text-sm text-white font-mono">{s.exit_logic || '—'}</span>
+                                <span className="text-[9px] text-slate-500 block mb-1">Exit</span>
+                                <span className="text-[12px] text-white font-mono">{s.exit_logic || '—'}</span>
                               </div>
-                              
-                              {/* Deploy Button - One Click */}
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeploy(s);
-                                }}
+                                onClick={(e) => { e.stopPropagation(); handleDeploy(s); }}
                                 disabled={deployingId === s.id}
-                                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                               >
                                 {deployingId === s.id ? (
-                                  <>
-                                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    Deploying...
-                                  </>
+                                  <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Deploying…</>
                                 ) : deployResult?.strategyId === s.id ? (
-                                  deployResult.success ? (
-                                    <span className="text-emerald-100">✓ Deployed!</span>
-                                  ) : (
-                                    <span className="text-rose-200">✗ {deployResult.error}</span>
-                                  )
+                                  deployResult.success ? <span className="text-emerald-100">✓ Deployed</span> : <span className="text-rose-200">✗ {deployResult.error}</span>
                                 ) : (
-                                  <>Deploy Strategy ({s.universe?.length || 0} tickers)</>
+                                  <>Deploy · {money(DEFAULT_POOL)} pool · {s.universe?.length || 0} tickers</>
                                 )}
                               </button>
                             </div>
@@ -566,25 +315,14 @@ const StrategyLab = () => {
           </table>
         </div>
       )}
-      
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-500">
-        <div className="flex items-center gap-1">
-          <span className="w-3 h-3 bg-slate-800/50 rounded"></span>
-          <span>Backtest Metrics</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="w-3 h-3 bg-emerald-900/20 rounded"></span>
-          <span>Live Performance</span>
-        </div>
-        <div className="ml-auto">
-          <span>WR = Win Rate • PF = Profit Factor • MDD = Max Drawdown • — = No Data</span>
-        </div>
+
+      <div className="flex flex-wrap items-center gap-4 text-[9px] text-slate-500">
+        <div className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-900/20 rounded" /><span>Live performance (green)</span></div>
+        <span className="ml-auto">WR = Win Rate · PF = Profit Factor · MDD = Max Drawdown · — = No Data</span>
       </div>
     </div>
   );
 };
 
 export { StrategyLab };
-
 export default StrategyLab;
