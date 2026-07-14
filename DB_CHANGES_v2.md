@@ -238,6 +238,28 @@ FROM ( ... );   -- DE: pivot per-ticker signal evaluations into a families[] arr
 `families` as an **array** is the key change — a ticker triggering ≥2 families gets the
 confluence badge. UI sorts by `potential` desc and shows top `limit` (default 8).
 
+**4.2.1 Forecast horizon columns (NEW, 🟡)** — add to `consumption.signal_setups`:
+
+```sql
+    fwd_5d         NUMERIC,    -- forecast % return over 5 trading days (signed, 1.2 = +1.2%)
+    fwd_20d        NUMERIC,    -- forecast % return over 20 trading days
+    fwd_1q         NUMERIC,    -- forecast % return over one quarter (~63 sessions)
+```
+The `/api/signals/universe` endpoint already selects these opportunistically and
+degrades to nulls until they exist; the Signals UI renders a Today/5D/20D/1Q grid
+in the signal detail modal. Use the model's expected-return output per horizon
+(NULL when the model doesn't produce one — do not backfill with zeros).
+
+**4.2.2 Data-quality fixes (🟡, currently patched server-side in `signals.py`):**
+- `market` classification: `.HK`-suffixed tickers (e.g. `2800.HK` from
+  ETF_HK_Balanced_Trend) currently arrive with `market='US'`.
+- `note` must be a short human-readable rationale — some rows currently ship a
+  raw JSON blob (`{"seasonality_score": null, ...}`).
+- One ticker format per asset — `consumption.crypto` mixes `ADAUSDT` and
+  `ADA-USD` for the same coin, producing conflicting BUY/SELL rows.
+- `potential` must always be the 0–100 score; HK rows currently arrive with
+  unpopulated scoring fields.
+
 ### 4.3 `consumption.signal_performance` 🟡
 ```sql
 CREATE OR REPLACE VIEW consumption.signal_performance AS
