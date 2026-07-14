@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { api, fmt, fmtK, fmtPct, fmtAge, pnlCl } from '../utils';
+import React, { useMemo, useState } from 'react';
+import { api, usePoll, fmt, fmtK, fmtAge, pnlCl } from '../utils';
 import { PromotionPanel } from './PromotionPanel';
 import { CapitalAllocationPanel } from './CapitalAllocationPanel';
 import { RiskWatchPanel } from './RiskWatchPanel';
@@ -151,12 +151,9 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     setLoading(false);
   };
 
-  useEffect(() => {
-    setLoading(true);
-    load();
-    const id = setInterval(load, 30000);
-    return () => clearInterval(id);
-  }, [strategyId]);
+  // Visibility-paused poll. The parent remounts this via key={strategyId},
+  // so mount handles the initial load + spinner; usePoll drives the 30s refresh.
+  usePoll(load, 30000);
 
   if (loading) {
     return (
