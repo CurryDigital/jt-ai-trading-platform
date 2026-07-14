@@ -5,7 +5,7 @@ import { LoginPage } from './components/LoginPage';
 import { ManualTicket } from './components/ManualTicket';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
-import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, marketClock, marketStatus, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
+import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
 
 // Tab-level code splitting: each view loads on first visit instead of shipping
 // one ~470kB monolith on initial paint. Vite emits a chunk per component.
@@ -48,24 +48,21 @@ const Icon = {
 
 // =================================================================
 // Workspace Ribbon — sticky strip below the navbar showing live state
-// market clocks, P&L, win rate, model heartbeat, last refresh time
+// P&L, win rate, model heartbeat, last refresh time
 // =================================================================
+const RibbonCell = ({ label, value, valClass = 'text-slate-200' }) => (
+  <div className="flex items-baseline gap-1.5 px-3 border-r border-white/[0.05] last:border-r-0">
+    <span className="qr-label">{label}</span>
+    <span className={`qr-num text-[12px] font-bold ${valClass}`}>{value}</span>
+  </div>
+);
+
 const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk, onModeChange, onHalt, wsConnected }) => {
-  const [clocks, setClocks] = useState(marketClock());
-  const [statuses, setStatuses] = useState(marketStatus());
   const [modeOpen, setModeOpen] = useState(false);
   const [haltConfirm, setHaltConfirm] = useState(false);
   const [haltPhrase, setHaltPhrase] = useState('');
   const [haltBusy, setHaltBusy] = useState(false);
   const [haltResult, setHaltResult] = useState(null);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setClocks(marketClock());
-      setStatuses(marketStatus());
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const todayPnL = dailyPnl?.[0]?.pnl ?? null;
   const winRate = (summary?.win_rate || 0) * 100;
@@ -74,21 +71,6 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
   const modeLabel = mode === 'LIVE_TRADING' ? 'LIVE' : mode === 'PAPER_TRADING' ? 'PAPER' : 'SIM';
   const modeColor = mode === 'LIVE_TRADING' ? 'text-rose-400' : mode === 'PAPER_TRADING' ? 'text-amber-400' : 'text-blue-400';
   const isLive = mode === 'LIVE_TRADING';
-
-  const Cell = ({ label, value, valClass = 'text-slate-200' }) => (
-    <div className="flex items-baseline gap-1.5 px-3 border-r border-white/[0.05] last:border-r-0">
-      <span className="qr-label">{label}</span>
-      <span className={`qr-num text-[12px] font-bold ${valClass}`}>{value}</span>
-    </div>
-  );
-
-  const Clock = ({ city, time, open }) => (
-    <div className="flex items-center gap-1.5 px-3 border-r border-white/[0.05]">
-      <span className={`qr-dot ${open ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
-      <span className="qr-label">{city}</span>
-      <span className="qr-num text-[11px] text-slate-300 font-semibold">{time}</span>
-    </div>
-  );
 
   const doHalt = async () => {
     setHaltBusy(true);
@@ -169,10 +151,10 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
             </div>
           )}
 
-          <Cell label="P&L D" value={todayPnL != null ? fmtK(todayPnL) : '—'} valClass={todayPnL == null ? 'text-slate-500' : todayPnL >= 0 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
-          <Cell label="WR"  value={`${winRate.toFixed(1)}%`} valClass={winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
-          <Cell label="TR"  value={totalTrades} />
-          <Cell label="UPD" value={fmtAge(lastRefresh)} valClass="text-slate-400" />
+          <RibbonCell label="P&L D" value={todayPnL != null ? fmtK(todayPnL) : '—'} valClass={todayPnL == null ? 'text-slate-500' : todayPnL >= 0 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
+          <RibbonCell label="WR"  value={`${winRate.toFixed(1)}%`} valClass={winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
+          <RibbonCell label="TR"  value={totalTrades} />
+          <RibbonCell label="UPD" value={fmtAge(lastRefresh)} valClass="text-slate-400" />
         </div>
       </div>
 
@@ -1096,7 +1078,7 @@ export default function App() {
 
         {currentTab === 'strategy_detail'  && (
           selectedStrategyId
-            ? <StrategyDetail strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
+            ? <StrategyDetail key={selectedStrategyId} strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
             : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategy selected · pick one from <button onClick={() => { navigateToTab('strategies'); setSubTab('strategies', 'performance'); }} className="text-blue-400 hover:text-blue-300 underline">Performance</button></div>
         )}
         {currentTab === 'compare'          && (
