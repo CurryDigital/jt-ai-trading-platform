@@ -220,6 +220,73 @@ const KPI = ({ l, v, sub, pos, hint }) => (
 );
 
 // Portfolio Component — Split by Asset Class
+// Asset-class accent colors (dot swatch), consistent with the redesign's
+// hex-accent pattern used across Research/Signals rather than emoji icons.
+const CLASS_META = {
+  STOCK:  { label: 'Stocks',  hex: '#3b82f6' },
+  FX:     { label: 'FX',      hex: '#10b981' },
+  CRYPTO: { label: 'Crypto',  hex: '#f59e0b' },
+  BOND:   { label: 'Bonds',   hex: '#64748b' },
+  ETF:    { label: 'ETFs',    hex: '#8b5cf6' },
+  OPTION: { label: 'Options', hex: '#f43f5e' },
+  FUTURE: { label: 'Futures', hex: '#f97316' },
+  CASH:   { label: 'Cash',    hex: '#10b981' },
+  OTHER:  { label: 'Other',   hex: '#64748b' },
+};
+
+// Hoisted to module scope so it doesn't remount on every PortfolioTab render.
+const PositionTable = ({ positions, title, hex }) => {
+  const grpValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
+  const grpPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
+  return (
+    <div className="qr-surface-strong overflow-hidden mb-3" style={{ border: `1px solid ${hex}33` }}>
+      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-sm flex-none" style={{ background: hex }} />
+          <span className="qr-label">{title}</span>
+          <span className="text-[10px] text-slate-500">{positions.length} positions</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="qr-num text-[11px] text-slate-400">{fmtK(grpValue)}</span>
+          <span className={`qr-num text-[11px] font-bold ${pnlCl(grpPnL)}`}>{grpPnL >= 0 ? '+' : ''}{fmtK(grpPnL)}</span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-white/[0.02]">
+            <tr>
+              {['Ticker', 'Name', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
+                <th key={h} className="qr-label text-right py-2 px-2 first:text-left">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {positions.map(p => {
+              const entry = p.avg_entry_price || p.entry_price || 0;
+              const current = p.current_price || 0;
+              const pnlPct = entry > 0 ? ((current - entry) / entry * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
+              return (
+                <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
+                  <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
+                  <td className="py-2 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
+                  <td className="py-2 px-2 text-center">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : p.side === 'SHORT' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.side || '—'}</span>
+                  </td>
+                  <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
+                  <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(entry)}</td>
+                  <td className="py-2 px-2 text-right font-mono text-white">${fmt(current)}</td>
+                  <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
+                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
+                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const PortfolioTab = ({ data, globalMode }) => {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
@@ -231,13 +298,16 @@ const PortfolioTab = ({ data, globalMode }) => {
 
   const placeOrder = async (action) => {
     if (!orderSymbol) { setOrderMsg({ type: 'error', text: 'Enter a symbol' }); return; }
+    const qty = parseInt(orderQty) || 1;
+    // Direct IBKR order — confirm before sending (real broker route, real money).
+    if (!window.confirm(`Send ${action} ${qty} ${orderSymbol.toUpperCase()} (${orderType}) to IBKR?`)) return;
     setOrderLoading(true);
     setOrderMsg(null);
     try {
       const res = await fetch('/api/ib/place-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: orderSymbol.toUpperCase(), action, quantity: parseInt(orderQty) || 1, order_type: orderType })
+        body: JSON.stringify({ symbol: orderSymbol.toUpperCase(), action, quantity: qty, order_type: orderType })
       });
       const data = await res.json();
       if (data.success) {
@@ -279,94 +349,6 @@ const PortfolioTab = ({ data, globalMode }) => {
 
   const totalValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
   const totalPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
-
-  // Summary by class
-  const classSummary = useMemo(() => {
-    const summary = {};
-    for (const cls of activeClasses) {
-      const grp = byAssetClass[cls];
-      summary[cls] = {
-        count: grp.length,
-        value: grp.reduce((s, p) => s + (p.market_value || 0), 0),
-        pnl: grp.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0),
-      };
-    }
-    return summary;
-  }, [byAssetClass, activeClasses]);
-
-  const classLabels = {
-    STOCK: { label: 'Stocks', icon: '📈', color: 'blue' },
-    FX: { label: 'FX', icon: '💱', color: 'emerald' },
-    CRYPTO: { label: 'Crypto', icon: '₿', color: 'amber' },
-    BOND: { label: 'Bonds', icon: '📋', color: 'slate' },
-    ETF: { label: 'ETFs', icon: '📊', color: 'violet' },
-    OPTION: { label: 'Options', icon: '⚡', color: 'rose' },
-    FUTURE: { label: 'Futures', icon: '⏳', color: 'orange' },
-    CASH: { label: 'Cash', icon: '💵', color: 'emerald' },
-    OTHER: { label: 'Other', icon: '💼', color: 'slate' },
-  };
-
-  const PositionTable = ({ positions, title, icon, color }) => {
-    const colorMap = {
-      blue: 'border-blue-500/20 bg-blue-500/5',
-      emerald: 'border-emerald-500/20 bg-emerald-500/5',
-      amber: 'border-amber-500/20 bg-amber-500/5',
-      slate: 'border-slate-500/20 bg-slate-500/5',
-      violet: 'border-violet-500/20 bg-violet-500/5',
-      rose: 'border-rose-500/20 bg-rose-500/5',
-      orange: 'border-orange-500/20 bg-orange-500/5',
-    };
-
-    const grpValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
-    const grpPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
-
-    return (
-      <div className={`qr-surface-strong border ${colorMap[color] || colorMap.slate} overflow-hidden mb-3`}>
-        <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-sm">{icon}</span>
-            <span className="qr-label">{title}</span>
-            <span className="text-[10px] text-slate-500">{positions.length} positions</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="qr-num text-[11px] text-slate-400">{fmtK(grpValue)}</span>
-            <span className={`qr-num text-[11px] font-bold ${pnlCl(grpPnL)}`}>{grpPnL >= 0 ? '+' : ''}{fmtK(grpPnL)}</span>
-          </div>
-        </div>
-
-        <table className="w-full text-xs">
-          <thead className="bg-white/[0.02]">
-            <tr>
-              {['Ticker', 'Name', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
-                <th key={h} className="qr-label text-right py-2 px-2 first:text-left">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {positions.map(p => {
-              const entry = p.avg_entry_price || p.entry_price || 0;
-              const current = p.current_price || 0;
-              const pnlPct = entry > 0 ? ((current - entry) / entry * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
-              return (
-                <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
-                  <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
-                  <td className="py-2 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
-                  <td className="py-2 px-2 text-center">
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : p.side === 'SHORT' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.side || '—'}</span>
-                  </td>
-                  <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(entry)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-white">${fmt(current)}</td>
-                  <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
-                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
-                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-4">
@@ -424,14 +406,14 @@ const PortfolioTab = ({ data, globalMode }) => {
               disabled={orderLoading}
               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
             >
-              {orderLoading ? '...' : '📈 BUY'}
+              {orderLoading ? '…' : 'BUY'}
             </button>
             <button
               onClick={() => placeOrder('SELL')}
               disabled={orderLoading}
               className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
             >
-              {orderLoading ? '...' : '📉 SELL'}
+              {orderLoading ? '…' : 'SELL'}
             </button>
           </div>
         </div>
@@ -450,9 +432,10 @@ const PortfolioTab = ({ data, globalMode }) => {
           <button
             key={cls}
             onClick={() => setActiveFilter(cls)}
-            className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap ${activeFilter === cls ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap ${activeFilter === cls ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
           >
-            {classLabels[cls]?.icon} {classLabels[cls]?.label} ({byAssetClass[cls].length})
+            <span className="w-1.5 h-1.5 rounded-sm flex-none" style={{ background: CLASS_META[cls]?.hex || '#64748b' }} />
+            {CLASS_META[cls]?.label || cls} ({byAssetClass[cls].length})
           </button>
         ))}
       </div>
@@ -473,18 +456,16 @@ const PortfolioTab = ({ data, globalMode }) => {
           <PositionTable
             key={cls}
             positions={byAssetClass[cls]}
-            title={classLabels[cls]?.label || cls}
-            icon={classLabels[cls]?.icon || '💼'}
-            color={classLabels[cls]?.color || 'slate'}
+            title={CLASS_META[cls]?.label || cls}
+            hex={CLASS_META[cls]?.hex || '#64748b'}
           />
         ))
       ) : (
         byAssetClass[activeFilter] && (
           <PositionTable
             positions={byAssetClass[activeFilter]}
-            title={classLabels[activeFilter]?.label || activeFilter}
-            icon={classLabels[activeFilter]?.icon || '💼'}
-            color={classLabels[activeFilter]?.color || 'slate'}
+            title={CLASS_META[activeFilter]?.label || activeFilter}
+            hex={CLASS_META[activeFilter]?.hex || '#64748b'}
           />
         )
       )}

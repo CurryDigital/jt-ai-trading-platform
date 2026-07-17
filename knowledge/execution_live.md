@@ -18,7 +18,8 @@ Backing: `consumption.portfolio_positions_current` (status='ACTIVE').
 
 ### `POST /api/ib/place-order` — Quick Order (IBKR)
 `{ symbol, action:"BUY|SELL", quantity, order_type:"MKT|LMT|STP" }` →
-`{ success, message }`. Routes through `ib_service` to TWS/Gateway.
+`{ success, message }`. Routes through `ib_service` to TWS/Gateway. The UI
+shows a confirm dialog before sending (direct broker route — real money).
 
 ### `POST /api/execution/manual-order` — Manual Ticket
 `{ book:"live|paper", ticker, market:"US|HK", asset:"STOCK|CRYPTO|FX",
