@@ -3,6 +3,7 @@
 See design-bundle handoff/API_SPEC_v2.md §3-4 and DB_CHANGES_v2.md §4.
 """
 import json
+import re
 
 from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
@@ -49,6 +50,28 @@ def _crypto_base(ticker: str) -> str:
     return t
 
 
+# --- Rotation-engine exit semantics (t_d44e5d60) -----------------------------
+# build_rotation_signals SELL = "zero target weight / exit to CASH", never
+# short conviction (verified by qr_research, t_ab8f7d94). The UI needs to tell
+# those rows apart from genuine sell calls, so we surface the engine metadata
+# embedded in `note` as structured fields.
+_ROTATION_ENGINE = "build_rotation_signals"
+# Notes can be truncated mid-JSON (~80-char ETL writes), so regex instead of
+# json.loads. engine/config_rank/config_filter all appear early in the blob.
+_CONFIG_FILTER_RE = re.compile(r'config_filter[\\"]*\s*:\s*[\\"]*([A-Za-z0-9_]+)')
+
+
+def _rotation_filters(note):
+    """Regime-filter names referenced by a rotation-engine note.
+
+    Returns a set like {'hk2800_126d'}, {'None'} for an unfiltered rotation
+    config, or None when the row did not come from the rotation engine.
+    """
+    if not note or _ROTATION_ENGINE not in note:
+        return None
+    return set(_CONFIG_FILTER_RE.findall(note)) or {"None"}
+
+
 @router.get("/universe")
 def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int = 8, db: Session = Depends(get_db)):
     market_list = _market_list(markets)
@@ -59,7 +82,7 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
     try:
         rows = db.execute(text("""
             SELECT market, ticker, name, families, direction, potential, change_pct, note,
-                   fwd_5d, fwd_20d, fwd_1q
+                   price, fwd_5d, fwd_20d, fwd_1q
             FROM consumption.signal_setups WHERE market = ANY(:markets)
             ORDER BY market, potential DESC
         """), {"markets": market_list}).fetchall()
@@ -67,11 +90,34 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
         db.rollback()
         has_horizons = False
         rows = safe_query(db, """
-            SELECT market, ticker, name, families, direction, potential, change_pct, note
+            SELECT market, ticker, name, families, direction, potential, change_pct, note, price
             FROM consumption.signal_setups WHERE market = ANY(:markets)
             ORDER BY market, potential DESC
         """, {"markets": market_list}, label="signal_universe")
     data = {}
+    # --- Exit-to-cash / regime-off detection (t_d44e5d60) -------------------
+    # Ground truth lives in gold.strategy_ticker_scores: rotation SELL rows
+    # carry score = 0 (zero target weight = exit to cash), and a strategy whose
+    # regime filter fails holds CASH score ~= 1.0 with no positive BUY weights.
+    # Notes on signal_setups are unreliable (some ETL refreshes write NULL), so
+    # detect structurally via the family -> strategy join instead.
+    ts_rows = safe_query(db, """
+        SELECT strategy_id, ticker, signal_action, score
+        FROM gold.strategy_ticker_scores
+    """, label="signal_universe_scores")
+    zero_by_ticker = {}      # ticker -> {strategy_id, ...} with SELL at zero target weight
+    strat_has_buy = set()    # strategies with at least one positive BUY weight
+    strat_cash_full = set()  # strategies with CASH weight ~= 1.0
+    for t in ts_rows:
+        score = float(t.score) if t.score is not None else None
+        if t.ticker == "CASH":
+            if score is not None and score >= 0.99:
+                strat_cash_full.add(t.strategy_id)
+        elif t.signal_action == "BUY" and score is not None and score > 0:
+            strat_has_buy.add(t.strategy_id)
+        elif t.signal_action == "SELL" and (score is None or score == 0):
+            zero_by_ticker.setdefault(t.ticker, set()).add(t.strategy_id)
+    regime_off_strats = strat_cash_full - strat_has_buy
     for r in rows:
         # qr_etl misclassifies some HK-listed tickers (e.g. 2800.HK) as US —
         # reclassify by suffix until fixed upstream (knowledge/research_signals.md).
@@ -83,12 +129,27 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
         bucket = data.setdefault(market, [])
         if len(bucket) >= limit:
             continue
+        # Family tags on signal_setups are imprecise (a 'trend'-tagged ticker
+        # may come from a different strategy), so match on the ticker itself:
+        # any strategy holding it at SELL/zero-weight makes this an exit row.
+        zero_strats = zero_by_ticker.get(r.ticker, set())
+        exit_to_cash = r.direction == "SELL" and bool(zero_strats)
+        cash_strats = sorted(s for s in zero_strats if s in regime_off_strats)
+        regime_off = exit_to_cash and bool(cash_strats)
+        # Regime-filter name is a bonus when the engine note survives ETL.
+        filters = _rotation_filters(r.note) or set()
+        regime_filter = sorted(f for f in filters if f != "None")
         bucket.append({
             "ticker": r.ticker, "name": r.name,
             "families": list(r.families) if r.families is not None else [],
             "direction": r.direction, "potential": float(r.potential) if r.potential is not None else None,
             "change_pct": float(r.change_pct) if r.change_pct is not None else None,
+            "price": float(r.price) if getattr(r, "price", None) is not None else None,
             "note": _human_note(r.note),
+            "exit_to_cash": exit_to_cash,
+            "regime_off": regime_off,
+            "regime_filter": regime_filter[0] if (regime_off and regime_filter) else None,
+            "cash_strategy": cash_strats if regime_off else [],
             "fwd_5d": float(r.fwd_5d) if has_horizons and r.fwd_5d is not None else None,
             "fwd_20d": float(r.fwd_20d) if has_horizons and r.fwd_20d is not None else None,
             "fwd_1q": float(r.fwd_1q) if has_horizons and r.fwd_1q is not None else None,
@@ -102,7 +163,7 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
     for market in missing:
         if market == "HK":
             hk_rows = safe_query(db, """
-                SELECT ticker, name, signal, signal_strength, change_pct, trend, top_strategy_score, strategy_signals
+                SELECT ticker, name, signal, signal_strength, change_pct, trend, top_strategy_score, strategy_signals, price
                 FROM consumption.stock
                 WHERE market = 'HK' AND signal IN ('BUY', 'SELL')
                 ORDER BY COALESCE(signal_strength, top_strategy_score, 0) DESC
@@ -129,6 +190,7 @@ def get_signal_universe(markets: str = "US,HK,ETF,CRYPTO,FX,METAL", limit: int =
                     "direction": r.signal,
                     "potential": round(potential, 2) if potential is not None else None,
                     "change_pct": float(r.change_pct) if r.change_pct is not None else None,
+                    "price": float(r.price) if getattr(r, "price", None) is not None else None,
                     "note": f"trend: {r.trend or '—'}",
                 })
 

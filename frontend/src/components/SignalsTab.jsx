@@ -25,6 +25,26 @@ const HORIZONS = [
 
 const signedPct = (v) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(2)}%`);
 
+// Notes from the signal engine often contain raw config metadata (JSON blobs or
+// "engine: ... · config rank: ...") instead of human reasoning. Never render those.
+const cleanNote = (note) => {
+  if (!note) return null;
+  const n = note.trim();
+  if (!n || n === '—') return null;
+  if (n.startsWith('{')) return null;
+  if (/engine\s*:|build_rotation_signals|config rank|config_rank|config filter|config_filt/i.test(n)) return null;
+  return note;
+};
+
+const PRICE_CCY = { US: '$', ETF: '$', HK: 'HK$', CRYPTO: '$', FX: '', METAL: '$' };
+const fmtPrice = (v, market) => {
+  if (v == null) return null;
+  const n = Number(v);
+  if (Number.isNaN(n)) return null;
+  const dec = Math.abs(n) < 10 ? 4 : 2;
+  return `${PRICE_CCY[market] ?? ''}${n.toFixed(dec)}`;
+};
+
 const HorizonChips = ({ s }) => {
   const present = HORIZONS.filter(h => s[h.key] != null);
   if (!present.length) return null;
@@ -35,10 +55,15 @@ const HorizonChips = ({ s }) => {
   );
 };
 
-function SignalRow({ s, rank, familyByKey, dim, onClick }) {
+function SignalRow({ s, rank, familyByKey, dim, market, onClick }) {
   const fam = familyByKey[s.families?.[0]];
   const color = fam?.color || '#3b82f6';
   const multi = (s.families || []).length > 1;
+  const note = cleanNote(s.note);
+  const price = fmtPrice(s.price, market);
+  // Rotation-engine SELL = zero target weight / exit to cash, never short
+  // conviction (t_d44e5d60). Render it as a neutral exit, not a rose SELL.
+  const exit = s.exit_to_cash === true;
   return (
     <div
       onClick={onClick}
@@ -48,15 +73,20 @@ function SignalRow({ s, rank, familyByKey, dim, onClick }) {
       <div className="min-w-[76px] flex-none">
         <div className="flex items-center gap-1.5">
           <span className="text-[12px] font-bold text-white">{s.ticker}</span>
-          <span className={`qr-chip ${s.direction === 'BUY' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{s.direction}</span>
+          {exit ? (
+            <span className="qr-chip qr-chip-slate" title="Rotation engine: zero target weight — exit to cash, not short conviction">EXIT → CASH</span>
+          ) : (
+            <span className={`qr-chip ${s.direction === 'BUY' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{s.direction}</span>
+          )}
         </div>
         <div className="text-[9px] text-slate-500">{s.name}</div>
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-300 truncate" title={s.note || ''}>{s.note}</span>
-          {multi && <span className="text-[8px] font-black px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 flex-none" title={`${s.families.length} signal families agree`}>★ {s.families.length}</span>}
-        </div>
+        {note && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-slate-300 truncate" title={note}>{note}</span>
+          </div>
+        )}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           {(s.families || []).map(fk => {
             const f = familyByKey[fk];
@@ -66,16 +96,31 @@ function SignalRow({ s, rank, familyByKey, dim, onClick }) {
               </span>
             );
           })}
+          {multi && <span className="text-[8px] font-black px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 flex-none" title={`${s.families.length} signal families agree`}>★ {s.families.length}</span>}
+          {price && <span className="font-mono text-[9px] text-slate-300">{price}</span>}
           {s.change_pct != null && <span className={`font-mono text-[9px] ${pnlCl(s.change_pct)}`}>{fmtPct(s.change_pct)}</span>}
           <HorizonChips s={s} />
         </div>
       </div>
       <div className="w-14 text-right flex-none">
-        <div className="font-mono text-[13px] font-bold text-white">{fmtNum(s.potential) ?? '—'}</div>
-        {s.potential != null && (
-          <div className="h-1 rounded bg-white/10 overflow-hidden mt-1">
-            <div className="h-full" style={{ width: `${Math.min(s.potential || 0, 100)}%`, background: color }} />
-          </div>
+        {exit ? (
+          // Strength on a rotation SELL row is cross-sectional rank quality,
+          // not exit conviction — show it muted with a rank label, no bar.
+          <>
+            <div className="font-mono text-[12px] font-bold text-slate-500">{fmtNum(s.potential) ?? '—'}</div>
+            {s.potential != null && (
+              <div className="text-[8px] text-slate-600 mt-0.5" title="Cross-sectional rank quality from the rotation engine — not sell conviction">rank score</div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="font-mono text-[13px] font-bold text-white">{fmtNum(s.potential) ?? '—'}</div>
+            {s.potential != null && (
+              <div className="h-1 rounded bg-white/10 overflow-hidden mt-1">
+                <div className="h-full" style={{ width: `${Math.min(s.potential || 0, 100)}%`, background: color }} />
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -92,6 +137,16 @@ function MarketColumn({ market, list, familyByKey, onSelect }) {
   const strong = sorted.filter(s => (s.potential || 0) >= LOW_SCORE);
   const weak = sorted.filter(s => (s.potential || 0) < LOW_SCORE);
   const weakVisible = showWeak || strong.length === 0;
+  // Regime-off: a failing rotation regime filter puts the strategy 100% in
+  // cash, so every universe member shows SELL. Banner it so a whole market at
+  // SELL reads as "strategy in cash", not "short everything" (t_d44e5d60).
+  const regimeOffRows = sorted.filter(s => s.regime_off);
+  const regimeLabels = [...new Set(regimeOffRows.flatMap(s => {
+    if (s.regime_filter) return [s.regime_filter];
+    const ids = Array.isArray(s.cash_strategy) ? s.cash_strategy : (s.cash_strategy ? [s.cash_strategy] : []);
+    return ids.map(id => Object.values(familyByKey).find(f => f.strategy_id === id)?.strategy_name || id);
+  }))];
+  const allExits = sorted.length > 0 && sorted.every(s => s.exit_to_cash);
   return (
     <div className="jt-surface-strong overflow-hidden" style={{ border: `1px solid ${meta.hex}44`, borderTop: `3px solid ${meta.hex}` }}>
       <div className="flex items-center gap-3 px-3.5 py-2.5" style={{ background: `${meta.hex}24` }}>
@@ -102,12 +157,19 @@ function MarketColumn({ market, list, familyByKey, onSelect }) {
         </div>
         <span className="text-[9px] font-bold text-slate-400 bg-white/[0.06] rounded px-2 py-0.5">{sorted.length} setup{sorted.length === 1 ? '' : 's'}</span>
       </div>
+      {regimeOffRows.length > 0 && (
+        <div className="px-3.5 py-1.5 border-t border-white/[0.05] text-[9px] text-slate-400 leading-snug">
+          Strategy in cash{regimeLabels.length > 0 && <> — <span className="font-mono text-slate-300">{regimeLabels.join(', ')}</span></>}. EXIT → CASH rows are zero-weight exits, not short calls.
+        </div>
+      )}
       <div className="px-3.5 py-1.5 border-t border-white/[0.05] flex items-center justify-between">
-        <span className="text-[9px] uppercase tracking-wide text-slate-500">Top Opportunities · by signal score</span>
+        <span className="text-[9px] uppercase tracking-wide text-slate-500">
+          {allExits ? 'Universe exits · strategy in cash' : 'Top Opportunities · by signal score'}
+        </span>
         <span className="text-[8px] text-slate-600" title="Score = signal strength 0–100 from the signal engine — NOT a forecast return">score 0–100 ⓘ</span>
       </div>
       {strong.map((s, i) => (
-        <SignalRow key={s.ticker} s={s} rank={i + 1} familyByKey={familyByKey} onClick={() => onSelect({ ...s, market })} />
+        <SignalRow key={s.ticker} s={s} rank={i + 1} familyByKey={familyByKey} market={market} onClick={() => onSelect({ ...s, market })} />
       ))}
       {weak.length > 0 && strong.length > 0 && (
         <button
@@ -118,7 +180,7 @@ function MarketColumn({ market, list, familyByKey, onSelect }) {
         </button>
       )}
       {weakVisible && weak.map((s, i) => (
-        <SignalRow key={s.ticker} s={s} rank={strong.length + i + 1} familyByKey={familyByKey} dim onClick={() => onSelect({ ...s, market })} />
+        <SignalRow key={s.ticker} s={s} rank={strong.length + i + 1} familyByKey={familyByKey} dim market={market} onClick={() => onSelect({ ...s, market })} />
       ))}
       {sorted.length === 0 && (
         <div className="py-8 text-center text-[11px] text-slate-600">No setups yet — signal_setups is not populated</div>
@@ -132,6 +194,9 @@ function SignalDetailModal({ signal, familyByKey, onOpenStrategy, onClose }) {
   const meta = MARKET_META[signal.market] || {};
   const fams = (signal.families || []).map(fk => ({ key: fk, ...(familyByKey[fk] || {}) }));
   const anyHorizon = HORIZONS.some(h => signal[h.key] != null);
+  const note = cleanNote(signal.note);
+  const price = fmtPrice(signal.price, signal.market);
+  const exit = signal.exit_to_cash === true;
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="jt-surface-strong w-full max-w-md overflow-hidden" style={{ border: `1px solid ${meta.hex || '#3b82f6'}55`, borderTop: `3px solid ${meta.hex || '#3b82f6'}` }}>
@@ -139,28 +204,43 @@ function SignalDetailModal({ signal, familyByKey, onOpenStrategy, onClose }) {
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-black text-white">{signal.ticker}</span>
-              <span className={`qr-chip ${signal.direction === 'BUY' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{signal.direction}</span>
+              {exit ? (
+                <span className="qr-chip qr-chip-slate">EXIT → CASH</span>
+              ) : (
+                <span className={`qr-chip ${signal.direction === 'BUY' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{signal.direction}</span>
+              )}
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${meta.hex}22`, color: meta.hex }}>{meta.label || signal.market}</span>
             </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">{signal.name}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">
+              {signal.name}
+              {price && <span className="font-mono text-slate-300 ml-2">{price}</span>}
+            </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-lg leading-none px-1">✕</button>
         </div>
 
         <div className="px-4 py-3 border-t border-white/[0.05]">
           <div className="flex items-baseline justify-between">
-            <span className="text-[9px] uppercase tracking-wide text-slate-500">Signal score</span>
-            <span className="font-mono text-xl font-black text-white">{fmtNum(signal.potential) ?? '—'}</span>
+            <span className="text-[9px] uppercase tracking-wide text-slate-500">{exit ? 'Rank score' : 'Signal score'}</span>
+            <span className={`font-mono text-xl font-black ${exit ? 'text-slate-400' : 'text-white'}`}>{fmtNum(signal.potential) ?? '—'}</span>
           </div>
           {signal.potential != null && (
             <div className="h-1.5 rounded bg-white/[0.08] overflow-hidden mt-1.5">
-              <div className="h-full" style={{ width: `${Math.min(signal.potential, 100)}%`, background: meta.hex || '#3b82f6' }} />
+              <div className="h-full" style={{ width: `${Math.min(signal.potential, 100)}%`, background: exit ? '#64748b' : (meta.hex || '#3b82f6') }} />
             </div>
           )}
-          <p className="text-[9px] text-slate-500 mt-1.5">
-            Signal strength 0–100 (composite weight/confidence from the signal engine) — not a forecast return.
-            {signal.potential != null && signal.potential < LOW_SCORE && ' Below 40 = lower conviction; treat as watchlist, not a trade trigger.'}
-          </p>
+          {exit ? (
+            <p className="text-[9px] text-slate-500 mt-1.5">
+              Rotation engine SELL = zero target weight — exit to cash, not short conviction.
+              Score is cross-sectional rank quality, not exit strength.
+              {signal.regime_off && ` ${signal.regime_filter ? `Regime filter ${signal.regime_filter} is failing` : 'The strategy regime filter is failing'} — the strategy holds 100% cash, so every universe member shows EXIT.`}
+            </p>
+          ) : (
+            <p className="text-[9px] text-slate-500 mt-1.5">
+              Signal strength 0–100 (composite weight/confidence from the signal engine) — not a forecast return.
+              {signal.potential != null && signal.potential < LOW_SCORE && ' Below 40 = lower conviction; treat as watchlist, not a trade trigger.'}
+            </p>
+          )}
         </div>
 
         <div className="px-4 py-3 border-t border-white/[0.05]">
@@ -182,10 +262,10 @@ function SignalDetailModal({ signal, familyByKey, onOpenStrategy, onClose }) {
           )}
         </div>
 
-        {signal.note && (
+        {note && (
           <div className="px-4 py-3 border-t border-white/[0.05]">
             <div className="text-[9px] uppercase tracking-wide text-slate-500 mb-1">Why this signal</div>
-            <p className="text-[11px] text-slate-300 leading-relaxed break-words">{signal.note}</p>
+            <p className="text-[11px] text-slate-300 leading-relaxed break-words">{note}</p>
           </div>
         )}
 
