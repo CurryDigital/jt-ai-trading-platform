@@ -653,6 +653,64 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
             )}
           </div>
 
+          {/* ETL Pipeline Freshness (gold.source_freshness) */}
+          {dataSources?.freshness && (
+            <div className="qr-surface p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                  ETL Pipeline Freshness
+                </h3>
+                <span className="text-[10px] text-slate-500">
+                  {dataSources.freshness.filter(f => f.stale).length} stale / {dataSources.freshness.length} sources
+                </span>
+              </div>
+              <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-[10px] text-slate-500 uppercase border-b border-white/10">
+                      <th className="text-left py-2">Source</th>
+                      <th className="text-left py-2">Asset Class</th>
+                      <th className="text-left py-2">Max Date</th>
+                      <th className="text-left py-2">Last Refreshed</th>
+                      <th className="text-right py-2">Age (h)</th>
+                      <th className="text-right py-2">Max Stale (h)</th>
+                      <th className="text-center py-2">Status</th>
+                      <th className="text-left py-2">Last Error</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {dataSources.freshness.map((f, idx) => (
+                      <tr key={idx} className="text-xs">
+                        <td className="py-2 text-white font-medium">{f.source}</td>
+                        <td className="py-2 text-slate-400">{f.asset_class || '—'}</td>
+                        <td className="py-2 text-slate-400">{f.max_date || '—'}</td>
+                        <td className="py-2 text-slate-300 text-[11px]">
+                          {f.last_refreshed_at ? new Date(f.last_refreshed_at).toLocaleString() : 'never'}
+                        </td>
+                        <td className="py-2 text-right text-slate-400">
+                          {f.age_hours != null ? f.age_hours.toFixed(1) : '—'}
+                        </td>
+                        <td className="py-2 text-right text-slate-400">
+                          {f.expected_max_staleness_hours ?? '—'}
+                        </td>
+                        <td className="py-2 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            f.stale ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {f.stale ? 'STALE' : 'FRESH'}
+                          </span>
+                        </td>
+                        <td className="py-2 text-[11px] text-rose-400 max-w-xs truncate" title={f.last_error || ''}>
+                          {f.last_error || ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Data Source Legend */}
           <div className="p-4 qr-surface">
             <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Source Legend</h4>
