@@ -67,6 +67,23 @@ User portfolio management.
 *   `win_loss`: Real-time P/L calculation based on live spot rates.
 *   `analysis`: JSONB block containing AI Swarm exit/hold advice.
 
+### `news_outlook`
+LLM market-impact layer over `silver.historical_news`, written twice daily
+(07:30 + 13:30 UTC) by the qr_research cron `news-outlook-daily`; read by
+`GET /api/news/outlook` (Research > News tab).
+*   `row_type`: `cluster` (per top story; joins to `/api/news/digest` stories
+    via `category` + `cluster_key` = sha1-16 of sorted headline token set) or
+    `outlook` (one per category per `run_date`).
+*   `category`: US / HK / CRYPTO / FX / METAL.
+*   `bias`: bullish / bearish / neutral / mixed; `horizon`: intraday / 1w / 1m;
+    `confidence`: 0..1; `affected_assets`: text[].
+*   `rationale`: free text — may carry `STALE FEED` / `DATA GAP WARNING`
+    markers (stale upstream feeds); the UI renders them verbatim in rose.
+*   `n_sources` + `source_latest` tie each row back to the real headline
+    window; `model` records the generating agent/model.
+*   Same-day reruns upsert on (run_date, row_type, category, cluster_key);
+    history accumulates by `run_date`. The API serves only the max run_date.
+
 ---
 
 ## 4. Maintenance & Metadata
