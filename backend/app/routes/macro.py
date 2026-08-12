@@ -301,7 +301,7 @@ def _cluster_news(items, threshold=0.42):
 
 @router.get("/news/digest")
 def get_news_digest(hours: int = 240, per_group: int = 120, key_limit: int = 8,
-                    db: Session = Depends(get_db)):
+                    langs: str | None = None, db: Session = Depends(get_db)):
     """Research > News - analytics digest over silver.historical_news.
 
     Dedups wire-copy repetition (same story from N outlets -> one cluster with
@@ -309,20 +309,32 @@ def get_news_digest(hours: int = 240, per_group: int = 120, key_limit: int = 8,
     tags market drivers, derives a directional tone heuristic, and extracts
     forward-looking events into a watch list. Everything is computed from real
     headlines; no predictions are fabricated.
+
+    ?langs=en,zh filters by silver.historical_news.lang (ISO 639-1) BEFORE
+    clustering/scoring, so all analytics reflect the filtered subset.
     """
     per_group = max(10, min(per_group, 300))
     key_limit = max(1, min(key_limit, 20))
     hours = max(24, min(hours, 24 * 30))
-    rows = safe_query(db, """
-        SELECT category, date, entity_name, headline, source FROM (
-            SELECT category, date, entity_name, headline, source,
+    lang_filter = None
+    if langs:
+        lang_filter = [l.strip().lower() for l in langs.split(",")
+                       if re.fullmatch(r"[a-z]{2,3}", l.strip().lower())]
+        if not lang_filter:
+            lang_filter = None
+    lang_clause = "AND lang = ANY(:langs)" if lang_filter else ""
+    rows = safe_query(db, f"""
+        SELECT category, date, entity_name, headline, source, lang FROM (
+            SELECT category, date, entity_name, headline, source, lang,
                    ROW_NUMBER() OVER (PARTITION BY category ORDER BY date DESC, id DESC) AS rn
             FROM silver.historical_news
             WHERE category = ANY(:cats)
               AND date >= NOW() - INTERVAL '1 hour' * :hours
+              {lang_clause}
         ) t WHERE rn <= :per_group
         ORDER BY category, date DESC
-    """, {"cats": NEWS_ASSET_ORDER, "per_group": per_group, "hours": hours},
+    """, {"cats": NEWS_ASSET_ORDER, "per_group": per_group, "hours": hours,
+          "langs": lang_filter},
         label="news_digest")
 
     by_cat = {c: [] for c in NEWS_ASSET_ORDER}
@@ -335,6 +347,7 @@ def get_news_digest(hours: int = 240, per_group: int = 120, key_limit: int = 8,
             "headline": r.headline,
             "source": src,
             "entity": r.entity_name or None,
+            "lang": r.lang or None,
             "published_at": r.date.isoformat() if r.date else None,
             "_dt": r.date,
             "_tok": _news_tokens(r.headline),
@@ -370,6 +383,7 @@ def get_news_digest(hours: int = 240, per_group: int = 120, key_limit: int = 8,
                 "headline": rep["headline"],
                 "cluster_key": _news_cluster_key(rep["headline"]),
                 "entity": rep["entity"],
+                "lang": rep["lang"],
                 "published_at": newest.isoformat() if newest else None,
                 "sources": sources,
                 "n_sources": coverage,
@@ -414,8 +428,119 @@ def get_news_digest(hours: int = 240, per_group: int = 120, key_limit: int = 8,
         "watch": watch_list,
         "categories": categories,
         "labels": NEWS_ASSET_LABELS,
+        "langs": lang_filter,
         "last_updated": last_updated,
         "as_of": _now_iso(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# News story clusters - Research > News primary feed (kanban t_d492325f).
+# Serves consumption.news_clusters, rebuilt every 2h by qr_etl cron
+# 'qr_etl.news_clusters_refresh' (multilingual title-embedding clustering,
+# cosine >= 0.82, 48h window, scoped by asset_class). /news/digest stays
+# unchanged as fallback + watch strip.
+# ---------------------------------------------------------------------------
+@router.get("/news/clusters")
+def get_news_clusters(hours: int = 48, limit: int = 200,
+                      langs: str | None = None, db: Session = Depends(get_db)):
+    """Research > News - story clusters (display unit = cluster, not headline).
+
+    Reads the latest precomputed batch from consumption.news_clusters. Clusters
+    carry canonical_headline (highest-authority member outlet), coverage stats,
+    driver tags, tickers, optional LLM outlook (null-safe), impact_score with
+    exact impact_components {attention, coverage, recency, keyword_impact,
+    llm_impact} (points summing to impact_score; null on pre-t_1f96bc9b rows),
+    and members[] with real per-member published_at + source urls.
+
+    ?hours= filters clusters by last_seen_utc (default 48, the build window).
+    ?langs=en,zh filters cluster MEMBERS by ISO 639-1 lang (clusters with no
+    surviving members are dropped; story/outlet counts reflect the filtered
+    members). Note: clustering itself runs over all langs in the ETL build -
+    the langs param narrows the served members, it does not re-cluster.
+    """
+    hours = max(1, min(hours, 24 * 30))
+    limit = max(1, min(limit, 500))
+    lang_filter = None
+    if langs:
+        lang_filter = [l.strip().lower() for l in langs.split(",")
+                       if re.fullmatch(r"[a-z]{2,3}", l.strip().lower())]
+        if not lang_filter:
+            lang_filter = None
+
+    rows = safe_query(db, """
+        SELECT cluster_id, canonical_headline, story_count, outlet_count,
+               first_seen_utc, last_seen_utc, asset_class, driver_tags,
+               tickers, llm_direction, llm_confidence, llm_rationale,
+               impact_score, impact_components, members, computed_at
+        FROM consumption.news_clusters
+        WHERE window_hours = 48
+          AND computed_at = (SELECT MAX(computed_at)
+                             FROM consumption.news_clusters
+                             WHERE window_hours = 48)
+          AND last_seen_utc >= NOW() - INTERVAL '1 hour' * :hours
+        ORDER BY impact_score DESC
+    """, {"hours": hours}, label="news_clusters")
+
+    clusters = []
+    for r in rows:
+        members = r.members or []
+        if isinstance(members, str):
+            try:
+                import json as _json
+                members = _json.loads(members)
+            except Exception:
+                members = []
+        if lang_filter:
+            members = [m for m in members
+                       if (m.get("lang") or "").lower() in lang_filter]
+            if not members:
+                continue
+        # Per-cluster lang (kanban t_32c13d6d): lang of the canonical-headline
+        # member (member headlines are the normalized text, so exact match on
+        # canonical_headline identifies it); fallback = modal lang across the
+        # (filtered) members; null when undetermined. Feeds the frontend
+        # per-story lang badge (t_940dd051).
+        cluster_lang = None
+        canon_lower = (r.canonical_headline or "").lower()
+        for m in members:
+            if (m.get("headline") or "").lower() == canon_lower and m.get("lang"):
+                cluster_lang = m["lang"]
+                break
+        if cluster_lang is None:
+            counts = {}
+            for m in members:
+                ml = (m.get("lang") or "").lower()
+                if ml:
+                    counts[ml] = counts.get(ml, 0) + 1
+            if counts:
+                cluster_lang = max(sorted(counts), key=lambda l: counts[l])
+        clusters.append({
+            "cluster_id": r.cluster_id,
+            "canonical_headline": r.canonical_headline,
+            "lang": cluster_lang,
+            "story_count": len(members) if lang_filter else r.story_count,
+            "outlet_count": (len({m.get("outlet") for m in members if m.get("outlet")})
+                             if lang_filter else r.outlet_count),
+            "first_seen_utc": r.first_seen_utc.isoformat() if r.first_seen_utc else None,
+            "last_seen_utc": r.last_seen_utc.isoformat() if r.last_seen_utc else None,
+            "asset_class": r.asset_class,
+            "driver_tags": list(r.driver_tags or []),
+            "tickers": list(r.tickers or []),
+            "llm_direction": r.llm_direction,
+            "llm_confidence": float(r.llm_confidence) if r.llm_confidence is not None else None,
+            "llm_rationale": r.llm_rationale,
+            "impact_score": r.impact_score,
+            "impact_components": (r.impact_components
+                                  if isinstance(r.impact_components, dict) else None),
+            "members": members,
+        })
+
+    return {
+        "clusters": clusters[:limit],
+        "langs": lang_filter,
+        "as_of": _now_iso(),
+        "source": "news_clusters",
     }
 
 
