@@ -613,3 +613,89 @@ def get_news_outlook(db: Session = Depends(get_db)):
         },
         "as_of": _now_iso(),
     }
+
+
+MIN_SAMPLE_TRUSTWORTHY = 30  # frontend greys out metrics with n below this
+
+
+@router.get("/news/signal-performance")
+def get_news_signal_performance(db: Session = Depends(get_db)):
+    """Research > News - LLM signal accountability (kanban t_03fc7ddb).
+
+    Serves consumption.news_signal_performance (built daily by qr_etl
+    build_news_signal_performance.py from the persistent ledger
+    consumption.news_signal_events): does llm_direction predict forward
+    returns of the story's primary ticker?
+
+    Shape:
+      windows['30d'|'90d'].by_horizon['1h'|'1d'|'5d'] =
+          {hit_rate, mean_return, ic, n} or null when unavailable
+          (1h is null while bronze.ibkr_historical_bars is stale)
+      windows[w].coverage = {pct, n}   (% clusters with resolvable ticker)
+      by_confidence_bucket / by_asset_class = 1d-horizon breakdowns
+      status = 'ok' | 'insufficient_data' (30d 1d overall n < 30)
+
+    Every metric carries n; treat n < 30 as untrustworthy (greyed out UI).
+    Degrades to status='no_data' + empty maps when the table is absent/empty.
+    """
+    rows = safe_query(db, """
+        SELECT horizon, "window", segment_type, segment_value, hit_rate,
+               mean_return, information_coefficient, coverage_pct,
+               sample_size, computed_at
+        FROM consumption.news_signal_performance
+        WHERE computed_at = (SELECT max(computed_at)
+                             FROM consumption.news_signal_performance)
+    """, label="news_signal_performance")
+
+    def _f(v):
+        return float(v) if v is not None else None
+
+    windows = {}
+    buckets = []
+    assets = []
+    computed_at = None
+    for r in rows:
+        if computed_at is None and r.computed_at:
+            computed_at = r.computed_at.isoformat()
+        w = windows.setdefault(r.window, {"by_horizon": {}, "coverage": None})
+        if r.segment_type == "coverage":
+            w["coverage"] = {"pct": _f(r.coverage_pct), "n": r.sample_size}
+            continue
+        metric = {"hit_rate": _f(r.hit_rate),
+                  "mean_return": _f(r.mean_return),
+                  "ic": _f(r.information_coefficient),
+                  "n": r.sample_size}
+        if r.segment_type == "overall":
+            w["by_horizon"][r.horizon] = metric
+        elif (r.segment_type == "confidence_bucket" and r.horizon == "1d"
+                and r.window == "30d"):
+            buckets.append({"bucket": r.segment_value, "horizon": "1d",
+                            "hit_rate": metric["hit_rate"], "n": r.sample_size})
+        elif (r.segment_type == "asset_class" and r.horizon == "1d"
+                and r.window == "30d"):
+            assets.append({"asset_class": r.segment_value, "horizon": "1d",
+                           "hit_rate": metric["hit_rate"], "n": r.sample_size})
+
+    # every horizon key present; null = unavailable (e.g. stale 1h bars)
+    for w in windows.values():
+        for hz in ("1h", "1d", "5d"):
+            w["by_horizon"].setdefault(hz, None)
+
+    if not rows:
+        status = "no_data"
+    else:
+        n_30d_1d = ((windows.get("30d") or {}).get("by_horizon", {})
+                    .get("1d") or {}).get("n") or 0
+        status = "ok" if n_30d_1d >= MIN_SAMPLE_TRUSTWORTHY else "insufficient_data"
+
+    return {
+        "data": {
+            "status": status,
+            "computed_at": computed_at,
+            "min_sample_trustworthy": MIN_SAMPLE_TRUSTWORTHY,
+            "windows": windows,
+            "by_confidence_bucket": buckets,
+            "by_asset_class": assets,
+        },
+        "as_of": _now_iso(),
+    }
