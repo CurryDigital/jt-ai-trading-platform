@@ -978,26 +978,39 @@ export const NewsTab = () => {
     });
     return m;
   })();
+  // INVARIANT (2026-08-13, do not break): the strip counts over EXACTLY the
+  // set the feed renders (view = feed → panel filter → my-book filter) with
+  // NO extra wall-clock window. bear.size must always equal the count of
+  // distinct held tickers on bearish rows below — checked by ad-hoc
+  // verification. The old 24h wall-clock gate let >24h held rows render with
+  // chips while the strip excluded them (strip said 0/0 above a BEARISH held
+  // row). Window mismatch, not a join-path bug: both read the same filled
+  // clusters/llm_direction/bookHits.
   const exposure = (() => {
-    const now = Date.now();
     const bear = new Set(); const bull = new Set();
-    for (const c of clusters || []) {
-      const t = parseUtc(c.last_seen_utc || c.first_seen_utc);
-      if (t == null || (now - t) / 3600000 > 24) continue;
+    let scored = 0, unscored = 0;
+    for (const c of view) {
+      const heldHits = hitsFor(c).filter((h) => h.held);
+      if (!heldHits.length) continue;
       const d = (c.llm_direction || '').toLowerCase();
-      for (const h of hitsFor(c)) {
-        if (!h.held) continue;
+      if (!d) { unscored += 1; continue; }
+      scored += 1;
+      for (const h of heldHits) {
         if (d.startsWith('bear')) bear.add(h.ticker);
         if (d.startsWith('bull')) bull.add(h.ticker);
       }
     }
-    return { bear, bull };
+    return { bear, bull, scored, unscored };
   })();
   // "0 bearish / 0 bullish" is only meaningful when clusters actually carry
   // symbols that join to the book. With junk/empty tickers the strip must say
   // UNAVAILABLE and name the blocker — a gap is not a signal.
-  const joinableCount = (clusters || []).filter((c) =>
+  const joinableCount = view.filter((c) =>
     (c.tickers || []).some((t) => book[t] || watchlist.has(t))).length;
+  // Third gap class: held clusters render in the feed but NONE carry an LLM
+  // direction. A bare 0/0 would read as measured; it is a coverage gap in the
+  // direction layer (news_outlook stamp/join), so render unavailable.
+  const heldUnscored = exposure.scored === 0 && exposure.unscored > 0;
   // Second gap class: the 24h window is anchored to wall clock, so a stale
   // news_clusters table reads as 0/0. If NO cluster falls in the window,
   // render a stale-data state instead of measured-looking zeros.
@@ -1087,24 +1100,32 @@ export const NewsTab = () => {
                 <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact</span>
                 <ProvBadge state="PENDING" tip="positions: consumption.portfolio_positions_current via /api/portfolio/positions (LIVE) · cluster tickers: news_clusters extraction fix pending" />
                 <span className="text-[9px] font-mono text-slate-500">
-                  unavailable — 0 of {(clusters || []).length} clusters carry symbols that resolve to your book · ticker extraction pending (qr_etl t_03bdbbfa). This is a data gap, not a neutral reading.
+                  unavailable — 0 of {view.length} clusters in view carry symbols that resolve to your book · ticker extraction pending (qr_etl t_03bdbbfa). This is a data gap, not a neutral reading.
                 </span>
               </div>
             ) : inWindow24 === 0 ? (
               <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 24h</span>
+                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 7d feed</span>
                 <ProvBadge state="PENDING" tip="news_clusters build job stalled — qr_etl t_ffff7242" />
                 <span className="text-[9px] font-mono text-slate-500">
                   no clusters in the last 24h — newest is {newestClusterH != null ? `${Math.round(newestClusterH)}h` : '—'} old (feed stale, qr_etl t_ffff7242). Not a measured zero.
                 </span>
               </div>
+            ) : heldUnscored ? (
+              <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 7d feed</span>
+                <ProvBadge state="PENDING" tip="llm_direction via news_clusters stamp (qr_etl t_9a746bb9) + /api/news/outlook join (t_3bfe7f78) — held-name coverage gap" />
+                <span className="text-[9px] font-mono text-slate-500">
+                  unavailable — {exposure.unscored} held cluster{exposure.unscored === 1 ? '' : 's'} in the feed but 0 carry LLM direction · direction-layer coverage gap (news_outlook stamp/join). Not a measured 0/0.
+                </span>
+              </div>
             ) : (
             <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 24h</span>
-              <ProvBadge state="LIVE" tip="consumption.portfolio_positions_current via /api/portfolio/positions × news_clusters tickers via /api/news/clusters" />
+              <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 7d feed</span>
+              <ProvBadge state="LIVE" tip="consumption.portfolio_positions_current via /api/portfolio/positions × news_clusters tickers via /api/news/clusters · counted over exactly the rows rendered below (INVARIANT: strip counts == distinct held tickers on rows)" />
               <span
                 className="text-[9px] font-mono"
-                title={`held names with ≥1 bearish cluster in the last 24h${exposure.bear.size ? `: ${[...exposure.bear].join(', ')}` : ''}`}
+                title={`held names with ≥1 bearish cluster in the visible feed${exposure.bear.size ? `: ${[...exposure.bear].join(', ')}` : ''}`}
               >
                 <span className="text-rose-400">{exposure.bear.size}</span>
                 <span className="text-slate-500"> held bearish</span>
@@ -1112,7 +1133,7 @@ export const NewsTab = () => {
               <span className="text-[9px] font-mono text-slate-600">vs</span>
               <span
                 className="text-[9px] font-mono"
-                title={`held names with ≥1 bullish cluster in the last 24h${exposure.bull.size ? `: ${[...exposure.bull].join(', ')}` : ''}`}
+                title={`held names with ≥1 bullish cluster in the visible feed${exposure.bull.size ? `: ${[...exposure.bull].join(', ')}` : ''}`}
               >
                 <span className="text-emerald-400">{exposure.bull.size}</span>
                 <span className="text-slate-500"> held bullish</span>
@@ -1120,6 +1141,14 @@ export const NewsTab = () => {
               <span className="text-[8px] font-mono text-slate-600">
                 · {Object.keys(book).length} held{watchlist.size > 0 ? ` · ${watchlist.size} watched` : ''}
               </span>
+              {exposure.unscored > 0 && (
+                <span
+                  className="text-[8px] font-mono text-slate-600"
+                  title={`${exposure.unscored} held cluster${exposure.unscored === 1 ? '' : 's'} in the feed carry no LLM direction yet — counts are over the ${exposure.scored} scored held cluster${exposure.scored === 1 ? '' : 's'} only`}
+                >
+                  · direction on {exposure.scored} of {exposure.scored + exposure.unscored} held
+                </span>
+              )}
             </div>
             )
           )}
