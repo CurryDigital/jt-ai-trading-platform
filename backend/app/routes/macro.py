@@ -113,6 +113,49 @@ def get_macro_global(db: Session = Depends(get_db)):
     return {"data": data, "as_of": _now_iso()}
 
 
+@router.get("/macro/calendar")
+def get_macro_calendar(days_past: int = 90, days_fwd: int = 60,
+                       region: str | None = None,
+                       db: Session = Depends(get_db)):
+    """Global macro catalyst schedule for the News attention-timeline
+    (kanban t_7a646947). Reads consumption.macro_calendar (view over
+    gold.macro_calendar, migration 018), refreshed weekly by qr_etl cron
+    'qr_etl.macro_calendar_refresh' from official published calendars
+    (BLS CPI/NFP, FOMC, ECB, RBA, BOJ, HK C&SD) + the PBoC LPR fixing
+    rule. ISO dates only; every row carries source provenance.
+
+    ?days_past=90&days_fwd=60  window relative to today (clamped)
+    ?region=US,EZ              optional comma-list filter
+    """
+    days_past = max(0, min(days_past, 365))
+    days_fwd = max(0, min(days_fwd, 400))
+    regions = None
+    if region:
+        regions = [r.strip().upper() for r in region.split(",")
+                   if re.fullmatch(r"[A-Za-z]{2,3}", r.strip())]
+        if not regions:
+            regions = None
+    region_clause = "AND region = ANY(:regions)" if regions else ""
+    rows = safe_query(db, f"""
+        SELECT region, event, event_date, importance, source
+        FROM consumption.macro_calendar
+        WHERE event_date >= CURRENT_DATE - :days_past
+          AND event_date <= CURRENT_DATE + :days_fwd
+          {region_clause}
+        ORDER BY event_date, region
+    """, {"days_past": days_past, "days_fwd": days_fwd,
+          "regions": regions}, label="macro_calendar")
+    events = [{
+        "event": r.event,
+        "date": r.event_date.isoformat() if r.event_date else None,
+        "region": r.region,
+        "importance": r.importance,
+        "source": r.source,
+    } for r in rows]
+    return {"events": events, "days_past": days_past, "days_fwd": days_fwd,
+            "as_of": _now_iso()}
+
+
 NEWS_ASSET_ORDER = ["US", "HK", "CRYPTO", "FX", "METAL"]
 
 NEWS_ASSET_LABELS = {
