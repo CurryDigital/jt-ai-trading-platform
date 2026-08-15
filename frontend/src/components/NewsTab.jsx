@@ -71,6 +71,23 @@ const AssetBadge = ({ cat, labels }) =>
     </span>
   );
 
+// t_9f70a327: serve-time macro-event grouping (GET /api/news/clusters,
+// dedupe_events=true by default). Angle-split clusters of the same calendar
+// event collapse into the highest-impact row, which carries an additive
+// event_group annotation {event, event_date, anchor, related_count,
+// related[]}. The chip names the event + collapsed-angle count; the
+// expansion lists the angles for drill-down. Nothing is deleted — the raw
+// list stays available via dedupe_events=false.
+const EventGroupChip = ({ eg }) =>
+  !eg ? null : (
+    <span
+      className="rounded bg-white/[0.05] px-1.5 py-px text-[8px] font-mono text-slate-400 whitespace-nowrap"
+      title={`Macro event group · ${eg.event} (${eg.event_date}) · anchor: ${eg.anchor}\nCollapsed angles: ${(eg.related || []).map((r) => r.canonical_headline).join(' | ')}`}
+    >
+      ⧉ {eg.related_count} angle{eg.related_count === 1 ? '' : 's'} · {eg.event}
+    </span>
+  );
+
 // Impact-tiered visual hierarchy — DISTRIBUTION-RELATIVE since 2026-08-12.
 // Absolute thresholds (65/40) collapsed when scores compressed into the 40s,
 // so tiers are now assigned by rank within the currently filtered feed
@@ -707,6 +724,23 @@ const ClusterExpansion = ({ c }) => {
   const canonical = normH(c.canonical_headline);
   return (
     <div className="mt-1.5 ml-9 border-l rounded-none border-white/[0.06] pl-3 pb-1">
+      {c.event_group && (c.event_group.related || []).length > 0 && (
+        <div className="mb-1.5">
+          <div className="text-[8px] font-mono uppercase text-slate-500 mb-0.5">
+            Related angles — {c.event_group.event} ({c.event_group.event_date})
+          </div>
+          <div className="space-y-0.5">
+            {(c.event_group.related || []).map((r) => (
+              <div key={r.cluster_id} className="text-[9px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-2">
+                <span className="font-mono text-slate-400" title="impact score of the collapsed angle row">{r.impact_score ?? '—'}</span>
+                <span className="text-slate-400">{r.canonical_headline}</span>
+                <span className="font-mono text-slate-600">{r.story_count ?? '—'} stories</span>
+                <AgeDot ts={r.last_seen_utc || r.first_seen_utc} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {c.llm_rationale && (
         <div className="text-[9px] text-slate-400 leading-snug mb-1.5">
           <span className="text-slate-500 uppercase font-mono text-[8px]">LLM rationale: </span>
@@ -771,6 +805,7 @@ const ClusterRow = ({ c, labels, expanded, onToggle, hits = [], deltas = {}, tie
                 {c.story_count ?? '—'} stories · <AgeDot ts={seenTs} />
               </span>
               {hits.map((h) => <HeldChip key={h.ticker} h={h} />)}
+              <EventGroupChip eg={c.event_group} />
               <StalePill ts={seenTs} />
               <span className="font-mono text-slate-700">{expanded ? '▾' : '▸'}</span>
             </div>
@@ -789,6 +824,7 @@ const ClusterRow = ({ c, labels, expanded, onToggle, hits = [], deltas = {}, tie
                 </span>
               )}
               <AssetBadge cat={c.asset_class} labels={labels} />
+              <EventGroupChip eg={c.event_group} />
               {c.lang && c.lang !== 'en' && <Chip label={c.lang.toUpperCase()} />}
               {(c.driver_tags || []).slice(0, 4).map((d) => <Chip key={d} label={d} />)}
               {/* MEDIUM: ticker chips hidden until hover/expand; HIGH: always visible */}

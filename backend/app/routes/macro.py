@@ -5,12 +5,13 @@ See design-bundle handoff/API_SPEC_v2.md §2 and DB_CHANGES_v2.md §3.
 import re
 import hashlib
 from collections import Counter
-from fastapi import APIRouter, Depends
-from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, Query
+from datetime import datetime, timezone, date as date_cls
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
 from app.db.safe_query import safe_query
+from app.core_logic.news_event_groups import group_clusters_by_events
 
 router = APIRouter(prefix="/api", tags=["macro"])
 
@@ -484,32 +485,176 @@ def get_news_digest(hours: int = 240, per_group: int = 120, key_limit: int = 8,
 # cosine >= 0.82, 48h window, scoped by asset_class). /news/digest stays
 # unchanged as fallback + watch strip.
 # ---------------------------------------------------------------------------
+def _parse_lang_filter(langs):
+    if not langs:
+        return None
+    lang_filter = [l.strip().lower() for l in langs.split(",")
+                   if re.fullmatch(r"[a-z]{2,3}", l.strip().lower())]
+    return lang_filter or None
+
+
+def _serialize_cluster(r, lang_filter, extra=None):
+    """Serialize one news-cluster row (live or daily table — identical column
+    semantics per agents/etl/docs/news_clusters_daily.md)."""
+    members = r.members or []
+    if isinstance(members, str):
+        try:
+            import json as _json
+            members = _json.loads(members)
+        except Exception:
+            members = []
+    if lang_filter:
+        members = [m for m in members
+                   if (m.get("lang") or "").lower() in lang_filter]
+        if not members:
+            return None
+    # Per-cluster lang (kanban t_32c13d6d): lang of the canonical-headline
+    # member (member headlines are the normalized text, so exact match on
+    # canonical_headline identifies it); fallback = modal lang across the
+    # (filtered) members; null when undetermined. Feeds the frontend
+    # per-story lang badge (t_940dd051).
+    cluster_lang = None
+    canon_lower = (r.canonical_headline or "").lower()
+    for m in members:
+        if (m.get("headline") or "").lower() == canon_lower and m.get("lang"):
+            cluster_lang = m["lang"]
+            break
+    if cluster_lang is None:
+        counts = {}
+        for m in members:
+            ml = (m.get("lang") or "").lower()
+            if ml:
+                counts[ml] = counts.get(ml, 0) + 1
+        if counts:
+            cluster_lang = max(sorted(counts), key=lambda l: counts[l])
+    out = {
+        "cluster_id": r.cluster_id,
+        "canonical_headline": r.canonical_headline,
+        "lang": cluster_lang,
+        "story_count": len(members) if lang_filter else r.story_count,
+        "outlet_count": (len({m.get("outlet") for m in members if m.get("outlet")})
+                         if lang_filter else r.outlet_count),
+        "first_seen_utc": r.first_seen_utc.isoformat() if r.first_seen_utc else None,
+        "last_seen_utc": r.last_seen_utc.isoformat() if r.last_seen_utc else None,
+        "asset_class": r.asset_class,
+        "driver_tags": list(r.driver_tags or []),
+        "tickers": list(r.tickers or []),
+        "llm_direction": r.llm_direction,
+        "llm_confidence": float(r.llm_confidence) if r.llm_confidence is not None else None,
+        "llm_rationale": r.llm_rationale,
+        "impact_score": r.impact_score,
+        "impact_components": (r.impact_components
+                              if isinstance(r.impact_components, dict) else None),
+        "members": members,
+    }
+    if extra:
+        out.update(extra)
+    return out
+
+
 @router.get("/news/clusters")
 def get_news_clusters(hours: int = 48, limit: int = 200,
-                      langs: str | None = None, db: Session = Depends(get_db)):
+                      date: date_cls | None = None,
+                      langs: str | None = None,
+                      dedupe_events: bool = True,
+                      db: Session = Depends(get_db)):
     """Research > News - story clusters (display unit = cluster, not headline).
 
-    Reads the latest precomputed batch from consumption.news_clusters. Clusters
-    carry canonical_headline (highest-authority member outlet), coverage stats,
-    driver tags, tickers, optional LLM outlook (null-safe), impact_score with
-    exact impact_components {attention, coverage, recency, keyword_impact,
-    llm_impact} (points summing to impact_score; null on pre-t_1f96bc9b rows),
-    and members[] with real per-member published_at + source urls.
+    Default (no date): reads the latest precomputed batch from
+    consumption.news_clusters (rolling 48h window). With ?date=YYYY-MM-DD:
+    serves the historical per-day snapshot from
+    consumption.news_clusters_daily WHERE window_date = :date (kanban
+    t_49832d70, contract agents/etl/docs/news_clusters_daily.md) — identical
+    JSON shape plus window_date and sim_threshold per cluster.
 
-    ?hours= filters clusters by last_seen_utc (default 48, the build window).
-    ?langs=en,zh filters cluster MEMBERS by ISO 639-1 lang (clusters with no
-    surviving members are dropped; story/outlet counts reflect the filtered
-    members). Note: clustering itself runs over all langs in the ETL build -
-    the langs param narrows the served members, it does not re-cluster.
+    Clusters carry canonical_headline (highest-authority member outlet),
+    coverage stats, driver tags, tickers, optional LLM outlook (null-safe),
+    impact_score with exact impact_components {attention, coverage, recency,
+    keyword_impact, llm_impact} (points summing to impact_score; null on
+    pre-t_1f96bc9b rows), and members[] with real per-member published_at +
+    source urls.
+
+    ?hours= filters clusters by last_seen_utc (default 48, the build window;
+    ignored when ?date= is given). ?langs=en,zh filters cluster MEMBERS by
+    ISO 639-1 lang (clusters with no surviving members are dropped;
+    story/outlet counts reflect the filtered members). Note: clustering
+    itself runs over all langs in the ETL build - the langs param narrows
+    the served members, it does not re-cluster.
+
+    ?dedupe_events= (default true, kanban t_9f70a327): serve-time macro-event
+    grouping. Clusters that are angle-splits of the same calendar event
+    (consumption.macro_calendar; anchor tokens mirror the ETL _ANCHOR_MAP)
+    collapse into their highest-impact row, which gains an additive
+    'event_group' annotation {event, event_date, region, anchor,
+    related_count, related[]} — the collapsed rows stay available in-payload
+    for drill-down. impact_score / impact_components are never mutated.
+    Pass dedupe_events=false for the raw, ungrouped list. Applies to both
+    the live table and the ?date= historical path.
     """
     hours = max(1, min(hours, 24 * 30))
     limit = max(1, min(limit, 500))
-    lang_filter = None
-    if langs:
-        lang_filter = [l.strip().lower() for l in langs.split(",")
-                       if re.fullmatch(r"[a-z]{2,3}", l.strip().lower())]
-        if not lang_filter:
-            lang_filter = None
+    lang_filter = _parse_lang_filter(langs)
+
+    # Calendar events eligible to anchor a group: inside the served window
+    # plus a 1-day grace each side (pre-positioning rows appear BEFORE the
+    # release; reactions to a release just before the window start still
+    # dominate the first window hours).
+    def _group_events(db_, lo, hi):
+        return safe_query(db_, """
+            SELECT region, event, event_date
+            FROM consumption.macro_calendar
+            WHERE event_date >= :lo AND event_date <= :hi
+            ORDER BY event_date
+        """, {"lo": lo, "hi": hi}, label="macro_calendar_event_dedupe")
+
+    def _apply_dedupe(db_, clusters_, lo, hi):
+        if not dedupe_events or not clusters_:
+            return clusters_, {"enabled": bool(dedupe_events),
+                               "active_events": [], "groups": 0,
+                               "collapsed": 0}
+        ev_rows = _group_events(db_, lo, hi)
+        events = [{"event": r.event, "date": r.event_date, "region": r.region}
+                  for r in ev_rows]
+        out, stats = group_clusters_by_events(clusters_, events)
+        stats = dict(stats)
+        stats["enabled"] = True
+        return out, stats
+
+    if date is not None:
+        rows = safe_query(db, """
+            SELECT cluster_id, canonical_headline, story_count, outlet_count,
+                   first_seen_utc, last_seen_utc, asset_class, driver_tags,
+                   tickers, llm_direction, llm_confidence, llm_rationale,
+                   impact_score, impact_components, members, computed_at,
+                   window_date, sim_threshold
+            FROM consumption.news_clusters_daily
+            WHERE window_date = :date
+            ORDER BY impact_score DESC
+        """, {"date": date}, label="news_clusters_daily")
+
+        clusters = []
+        for r in rows:
+            item = _serialize_cluster(r, lang_filter, extra={
+                "window_date": r.window_date.isoformat() if r.window_date else None,
+                "sim_threshold": (float(r.sim_threshold)
+                                  if r.sim_threshold is not None else None),
+            })
+            if item is not None:
+                clusters.append(item)
+
+        clusters, dedupe_stats = _apply_dedupe(
+            db, clusters,
+            date.fromordinal(date.toordinal() - 1),
+            date.fromordinal(date.toordinal() + 1))
+
+        return {
+            "clusters": clusters[:limit],
+            "langs": lang_filter,
+            "date": date.isoformat(),
+            "as_of": _now_iso(),
+            "source": "news_clusters_daily",
+            "event_dedupe": dedupe_stats,
+        }
 
     rows = safe_query(db, """
         SELECT cluster_id, canonical_headline, story_count, outlet_count,
@@ -527,63 +672,114 @@ def get_news_clusters(hours: int = 48, limit: int = 200,
 
     clusters = []
     for r in rows:
-        members = r.members or []
-        if isinstance(members, str):
-            try:
-                import json as _json
-                members = _json.loads(members)
-            except Exception:
-                members = []
-        if lang_filter:
-            members = [m for m in members
-                       if (m.get("lang") or "").lower() in lang_filter]
-            if not members:
-                continue
-        # Per-cluster lang (kanban t_32c13d6d): lang of the canonical-headline
-        # member (member headlines are the normalized text, so exact match on
-        # canonical_headline identifies it); fallback = modal lang across the
-        # (filtered) members; null when undetermined. Feeds the frontend
-        # per-story lang badge (t_940dd051).
-        cluster_lang = None
-        canon_lower = (r.canonical_headline or "").lower()
-        for m in members:
-            if (m.get("headline") or "").lower() == canon_lower and m.get("lang"):
-                cluster_lang = m["lang"]
-                break
-        if cluster_lang is None:
-            counts = {}
-            for m in members:
-                ml = (m.get("lang") or "").lower()
-                if ml:
-                    counts[ml] = counts.get(ml, 0) + 1
-            if counts:
-                cluster_lang = max(sorted(counts), key=lambda l: counts[l])
-        clusters.append({
-            "cluster_id": r.cluster_id,
-            "canonical_headline": r.canonical_headline,
-            "lang": cluster_lang,
-            "story_count": len(members) if lang_filter else r.story_count,
-            "outlet_count": (len({m.get("outlet") for m in members if m.get("outlet")})
-                             if lang_filter else r.outlet_count),
-            "first_seen_utc": r.first_seen_utc.isoformat() if r.first_seen_utc else None,
-            "last_seen_utc": r.last_seen_utc.isoformat() if r.last_seen_utc else None,
-            "asset_class": r.asset_class,
-            "driver_tags": list(r.driver_tags or []),
-            "tickers": list(r.tickers or []),
-            "llm_direction": r.llm_direction,
-            "llm_confidence": float(r.llm_confidence) if r.llm_confidence is not None else None,
-            "llm_rationale": r.llm_rationale,
-            "impact_score": r.impact_score,
-            "impact_components": (r.impact_components
-                                  if isinstance(r.impact_components, dict) else None),
-            "members": members,
-        })
+        item = _serialize_cluster(r, lang_filter)
+        if item is not None:
+            clusters.append(item)
+
+    today = datetime.now(timezone.utc).date()
+    win_lo = date_cls.fromordinal(
+        today.toordinal() - (hours // 24) - 1)
+    win_hi = date_cls.fromordinal(today.toordinal() + 1)
+    clusters, dedupe_stats = _apply_dedupe(db, clusters, win_lo, win_hi)
 
     return {
         "clusters": clusters[:limit],
         "langs": lang_filter,
         "as_of": _now_iso(),
         "source": "news_clusters",
+        "event_dedupe": dedupe_stats,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Historical per-day aggregates over consumption.news_clusters_daily
+# (kanban t_49832d70; contract agents/etl/docs/news_clusters_daily.md).
+# Feeds the News attention chart. window_date = UTC calendar day; the live
+# rolling 48h table consumption.news_clusters is untouched.
+# ---------------------------------------------------------------------------
+@router.get("/news/clusters/timeline")
+def get_news_clusters_timeline(from_: date_cls | None = Query(None, alias="from"),
+                               to: date_cls | None = None,
+                               asset_class: str | None = None,
+                               db: Session = Depends(get_db)):
+    """Per-day aggregate of historical story clusters for the attention chart.
+
+    ?from= / ?to= (YYYY-MM-DD, inclusive) bound the window; ?asset_class=US
+    narrows to one class. Returns one row per (window_date, asset_class) with
+    stories (cluster count), articles (sum of member stories) and top_impact
+    (max impact_score that day). Days with zero silver source rows are simply
+    absent — the UI should render them as no-data days (see /availability).
+    """
+    params = {}
+    where = ["1=1"]
+    if from_ is not None:
+        where.append("window_date >= :from")
+        params["from"] = from_
+    if to is not None:
+        where.append("window_date <= :to")
+        params["to"] = to
+    ac = (asset_class or "").strip().upper() or None
+    if ac:
+        where.append("asset_class = :ac")
+        params["ac"] = ac
+
+    rows = safe_query(db, f"""
+        SELECT window_date, asset_class,
+               count(*) AS stories,
+               sum(story_count) AS articles,
+               max(impact_score) AS top_impact
+        FROM consumption.news_clusters_daily
+        WHERE {' AND '.join(where)}
+        GROUP BY window_date, asset_class
+        ORDER BY window_date, asset_class
+    """, params, label="news_clusters_daily_timeline")
+
+    return {
+        "timeline": [{
+            "window_date": r.window_date.isoformat(),
+            "asset_class": r.asset_class,
+            "stories": r.stories,
+            "articles": r.articles,
+            "top_impact": r.top_impact,
+        } for r in rows],
+        "from": from_.isoformat() if from_ else None,
+        "to": to.isoformat() if to else None,
+        "asset_class": ac,
+        "as_of": _now_iso(),
+        "source": "news_clusters_daily",
+    }
+
+
+@router.get("/news/clusters/availability")
+def get_news_clusters_availability(db: Session = Depends(get_db)):
+    """Coverage of the historical per-day table so the UI can grey out days
+    with no data (silver source gaps, thin weekends). Returns min/max
+    window_date, populated-day count, total clusters, the sim_threshold in
+    force, and the full list of populated dates (a few hundred entries)."""
+    row = safe_query(db, """
+        SELECT min(window_date) AS min_date, max(window_date) AS max_date,
+               count(DISTINCT window_date) AS days, count(*) AS clusters,
+               min(sim_threshold) AS min_thr, max(sim_threshold) AS max_thr
+        FROM consumption.news_clusters_daily
+    """, {}, label="news_clusters_daily_availability")
+    dates = safe_query(db, """
+        SELECT DISTINCT window_date FROM consumption.news_clusters_daily
+        ORDER BY window_date
+    """, {}, label="news_clusters_daily_dates")
+
+    r = row[0] if row else None
+    return {
+        "min_date": r.min_date.isoformat() if r and r.min_date else None,
+        "max_date": r.max_date.isoformat() if r and r.max_date else None,
+        "days": r.days if r else 0,
+        "clusters": r.clusters if r else 0,
+        "sim_threshold": (float(r.max_thr) if r and r.max_thr is not None
+                          else None),
+        "sim_threshold_uniform": (bool(r and r.min_thr is not None
+                                       and r.min_thr == r.max_thr)),
+        "dates": [d.window_date.isoformat() for d in dates],
+        "as_of": _now_iso(),
+        "source": "news_clusters_daily",
     }
 
 
