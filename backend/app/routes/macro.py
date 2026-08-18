@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_db
 from app.db.safe_query import safe_query
 from app.core_logic.news_event_groups import group_clusters_by_events
+from app.services.news_trust import apply_trust
 
 router = APIRouter(prefix="/api", tags=["macro"])
 
@@ -173,13 +174,21 @@ def get_news_by_asset(per_group: int = 15, db: Session = Depends(get_db)):
     """Research > News subtab — latest silver.historical_news headlines split
     by asset class (category). Junk categories ('market', 'person') are
     excluded. last_updated exposes per-category freshness so the UI can flag
-    stale feeds (ETL cadence differs per category)."""
+    stale feeds (ETL cadence differs per category).
+
+    Reads silver.v_news_enriched (kanban t_9be92903): enrichment columns
+    sent_label/sent_score/impact/tickers/dup_count are additive, computed by
+    qr_etl scorer lexicon-finvader1-lm1. sent_label is NULL for non-English
+    headlines (~29% of rows) — UI must treat NULL as 'unlabeled', not neutral.
+    """
     per_group = max(1, min(per_group, 50))
     rows = safe_query(db, """
-        SELECT category, date, entity_name, headline, source FROM (
+        SELECT category, date, entity_name, headline, source,
+               sent_label, sent_score, impact, tickers, dup_count FROM (
             SELECT category, date, entity_name, headline, source,
+                   sent_label, sent_score, impact, tickers, dup_count,
                    ROW_NUMBER() OVER (PARTITION BY category ORDER BY date DESC, id DESC) AS rn
-            FROM silver.historical_news
+            FROM silver.v_news_enriched
             WHERE category = ANY(:cats)
         ) t WHERE rn <= :per_group
         ORDER BY category, date DESC
@@ -194,6 +203,11 @@ def get_news_by_asset(per_group: int = 15, db: Session = Depends(get_db)):
             "source": (r.source or "").replace("gdelt:", "") or None,
             "entity": r.entity_name or None,
             "published_at": r.date.isoformat() if r.date else None,
+            "sentiment": r.sent_label or None,
+            "sent_score": float(r.sent_score) if r.sent_score is not None else None,
+            "impact": r.impact or None,
+            "tickers": list(r.tickers) if r.tickers else [],
+            "dup_count": r.dup_count if r.dup_count is not None else None,
         })
         if r.category not in last_updated and r.date:
             last_updated[r.category] = r.date.isoformat()
@@ -557,6 +571,8 @@ def get_news_clusters(hours: int = 48, limit: int = 200,
                       date: date_cls | None = None,
                       langs: str | None = None,
                       dedupe_events: bool = True,
+                      rank: str = "trust",
+                      held: str | None = None,
                       db: Session = Depends(get_db)):
     """Research > News - story clusters (display unit = cluster, not headline).
 
@@ -590,9 +606,27 @@ def get_news_clusters(hours: int = 48, limit: int = 200,
     for drill-down. impact_score / impact_components are never mutated.
     Pass dedupe_events=false for the raw, ungrouped list. Applies to both
     the live table and the ?date= historical path.
+
+    ?rank=trust (default) | raw — serving-layer trust overlay
+    (app/services/news_trust.py): every cluster gains a trust object
+    {trust_score, penalties[], outlet_diversity, distinct_headlines,
+    source_factor, source_outlets}. Raw impact_score is never mutated.
+    rank=trust re-sorts by trust_score desc (content farms / press releases /
+    affiliate spam sink below diverse multi-outlet events); rank=raw preserves
+    the ETL impact_score order for comparison. ?held=SPY,BTC-USD exempts held
+    tickers from the micro-cap crypto penalty.
+
+    The live-path response carries llm_coverage (kanban t_94cad40c):
+    {rule, description, cohort_size, scored, coverage_pct, target_pct,
+    last_run{...}} — the explicit LLM-direction scoring rule (top 80% of
+    the visible trust-ranked feed scored; lower 20% unscored) plus live
+    counts and the latest scoring-run metadata from
+    consumption.news_outlook_coverage, so the UI can state the rule.
     """
     hours = max(1, min(hours, 24 * 30))
     limit = max(1, min(limit, 500))
+    rank = (rank or "trust").strip().lower()
+    held_set = {t.strip().upper() for t in (held or "").split(",") if t.strip()}
     lang_filter = _parse_lang_filter(langs)
 
     # Calendar events eligible to anchor a group: inside the served window
@@ -647,6 +681,10 @@ def get_news_clusters(hours: int = 48, limit: int = 200,
             date.fromordinal(date.toordinal() - 1),
             date.fromordinal(date.toordinal() + 1))
 
+        apply_trust(clusters, held=held_set)
+        if rank == "trust":
+            clusters.sort(key=lambda c: -(c.get("trust", {}).get("trust_score") or 0))
+
         return {
             "clusters": clusters[:limit],
             "langs": lang_filter,
@@ -654,6 +692,7 @@ def get_news_clusters(hours: int = 48, limit: int = 200,
             "as_of": _now_iso(),
             "source": "news_clusters_daily",
             "event_dedupe": dedupe_stats,
+            "rank": rank,
         }
 
     rows = safe_query(db, """
@@ -682,12 +721,64 @@ def get_news_clusters(hours: int = 48, limit: int = 200,
     win_hi = date_cls.fromordinal(today.toordinal() + 1)
     clusters, dedupe_stats = _apply_dedupe(db, clusters, win_lo, win_hi)
 
+    apply_trust(clusters, held=held_set)
+    if rank == "trust":
+        clusters.sort(key=lambda c: -(c.get("trust", {}).get("trust_score") or 0))
+
+    served = clusters[:limit]
+
+    # LLM-direction coverage contract (kanban t_94cad40c): the scoring rule
+    # is explicit (top 80% of the visible trust-ranked feed; lower 20%
+    # unscored) so the frontend can STATE it instead of showing an
+    # unexplained percentage. Live counts come from the served rows; the
+    # last-run metadata comes from consumption.news_outlook_coverage
+    # (written by qr_research insert_outlook.py per scoring run).
+    n_scored = sum(1 for c in served if c.get("llm_direction"))
+    cov_rows = safe_query(db, """
+        SELECT rule, rule_detail, cohort_size, target_scored,
+               already_scored, attempted, succeeded, failed,
+               stale_key_count, model, direction_source, scored_at
+        FROM consumption.news_outlook_coverage
+        ORDER BY id DESC LIMIT 1
+    """, {}, label="news_outlook_coverage_latest")
+    last_run = None
+    if cov_rows:
+        r = cov_rows[0]
+        last_run = {
+            "rule": r.rule,
+            "rule_detail": (r.rule_detail
+                            if isinstance(r.rule_detail, dict) else None),
+            "cohort_size": r.cohort_size,
+            "target_scored": r.target_scored,
+            "already_scored": r.already_scored,
+            "attempted": r.attempted,
+            "succeeded": r.succeeded,
+            "failed": r.failed,
+            "stale_key_count": r.stale_key_count,
+            "model": r.model,
+            "direction_source": r.direction_source,
+            "scored_at": r.scored_at.isoformat() if r.scored_at else None,
+        }
+    llm_coverage = {
+        "rule": "visible_feed_top80pct",
+        "description": "LLM direction: top 80% of visible clusters by "
+                       "trust rank; lower 20% unscored",
+        "cohort_size": len(served),
+        "scored": n_scored,
+        "coverage_pct": (round(100.0 * n_scored / len(served), 1)
+                         if served else None),
+        "target_pct": 80,
+        "last_run": last_run,
+    }
+
     return {
-        "clusters": clusters[:limit],
+        "clusters": served,
         "langs": lang_filter,
         "as_of": _now_iso(),
         "source": "news_clusters",
         "event_dedupe": dedupe_stats,
+        "rank": rank,
+        "llm_coverage": llm_coverage,
     }
 
 

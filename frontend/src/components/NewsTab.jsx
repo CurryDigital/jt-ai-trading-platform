@@ -853,6 +853,9 @@ export const NewsTab = () => {
   const [outlookData, setOutlookData] = useState(null);
   const [live, setLive] = useState(false);          // true once /api/news/clusters serves real rows
   const [asOf, setAsOf] = useState(null);
+  // t_4b664a1a: top-level llm_coverage block from /api/news/clusters (live
+  // path only) — explains the direction-scoring rule next to the feed.
+  const [coverage, setCoverage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});     // cluster_id -> bool
   const [showAll, setShowAll] = useState(false);    // feed capped at FEED_CAP rows by default
@@ -923,6 +926,7 @@ export const NewsTab = () => {
       setClusters(filled);
       setLive(true);
       setAsOf(cl.as_of || null);
+      setCoverage(cl.llm_coverage || null);
       if (cl.labels) setLabels(cl.labels);
     } else if (dg && dg.categories) {
       // Fallback: derive the cluster feed from the digest. The outlook key
@@ -942,6 +946,7 @@ export const NewsTab = () => {
       setClusters(mapped);
       setLive(false);
       setAsOf(dg.as_of || null);
+      setCoverage(null); // digest fallback has no llm_coverage block
     }
     setLoading(false);
   };
@@ -1058,6 +1063,33 @@ export const NewsTab = () => {
     const h = ageHours(c.last_seen_utc || c.first_seen_utc);
     return h != null && (m == null || h < m) ? h : m;
   }, null);
+
+  // t_4b664a1a: coverage caption — EXPLAIN the scoring rule, not bare counts.
+  // llm_coverage.description is the canonical text; live scored/cohort counts
+  // are appended. A coverage_pct materially below target_pct is transient
+  // scoring lag (stamps land at the next 2h build_news_clusters run) — the
+  // phrasing must never read as an error state. last_run may be null (table
+  // freshly created): degrade to the description only.
+  const covLine = (() => {
+    if (!coverage) return null;
+    const parts = [coverage.description || 'LLM direction coverage'];
+    const { scored, cohort_size, coverage_pct, target_pct } = coverage;
+    if (Number.isFinite(scored) && Number.isFinite(cohort_size) && cohort_size > 0) {
+      parts.push(`${scored}/${cohort_size} scored`);
+    }
+    if (Number.isFinite(coverage_pct) && Number.isFinite(target_pct) && coverage_pct < target_pct - 5) {
+      parts.push('below target — transient, top-up lands on the next 2h scoring run');
+    }
+    return parts.join(' · ');
+  })();
+  const covTip = (() => {
+    if (!coverage) return undefined;
+    const base = `rule ${coverage.rule || '—'} · target ${coverage.target_pct ?? '—'}% of the visible feed by trust rank`;
+    const lr = coverage.last_run;
+    if (!lr) return `${base} · no scoring run recorded yet (coverage table freshly created)`;
+    const when = lr.scored_at ? `${fmtAge(lr.scored_at)} ago` : '—';
+    return `${base} · last run ${when}: attempted ${lr.attempted ?? '—'}, scored ${lr.succeeded ?? '—'}, failed ${lr.failed ?? '—'}${lr.model ? ` · model ${lr.model}` : ''}`;
+  })();
 
   // Fetch price deltas (since each story broke) for tickers on visible rows.
   // /api/market/delta-since is LIVE (daily-close fallback while IBKR intraday
@@ -1244,6 +1276,14 @@ export const NewsTab = () => {
                 {hiddenCount > 0 && <span> · {hiddenCount} hidden (language/dup/book)</span>}
               </div>
             </div>
+            {covLine && (
+              <div
+                className="text-[9px] font-mono text-slate-500 -mt-0.5 mb-1.5"
+                title={covTip}
+              >
+                {covLine}
+              </div>
+            )}
             {view.length === 0 ? (
               <div className="text-[10px] text-slate-600 py-2">
                 {panelFilter && feed.length > 0
