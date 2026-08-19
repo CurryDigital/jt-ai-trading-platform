@@ -342,15 +342,25 @@ const RegimeRow = ({ region, r }) => {
       <span className="text-[10px] text-slate-400 w-[86px] flex-none" title="Consecutive sessions in current regime (gold.regime_label)">
         {r?.days_in_regime != null ? `${r.days_in_regime}d in regime` : '— in regime'}
       </span>
-      <span className="text-[10px] text-slate-400 w-[76px] flex-none" title="HMM posterior confidence (gold.regime_label)">
-        {r?.confidence != null ? `conf ${(r.confidence * 100).toFixed(2)}%` : 'conf —'}
+      <span className="text-[10px] text-slate-400 w-[76px] flex-none" title="HMM posterior confidence (gold.regime_label, raw value — a permanently saturated posterior is a model property, not certainty)">
+        {r?.confidence != null ? `conf ${r.confidence >= 0.99995 ? '>99.99%' : `${(r.confidence * 100).toFixed(2)}%`}` : 'conf —'}
       </span>
       {fit ? (
-        <span className="flex items-center gap-2 text-[10px] font-mono min-w-0" title="Active strategies (paper/live) whose declared regime-fit matches vs conflicts with the current regime; ANY scope is agnostic">
-          <span className="text-slate-300">{fit.matched} match</span>
-          <span className={fit.conflicted > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>{fit.conflicted} conflict</span>
-          <span className="text-slate-600 truncate">{fit.agnostic} agnostic / {fit.active} active</span>
-        </span>
+        // gold.v_strategy_book_extended.regime_scope defaults every unmapped
+        // strategy to 'ANY' (ELSE branch), so all-agnostic means NOT CLASSIFIED,
+        // not "aligned". Never render 0 conflict as reassurance. (qr_etl task:
+        // expose declared-vs-default.)
+        fit.active > 0 && fit.matched === 0 && fit.conflicted === 0 && fit.agnostic === fit.active ? (
+          <span className="text-[10px] font-mono text-slate-600 min-w-0 truncate" title="No active strategy has a declared regime fit — the registry view defaults unmapped strategies to ANY. Counts are uninformative until qr_etl exposes declared-vs-default and research classifies the book.">
+            regime-fit not classified · {fit.active} active
+          </span>
+        ) : (
+          <span className="flex items-center gap-2 text-[10px] font-mono min-w-0" title="Active strategies (paper/live) whose declared regime-fit matches vs conflicts with the current regime; ANY scope is agnostic">
+            <span className="text-slate-300">{fit.matched} match</span>
+            <span className={fit.conflicted > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>{fit.conflicted} conflict</span>
+            <span className="text-slate-600 truncate">{fit.agnostic} agnostic / {fit.active} active</span>
+          </span>
+        )
       ) : <span className="text-[10px] text-slate-600">fit —</span>}
       {r?.staleness_days > 1 && (
         <span className="ml-auto flex-none text-[9px] font-mono text-slate-600" title="gold.regime_label is behind the calendar">

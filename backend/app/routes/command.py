@@ -409,7 +409,10 @@ def get_command_overview(db: Session = Depends(get_db)):
                 break
         us_series = {
             "regime": latest.regime,
-            "confidence": round(float(latest.confidence), 4) if latest.confidence is not None else None,
+            # Raw posterior — do NOT round here. round(x, 4) turns genuine
+            # 0.99999998 posteriors into exactly 1.0, which reads as a
+            # placeholder. The UI formats honestly (>=0.99995 → '>99.99%').
+            "confidence": float(latest.confidence) if latest.confidence is not None else None,
             "days_in_regime": run,
             "as_of": str(latest.date),
             "staleness_days": (datetime.now(timezone.utc).date() - latest.date).days,
