@@ -522,6 +522,47 @@ def system_health():
     }
 
 
+@app.get("/api/system/freshness")
+def system_freshness(db: Session = Depends(get_db)):
+    """Per-source data freshness registry (gold.v_source_freshness, qr_etl-owned).
+
+    P0-1 Command-page contract: each row carries the source name, its
+    configured staleness budget (expected_max_staleness_hours — per-source,
+    config-driven, not hardcoded in the UI), the last refresh timestamp, and
+    the precomputed staleness in hours. The frontend classifies
+    FRESH/LAGGING/STALE/DISCONNECTED from these fields and propagates state to
+    panels via its source→panel dependency map.
+
+    Degrades to {"sources": None} when the registry view is missing so the
+    client treats every source as UNKNOWN rather than FRESH.
+    """
+    rows = safe_query(db, """
+        SELECT source, asset_class, expected_frequency,
+               expected_max_staleness_hours, last_refreshed_at, last_checked_at,
+               last_error, notes, staleness_hours, freshness_status
+        FROM gold.v_source_freshness
+        ORDER BY source
+    """, label="system_freshness")
+    # safe_query falls back to [] on missing view — an empty registry is as
+    # uninformative as a missing one, so degrade to sources=None (UNKNOWN).
+    if not rows:
+        return {"sources": None, "as_of": datetime.datetime.utcnow().isoformat() + "Z"}
+    return {
+        "sources": [{
+            "source": r.source,
+            "asset_class": r.asset_class,
+            "expected_frequency": r.expected_frequency,
+            "max_staleness_h": int(r.expected_max_staleness_hours) if r.expected_max_staleness_hours is not None else None,
+            "last_refreshed_at": r.last_refreshed_at.isoformat() if r.last_refreshed_at else None,
+            "last_checked_at": r.last_checked_at.isoformat() if r.last_checked_at else None,
+            "staleness_h": round(float(r.staleness_hours), 2) if r.staleness_hours is not None else None,
+            "registry_status": r.freshness_status,
+            "last_error": r.last_error,
+        } for r in rows],
+        "as_of": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+
+
 # --- POSITION & EXECUTION TRACKING ---
 
 @app.get("/api/positions")

@@ -5,7 +5,8 @@ import { LoginPage } from './components/LoginPage';
 import { ManualTicket } from './components/ManualTicket';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
-import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, fmtAge, getToken, setToken, clearToken, onUnauthorized } from './utils';
+import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, getToken, setToken, clearToken, onUnauthorized } from './utils';
+import { FR, FR_NAME, classifySource, useFreshness, fmtAgeSec } from './freshness';
 
 // Tab-level code splitting: each view loads on first visit instead of shipping
 // one ~470kB monolith on initial paint. Vite emits a chunk per component.
@@ -57,7 +58,71 @@ const RibbonCell = ({ label, value, valClass = 'text-slate-200' }) => (
   </div>
 );
 
-const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, healthOk, onModeChange, onHalt, wsConnected }) => {
+// Feed-health indicator — replaces the old single global "UPD" cell. Shows
+// the WORST freshness state across all registered sources; click expands
+// per-source detail (worst first). Palette: rose = STALE/DISCONNECTED,
+// teal = LAGGING, slate = FRESH/UNKNOWN.
+const FEED_CL = {
+  [FR.FRESH]: { dot: 'bg-slate-500', text: 'text-slate-400' },
+  [FR.LAGGING]: { dot: 'bg-teal-400', text: 'text-teal-300' },
+  [FR.UNKNOWN]: { dot: 'bg-slate-600', text: 'text-slate-500' },
+  [FR.STALE]: { dot: 'bg-rose-500', text: 'text-rose-400' },
+  [FR.DISCONNECTED]: { dot: 'bg-rose-500', text: 'text-rose-300' },
+};
+
+const FeedHealth = () => {
+  const [open, setOpen] = useState(false);
+  const registry = useFreshness(60000);
+
+  const rows = useMemo(() => {
+    if (!registry) return [];
+    return Object.values(registry)
+      .map(r => ({ name: r.source, ...classifySource(r) }))
+      .sort((a, b) => b.state - a.state || (b.ageSec ?? 1e15) - (a.ageSec ?? 1e15));
+  }, [registry]);
+
+  const worst = rows.length ? rows[0].state : FR.UNKNOWN;
+  const bad = rows.filter(r => r.state >= FR.STALE).length;
+  const cl = FEED_CL[worst];
+  const label = rows.length === 0 ? 'FEEDS ?'
+    : worst === FR.FRESH ? 'FEEDS OK'
+    : `${FR_NAME[worst]}${bad > 1 ? ` ×${bad}` : ''}`;
+
+  return (
+    <div className="relative px-3 border-r border-white/[0.05] last:border-r-0">
+      <button onClick={() => setOpen(o => !o)} className="flex items-baseline gap-1.5 group">
+        <span className={`qr-dot ${cl.dot}`} />
+        <span className={`qr-num text-[12px] font-bold ${cl.text}`}>{label}</span>
+        <span className="text-[8px] text-slate-600 group-hover:text-slate-400 transition-colors">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-50 w-80 max-h-[60vh] overflow-y-auto bg-[#0e111a] border border-white/[0.08] rounded-lg shadow-xl py-1">
+            <div className="px-3 py-1.5 border-b border-white/[0.06] flex items-center justify-between">
+              <span className="qr-label">Source freshness</span>
+              <span className="text-[9px] text-slate-600">{rows.length} sources · gold.v_source_freshness</span>
+            </div>
+            {rows.length === 0 && (
+              <div className="px-3 py-3 text-[10px] text-slate-500">registry unavailable — treating all sources as UNKNOWN</div>
+            )}
+            {rows.map(r => (
+              <div key={r.name} className="px-3 py-1 flex items-center gap-2 hover:bg-white/[0.03]" title={r.row?.last_error || r.row?.notes || ''}>
+                <span className={`qr-dot flex-none ${FEED_CL[r.state].dot}`} />
+                <span className="flex-1 min-w-0 text-[10px] font-mono text-slate-300 truncate">{r.name}</span>
+                <span className={`text-[9px] font-mono flex-none ${FEED_CL[r.state].text}`}>
+                  {r.state === FR.DISCONNECTED ? 'never' : fmtAgeSec(r.ageSec)}{r.budgetH != null ? ` / ${r.budgetH}h` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const WorkspaceRibbon = ({ summary, dailyPnl, latencyMs, mode, healthOk, onModeChange, onHalt, wsConnected }) => {
   const [modeOpen, setModeOpen] = useState(false);
   const [haltConfirm, setHaltConfirm] = useState(false);
   const [haltPhrase, setHaltPhrase] = useState('');
@@ -154,7 +219,7 @@ const WorkspaceRibbon = ({ summary, dailyPnl, lastRefresh, latencyMs, mode, heal
           <RibbonCell label="P&L D" value={todayPnL != null ? fmtK(todayPnL) : '—'} valClass={todayPnL == null ? 'text-slate-500' : todayPnL >= 0 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
           <RibbonCell label="WR"  value={`${winRate.toFixed(1)}%`} valClass={winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
           <RibbonCell label="TR"  value={totalTrades} />
-          <RibbonCell label="UPD" value={fmtAge(lastRefresh)} valClass="text-slate-400" />
+          <FeedHealth />
         </div>
       </div>
 
@@ -661,7 +726,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [ibkrConnected, setIbkrConnected] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(null);
   const [latencyMs, setLatencyMs] = useState(null);
   const [healthData, setHealthData] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
@@ -889,7 +953,6 @@ export default function App() {
       summary: performance?.summary || {},
       mode: executionMode,
     });
-    setLastRefresh(new Date().toISOString());
     setLoading(false);
   }, 60000);
 
@@ -990,7 +1053,6 @@ export default function App() {
         <WorkspaceRibbon
           summary={data.summary}
           dailyPnl={data.dailyPnl}
-          lastRefresh={lastRefresh}
           latencyMs={latencyMs}
           mode={executionMode}
           healthOk={healthData?.status === 'healthy'}

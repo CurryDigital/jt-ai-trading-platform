@@ -152,6 +152,22 @@ body {
   .qr-dot {
     @apply inline-block w-1.5 h-1.5 rounded-full;
   }
+
+  /* ===== Freshness states (Command P0-1) ===== */
+  /* STALE body: numerics + charts desaturate to ~50% */
+  .qr-fresh-desat :is(.font-mono, .qr-num, svg, img) {
+    opacity: 0.5;
+  }
+  /* STALE hatch overlay (pointer-transparent, sits above the body) */
+  .qr-hatch {
+    background-image: repeating-linear-gradient(
+      45deg,
+      rgba(148, 163, 184, 0.09) 0px,
+      rgba(148, 163, 184, 0.09) 1.5px,
+      transparent 1.5px,
+      transparent 8px
+    );
+  }
   .qr-dot-live   { background: var(--signal-buy);    box-shadow: 0 0 6px var(--signal-buy); }
   .qr-dot-stale  { background: var(--signal-warning);}
   .qr-dot-down   { background: var(--signal-sell);   }
