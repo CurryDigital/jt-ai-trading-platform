@@ -22,6 +22,30 @@ export const FR_NAME = ['FRESH', 'LAGGING', 'UNKNOWN', 'STALE', 'DISCONNECTED'];
 // policy constant; the budgets themselves come from the registry.
 const LAG_FRACTION = 0.5;
 
+// Dev-only freshness override — makes degraded states reachable for review
+// and screenshot capture without waiting for a real outage.
+//   ?fresh_override=ibkr:stale            force one source
+//   ?fresh_override=ibkr:disconnected,attention_items:stale
+// Honored ONLY on localhost or when localStorage['command.freshnessDebug']='1'
+// is set — inert for normal viewers of the production site. Display-only:
+// it never touches data, only this client's classification.
+const OVERRIDE = (() => {
+  try {
+    const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    const debugOn = window.localStorage?.getItem('command.freshnessDebug') === '1';
+    if (!isLocal && !debugOn) return null;
+    const q = new URLSearchParams(window.location.search).get('fresh_override');
+    if (!q) return null;
+    const map = {};
+    for (const pair of q.split(',')) {
+      const [name, state] = pair.split(':').map(s => s && s.trim());
+      const idx = FR_NAME.indexOf((state || '').toUpperCase());
+      if (name && idx >= 0) map[name] = idx;
+    }
+    return Object.keys(map).length ? map : null;
+  } catch { return null; }
+})();
+
 // Source → panel dependency map. Panels are NEVER tagged by hand; they
 // inherit the worst state of their upstream sources from this map.
 // ibkr staleness deliberately propagates to the book, exposures and the
@@ -39,7 +63,15 @@ export const PANEL_SOURCES = {
 // Merged Command attention panel inherits from both alert feeds.
 PANEL_SOURCES.attention = [...PANEL_SOURCES.strategyRisks, ...PANEL_SOURCES.platform];
 
-export function classifySource(row) {
+export function classifySource(row, name) {
+  const srcName = name ?? row?.source;
+  if (OVERRIDE && srcName && OVERRIDE[srcName] != null) {
+    const state = OVERRIDE[srcName];
+    const ageSec = row?.last_refreshed_at
+      ? Math.max(0, (Date.now() - new Date(row.last_refreshed_at).getTime()) / 1000)
+      : null;
+    return { state, ageSec, budgetH: row?.max_staleness_h ?? null, row, overridden: true };
+  }
   if (!row) return { state: FR.UNKNOWN, ageSec: null, budgetH: null };
   const budgetH = row.max_staleness_h ?? null;
   if (!row.last_refreshed_at) return { state: FR.DISCONNECTED, ageSec: null, budgetH, row };
@@ -62,7 +94,7 @@ export function classifySource(row) {
 export function panelFreshness(sourceNames, registry) {
   let state = FR.FRESH, culprit = null, asOfSec = null;
   for (const name of sourceNames) {
-    const c = classifySource(registry ? registry[name] : null);
+    const c = classifySource(registry ? registry[name] : null, name);
     if (c.state > state) { state = c.state; culprit = { name, ...c }; }
     if (c.ageSec != null && (asOfSec == null || c.ageSec > asOfSec)) asOfSec = c.ageSec;
   }
