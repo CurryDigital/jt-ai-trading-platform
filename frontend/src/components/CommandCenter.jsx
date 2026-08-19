@@ -173,6 +173,7 @@ function MarketBand({ navigateToTab, fresh }) {
   const [breadth, setBreadth] = useState({ us: null, hk: null });
   const [sentiment, setSentiment] = useState(null);
   const [movers, setMovers] = useState({ gainers: [], losers: [] });
+  const [loaded, setLoaded] = useState(false);  // first successful poll landed
 
   const loadMarketData = async () => {
     const ov = await api.get('/api/markets/overview?regions=US,HK');
@@ -182,6 +183,7 @@ function MarketBand({ navigateToTab, fresh }) {
     setBreadth(ov.breadth || { us: null, hk: null });
     setSentiment(ov.sentiment || null);
     setMovers(ov.movers || { gainers: [], losers: [] });
+    setLoaded(true);
   };
 
   // Initial load on mount, then visibility-aware polling every 15s.
@@ -226,17 +228,16 @@ function MarketBand({ navigateToTab, fresh }) {
                 return (
                   <div className="mb-2.5 h-[172px] flex flex-col justify-between overflow-x-auto">
                     {(() => {
+                      // P1: EST 1D/1W/1M forecast badges REMOVED — no hit-rate
+                      // store exists for them (checked gold/consumption/silver
+                      // 2026-08-19); an unscored forecast is decoration.
                       const cols = [
                         { key: 'change_1d', label: '1D', est: false },
                         { key: 'change_1w', label: '1W', est: false },
                         { key: 'change_1m', label: '1M', est: false },
                         { key: 'change_ytd', label: 'YTD', est: false },
-                        { key: 'est_1d', label: 'Est 1D', est: true },
-                        { key: 'est_1w', label: 'Est 1W', est: true },
-                        { key: 'est_1m', label: 'Est 1M', est: true },
                       ];
-                      const showEst = regionIdx.some(i => cols.some(c => c.est && i[c.key] != null));
-                      const visibleCols = cols.filter(c => !c.est || showEst);
+                      const visibleCols = cols;
                       const gridCols = `70px 64px repeat(${visibleCols.length}, minmax(44px, 1fr))`;
                       return (
                         <div className="min-w-[620px]">
@@ -346,21 +347,27 @@ const RegimeRow = ({ region, r }) => {
         {r?.confidence != null ? `conf ${r.confidence >= 0.99995 ? '>99.99%' : `${(r.confidence * 100).toFixed(2)}%`}` : 'conf —'}
       </span>
       {fit ? (
-        // gold.v_strategy_book_extended.regime_scope defaults every unmapped
-        // strategy to 'ANY' (ELSE branch), so all-agnostic means NOT CLASSIFIED,
-        // not "aligned". Never render 0 conflict as reassurance. (qr_etl task:
-        // expose declared-vs-default.)
-        fit.active > 0 && fit.matched === 0 && fit.conflicted === 0 && fit.agnostic === fit.active ? (
-          <span className="text-[10px] font-mono text-slate-600 min-w-0 truncate" title="No active strategy has a declared regime fit — the registry view defaults unmapped strategies to ANY. Counts are uninformative until qr_etl exposes declared-vs-default and research classifies the book.">
-            regime-fit not classified · {fit.active} active
-          </span>
-        ) : (
-          <span className="flex items-center gap-2 text-[10px] font-mono min-w-0" title="Active strategies (paper/live) whose declared regime-fit matches vs conflicts with the current regime; ANY scope is agnostic">
-            <span className="text-slate-300">{fit.matched} match</span>
-            <span className={fit.conflicted > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>{fit.conflicted} conflict</span>
-            <span className="text-slate-600 truncate">{fit.agnostic} agnostic / {fit.active} active</span>
-          </span>
-        )
+        // gold.v_strategy_book_extended now exposes regime_scope_declared
+        // (qr_etl t_469a21c1): the backend counts matched/conflicted/agnostic
+        // ONLY over declared rows and reports `classified` (declared count).
+        // Unmapped strategies default to ANY in the view but are NOT counted —
+        // classified===0 with active>0 means the whole active book is
+        // unclassified, never "aligned". Never render 0 conflict as
+        // reassurance.
+        (() => {
+          const classified = fit.classified ?? (fit.matched + fit.agnostic + fit.conflicted);
+          return fit.active > 0 && classified === 0 ? (
+            <span className="text-[10px] font-mono text-slate-600 min-w-0 truncate" title="No active strategy has a researched regime-fit declaration — regime_scope_declared is false for the whole active book (unmapped strategies default to ANY in the view, which is not a declaration). Counts are uninformative until research classifies the book.">
+              regime-fit not classified · {fit.active} active
+            </span>
+          ) : (
+            <span className="flex items-center gap-2 text-[10px] font-mono min-w-0" title="Active strategies (paper/live) whose declared regime-fit matches vs conflicts with the current regime; declared-ANY scope is agnostic. Counts cover classified rows only — unclassified actives are excluded, not counted as agnostic.">
+              <span className="text-slate-300">{fit.matched} match</span>
+              <span className={fit.conflicted > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'}>{fit.conflicted} conflict</span>
+              <span className="text-slate-600 truncate">{fit.agnostic} agnostic · {classified}/{fit.active} classified</span>
+            </span>
+          );
+        })()
       ) : <span className="text-[10px] text-slate-600">fit —</span>}
       {r?.staleness_days > 1 && (
         <span className="ml-auto flex-none text-[9px] font-mono text-slate-600" title="gold.regime_label is behind the calendar">
@@ -402,35 +409,92 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
 
   // Merged attention queue (P0-2): strategy risks + monitoring gap + platform
   // items in ONE panel, sorted by severity then recency (risks carry no
-  // timestamp — nulls sort last within a severity tier).
+  // timestamp — nulls sort last within a severity tier). P0-3: every item
+  // carries a stable ackKey for server-side ack/snooze, a real action verb,
+  // and a dedup class so same-class rows collapse to one.
   const attentionItems = useMemo(() => {
     const items = [];
     for (const s of strategyRisks) items.push({
       kind: 'risk', sev: s.sev, tag: 'RISK', title: s.name,
+      triggers: s.triggers || null,
+      fullMetrics: `PF ${s.paper_pf != null ? s.paper_pf.toFixed(2) : '—'} · P&L ${s.paper_pnl >= 0 ? '+' : ''}${fmtK(s.paper_pnl)} · WR ${s.paper_wr}% · ${s.closed_trades} closed`,
       impact: `PF ${s.paper_pf != null ? s.paper_pf.toFixed(2) : '—'} · P&L ${s.paper_pnl >= 0 ? '+' : ''}${fmtK(s.paper_pnl)} · WR ${s.paper_wr}% · ${s.closed_trades} closed`,
-      ts: null, age: null, strategyId: s.strategy_id, action: 'Review',
-      key: `risk-${s.strategy_id}`,
+      ts: null, age: null, strategyId: s.strategy_id, action: 'open',
+      key: `risk-${s.strategy_id}`, ackKey: `risk:${s.strategy_id}`,
     });
     if (monitoringGap > 0) items.push({
       kind: 'gap', sev: 'info', tag: 'GAPS',
       title: `${monitoringGap} paper strateg${monitoringGap === 1 ? 'y' : 'ies'} not actively monitored`,
       impact: 'Registry says PAPER but no ACTIVE paper deployment — no live signal tracking running.',
-      ts: null, age: null, target: 'strategies', action: 'Review', key: 'gap',
+      ts: null, age: null, target: 'strategies', action: 'open', key: 'gap', ackKey: 'gap:monitoring',
     });
     for (const a of (overview?.attention || [])) {
       const raw = a.created_at;
       const ts = raw ? new Date(/Z|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw + 'Z').getTime() : null;
       items.push({
         kind: 'platform', sev: a.sev, tag: a.tag, title: a.title, impact: a.impact,
-        ts, age: a.age || fmtAge(a.created_at), target: a.target, action: a.action || 'Review',
-        key: `plat-${a.ref_id || a.title}`,
+        ts, age: a.age || fmtAge(a.created_at), target: a.target,
+        action: a.action || 'open', refId: a.ref_id,
+        key: `plat-${a.id || a.ref_id || a.title}`, ackKey: a.id ? String(a.id) : null,
       });
     }
     items.sort((x, y) => (SEV_RANK[x.sev] ?? 9) - (SEV_RANK[y.sev] ?? 9) || (y.ts ?? -1) - (x.ts ?? -1));
     return items;
   }, [overview, strategyRisks, monitoringGap]);
 
-  const sevCounts = attentionItems.reduce((m, a) => ({ ...m, [a.sev]: (m[a.sev] || 0) + 1 }), {});
+  // P0-3: server-side dismissals filter the payload already; this set is the
+  // optimistic local removal after the user acks/snoozes in THIS session.
+  const [dismissed, setDismissed] = useState(() => new Set());
+  const [actBusy, setActBusy] = useState(null);   // ackKey currently executing
+  const [actMsg, setActMsg] = useState(null);     // {ackKey, ok, text}
+  const visibleItems = useMemo(
+    () => attentionItems.filter(a => !a.ackKey || !dismissed.has(a.ackKey)),
+    [attentionItems, dismissed],
+  );
+
+  // Dedup by class (P0-3): '<source> feed is stale' rows collapse into one
+  // group row with a disclosure triangle; other classes stay individual.
+  const alertClass = (a) =>
+    (a.kind === 'platform' && / feed is stale$/i.test(a.title)) ? 'feed-stale' : `solo:${a.key}`;
+  const attentionGroups = useMemo(() => {
+    const order = [], byClass = new Map();
+    for (const a of visibleItems) {
+      const k = alertClass(a);
+      if (!byClass.has(k)) { byClass.set(k, []); order.push(k); }
+      byClass.get(k).push(a);
+    }
+    return order.map(k => byClass.get(k));
+  }, [visibleItems]);
+  const [openGroups, setOpenGroups] = useState(() => new Set());
+  const toggleGroup = (k) => setOpenGroups(prev => {
+    const n = new Set(prev);
+    n.has(k) ? n.delete(k) : n.add(k);
+    return n;
+  });
+
+  const dismissAlert = async (targets, action) => {
+    const keys = targets.map(a => a.ackKey).filter(Boolean);
+    if (!keys.length) return;
+    for (const k of keys) {
+      await api.post('/api/command/alerts/ack', { alert_key: k, action, snooze_minutes: 60 });
+    }
+    setDismissed(prev => new Set([...prev, ...keys]));
+  };
+
+  const ACT_LABEL = { reconnect: 'Reconnect', flatten: 'Flatten', open: 'Open' };
+  const runAction = async (a) => {
+    if (a.action === 'reconnect') {
+      setActBusy(a.ackKey || a.key);
+      const res = await api.post('/api/ib/tws/connect', {});
+      setActBusy(null);
+      setActMsg({ key: a.ackKey || a.key, ok: !!(res && res.success !== false), text: res && (res.message || res.status) ? String(res.message || res.status) : (res ? 'connect requested' : 'request failed') });
+      return;
+    }
+    if (a.strategyId) onSelectStrategy?.(a.strategyId);
+    else navigateToTab(a.target || 'command');
+  };
+
+  const sevCounts = visibleItems.reduce((m, a) => ({ ...m, [a.sev]: (m[a.sev] || 0) + 1 }), {});
 
   // Markets band collapsed by default (P0-2), persisted per user/browser.
   const [marketsOpen, setMarketsOpen] = useState(() => {
@@ -474,27 +538,78 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
           {sevCounts.critical > 0 && <span className="text-[9px] font-bold text-rose-400">{sevCounts.critical} critical</span>}
           {sevCounts.warning > 0 && <span className="text-[9px] font-bold text-slate-400">{sevCounts.warning} warning</span>}
           {sevCounts.info > 0 && <span className="text-[9px] text-slate-500">{sevCounts.info} info</span>}
-          {attentionItems.length === 0 && <span className="text-[9px] text-slate-500">clear</span>}
+          {visibleItems.length === 0 && <span className="text-[9px] text-slate-500">clear</span>}
         </span>
       }>
-        {attentionItems.map((a, i) => {
-          const sv = SEV_STYLE[a.sev] || SEV_STYLE.info;
-          const onAct = () => a.strategyId ? onSelectStrategy?.(a.strategyId) : navigateToTab(a.target || 'command');
+        {attentionGroups.map((group, gi) => {
+          const lead = group[0];
+          const isCrit = lead.sev === 'critical';
+          const sv = SEV_STYLE[lead.sev] || SEV_STYLE.info;
+          const grouped = group.length > 1;
+          const gKey = grouped ? alertClass(lead) : null;
+          const expanded = gKey != null && openGroups.has(gKey);
+          const leadId = lead.ackKey || lead.key;
+          const groupTitle = grouped && gKey === 'feed-stale'
+            ? `${group.length} feeds stale — ${group.map(a => a.refId || a.title).join(', ')}`
+            : lead.title;
           return (
-            <div key={a.key} className={`flex items-center gap-3 py-2 px-3 border-l-2 ${sv.border} ${sv.bg} ${i > 0 ? 'border-t border-t-white/[0.05]' : ''}`}>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`text-[8px] font-black tracking-wide px-1.5 py-0.5 rounded ${sv.tag}`}>{a.tag}</span>
-                  <button onClick={onAct} className="text-[12px] font-bold text-white truncate hover:opacity-80 text-left">{a.title}</button>
+            <div key={gKey || lead.key} className={gi > 0 ? 'border-t border-t-white/[0.05]' : ''}>
+              <div className={`flex items-center gap-3 px-3 ${isCrit ? 'py-3 border-l-4' : 'py-2 border-l-2'} ${sv.border} ${sv.bg}`}>
+                {grouped && (
+                  <button onClick={() => toggleGroup(gKey)} className="flex-none w-3 text-[10px] text-slate-500 hover:text-slate-300" title="Show individual alerts">{expanded ? '▾' : '▸'}</button>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-[8px] font-black tracking-wide px-1.5 py-0.5 rounded ${sv.tag}`}>{lead.tag}</span>
+                    <button onClick={() => grouped ? toggleGroup(gKey) : runAction(lead)} className={`${isCrit ? 'text-[13px]' : 'text-[12px]'} font-bold text-white truncate hover:opacity-80 text-left`}>{groupTitle}</button>
+                  </div>
+                  {lead.kind === 'risk' && lead.triggers && lead.triggers.length > 0 ? (
+                    <div className="flex items-center gap-1 mt-1 flex-wrap" title={lead.fullMetrics}>
+                      {lead.triggers.map(t => (
+                        <span key={t} className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300">{t}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={`${isCrit ? 'text-[11px]' : 'text-[10px]'} text-slate-500 mt-0.5 truncate`} title={lead.impact}>{lead.impact}</div>
+                  )}
+                  {actMsg && actMsg.key === leadId && (
+                    <div className={`text-[9px] font-mono mt-0.5 ${actMsg.ok ? 'text-teal-400' : 'text-rose-400'}`}>{actMsg.text}</div>
+                  )}
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5 truncate" title={a.impact}>{a.impact}</div>
+                <span className="font-mono text-[10px] text-slate-600 flex-none">{lead.age || '—'}</span>
+                <div className="flex-none flex items-center gap-1">
+                  <button onClick={() => runAction(lead)} disabled={actBusy === leadId}
+                    className="text-[10px] font-bold px-2.5 py-1 rounded bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 disabled:opacity-50">
+                    {actBusy === leadId ? '…' : (ACT_LABEL[lead.action] || 'Open')}
+                  </button>
+                  {lead.ackKey && (
+                    <>
+                      <button onClick={() => dismissAlert(group, 'acknowledge')} title="Acknowledge — persists server-side (actor + timestamp)"
+                        className="text-[9px] px-1.5 py-1 rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.05]">Ack</button>
+                      <button onClick={() => dismissAlert(group, 'snooze')} title="Snooze 1h — persists server-side, auto-returns"
+                        className="text-[9px] px-1.5 py-1 rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.05]">Snooze 1h</button>
+                    </>
+                  )}
+                </div>
               </div>
-              <span className="font-mono text-[10px] text-slate-600 flex-none">{a.age || '—'}</span>
-              <button onClick={onAct} className="flex-none text-[10px] font-bold px-2.5 py-1 rounded bg-white/[0.06] hover:bg-white/[0.1] text-slate-200">{a.action}</button>
+              {grouped && expanded && group.map(m => {
+                const mid = m.ackKey || m.key;
+                return (
+                  <div key={m.key} className="flex items-center gap-3 py-1.5 px-3 pl-8 border-l-2 border-l-white/[0.08]">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-mono text-slate-300 truncate">{m.title}</div>
+                      <div className="text-[9px] text-slate-600 truncate" title={m.impact}>{m.impact}</div>
+                    </div>
+                    <span className="font-mono text-[9px] text-slate-600 flex-none">{m.age || '—'}</span>
+                    <button onClick={() => runAction(m)} className="flex-none text-[9px] font-bold px-2 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.09] text-slate-300">{ACT_LABEL[m.action] || 'Open'}</button>
+                    {m.ackKey && <button onClick={() => dismissAlert([m], 'acknowledge')} className="flex-none text-[9px] px-1.5 py-0.5 rounded text-slate-600 hover:text-slate-300">Ack</button>}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
-        {attentionItems.length === 0 && (
+        {visibleItems.length === 0 && (
           <div className="py-6 text-center text-[11px] text-slate-600">Nothing needs attention right now</div>
         )}
       </Panel>
@@ -518,7 +633,12 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">Day P&L</div>
                 <div className="flex items-baseline gap-1.5 justify-end">
                   <span className={`font-mono text-[17px] font-black ${pnlCl(account?.day_pnl)}`}>{account?.day_pnl != null ? fmtK(account.day_pnl) : '—'}</span>
-                  {account?.day_pnl_pct != null && <span className={`font-mono text-[11px] ${pnlCl(account.day_pnl_pct)}`}>{fmtPct(account.day_pnl_pct)}</span>}
+                  {/* bps, not %: 1dp percent is below the resolution of a multi-$M book */}
+                  {account?.day_pnl != null && equity ? (
+                    <span className={`font-mono text-[11px] ${pnlCl(account.day_pnl)}`} title="Day P&L as basis points of equity">
+                      {(account.day_pnl / equity * 1e4) >= 0 ? '+' : ''}{(account.day_pnl / equity * 1e4).toFixed(1)} bps
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -529,8 +649,6 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
             {[
               { l: 'Open P&L', v: account?.open_pnl != null ? fmtK(account.open_pnl) : fmtK(openPnl), sub: account?.equity ? fmtPct((account.open_pnl ?? openPnl) / account.equity * 100) : null, pos: (account?.open_pnl ?? openPnl) >= 0 },
               { l: 'Buying Power', v: account?.buying_power != null ? fmtK(account.buying_power) : '—', sub: account?.cash_pct != null ? `${Number(account.cash_pct).toFixed(1)}% cash` : null },
-              { l: 'Gross Exp', v: gross != null ? `${gross.toFixed(1)}%` : '—', sub: gross != null && Math.abs(gross) > 200 ? 'check backend' : null, pos: gross != null ? gross >= 0 : undefined },
-              { l: 'Net Exp', v: net != null ? `${net.toFixed(1)}%` : '—', sub: net != null ? (net >= 0 ? 'net long' : 'net short') : null, pos: net != null ? net >= 0 : undefined },
             ].map(k => (
               <div key={k.l} className="qr-surface p-2.5 flex flex-col justify-center">
                 <div className="qr-label">{k.l}</div>
@@ -538,6 +656,40 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
                 {k.sub && <div className="text-[9px] text-slate-500 mt-0.5">{k.sub}</div>}
               </div>
             ))}
+            {/* Exposure (P1): one widget replacing the twin Gross/Net cards —
+                long/short split bar from the live position book, net + gross
+                headline from the canonical account row. Beta-adjusted net has
+                NO source field today — rendered as '—', flagged, not invented. */}
+            {(() => {
+              const longPct = equity ? (longMV / equity) * 100 : null;
+              const shortPct = equity ? (shortMV / equity) * 100 : null;
+              const scale = Math.max(100, gross ?? 0, ((longPct ?? 0) + (shortPct ?? 0)));
+              return (
+                <div className="qr-surface p-2.5 col-span-2">
+                  <div className="flex items-baseline justify-between">
+                    <span className="qr-label">Exposure</span>
+                    <span className="font-mono text-[10px] text-slate-300">
+                      net <span className={pnlCl(net)}>{net != null ? `${net >= 0 ? '+' : ''}${net.toFixed(1)}%` : '—'}</span>
+                      <span className="text-slate-600"> · gross {gross != null ? `${gross.toFixed(1)}%` : '—'}</span>
+                    </span>
+                  </div>
+                  <div className="relative h-2 mt-2 rounded bg-white/[0.04] overflow-hidden" title={`Long ${longPct != null ? longPct.toFixed(1) : '—'}% vs short ${shortPct != null ? shortPct.toFixed(1) : '—'}% of equity · center = 0 · full half-width = ${scale.toFixed(0)}%`}>
+                    <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/20" />
+                    {longPct != null && longPct > 0 && (
+                      <div className="absolute top-0 bottom-0 right-1/2 bg-emerald-500/70" style={{ width: `${(longPct / scale) * 50}%` }} />
+                    )}
+                    {shortPct != null && shortPct > 0 && (
+                      <div className="absolute top-0 bottom-0 left-1/2 bg-rose-500/70" style={{ width: `${(shortPct / scale) * 50}%` }} />
+                    )}
+                  </div>
+                  <div className="flex justify-between mt-1 text-[9px] font-mono text-slate-500">
+                    <span>long {longPct != null ? `${longPct.toFixed(1)}%` : '—'}</span>
+                    <span title="Beta-weighted net exposure — no beta field exists in /api/command/overview (flagged as missing API data, not estimated)">β-adj net <span className="text-slate-600">—</span></span>
+                    <span>short {shortPct != null ? `${shortPct.toFixed(1)}%` : '—'}</span>
+                  </div>
+                </div>
+              );
+            })()}
           </FreshWrap>
         </div>
 

@@ -742,6 +742,9 @@ def get_paper_strategy_book_extended(db: Session = Depends(get_db)):
                 "display_name": r.display_name,
                 "instrument": r.instrument,
                 "regime_scope": r.regime_scope,
+                # 2026-08-19 view contract: true = researched declaration,
+                # false = unmapped default ANY (qr_etl t_469a21c1)
+                "regime_scope_declared": getattr(r, "regime_scope_declared", None),
                 "status": r.status,
                 "asset_class": r.asset_class,
                 "entry_logic": r.entry_logic,
@@ -771,6 +774,20 @@ def get_paper_strategy_book_extended(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Strategy book extended error: {e}")
         return {"strategies": [], "count": 0, "error": str(e)}
+
+
+# ── Aliases for paper strategy book (frontend uses /api/agents/paper/...)
+
+@router.get("/agents/paper/strategy-book")
+def get_agents_paper_strategy_book(db: Session = Depends(get_db)):
+    """Alias for /api/paper/strategy-book."""
+    return get_paper_strategy_book(db=db)
+
+
+@router.get("/agents/paper/strategy-book-extended")
+def get_agents_paper_strategy_book_extended(db: Session = Depends(get_db)):
+    """Alias for /api/paper/strategy-book-extended."""
+    return get_paper_strategy_book_extended(db=db)
 
 
 # ── GET /api/paper/gateway-status ────────────────────────────────────────

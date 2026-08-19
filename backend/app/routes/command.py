@@ -5,7 +5,7 @@ handoff/API_SPEC_v2.md + DB_CHANGES_v2.md). All reads degrade to empty via
 safe_query() until the underlying gold/consumption objects are materialized
 by the qr_etl data-engineering process.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from app.dependencies import get_db, logger
 from app.db.safe_query import safe_query, safe_query_one
+from app.db.session import engine
 
 router = APIRouter(prefix="/api", tags=["command"])
 
@@ -21,6 +22,119 @@ SEV_ORDER = {'critical': 0, 'warning': 1, 'info': 2}
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Alert acknowledgements (Command P0-3): acks/snoozes persist server-side with
+# actor + timestamp so a dismissed alert stays dismissed across sessions.
+# Table is self-healing (CREATE IF NOT EXISTS); formal ownership migration is
+# qr_etl's call. Key space: attention item_id, 'risk:<strategy_id>', 'gap:*'.
+# ---------------------------------------------------------------------------
+_ACK_DDL = """
+CREATE TABLE IF NOT EXISTS consumption.alert_acknowledgements (
+    alert_key    TEXT PRIMARY KEY,
+    action       TEXT NOT NULL,            -- 'acknowledge' | 'snooze'
+    actor        TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    snooze_until TIMESTAMPTZ               -- set only for snooze
+)
+"""
+_ack_ready = False
+
+
+def _ensure_ack_table():
+    global _ack_ready
+    if _ack_ready:
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(_ACK_DDL))
+        _ack_ready = True
+    except Exception as e:
+        logger.warning(f"alert_acknowledgements DDL failed: {e}")
+
+
+def _actor(request) -> str:
+    """Best-effort actor from the bearer token; 'local' when auth is off."""
+    try:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            from app.auth import verify_token
+            payload = verify_token(auth[7:])
+            if payload:
+                return payload.get("sub") or payload.get("username") or "user"
+    except Exception:
+        pass
+    return "local"
+
+
+def _ack_map(db) -> dict:
+    """alert_key -> {action, actor, at, snooze_until}; active dismissals only."""
+    _ensure_ack_table()
+    try:
+        rows = safe_query(db, """
+            SELECT alert_key, action, actor, created_at, snooze_until
+            FROM consumption.alert_acknowledgements
+            WHERE action = 'acknowledge'
+               OR (action = 'snooze' AND snooze_until > now())
+        """, label="command_alert_acks")
+    except Exception:
+        return {}
+    now = datetime.now(timezone.utc)
+    out = {}
+    for r in rows:
+        out[r.alert_key] = {
+            "action": r.action,
+            "actor": r.actor,
+            "at": r.created_at.isoformat() if r.created_at else None,
+            "snooze_until": r.snooze_until.isoformat() if r.snooze_until else None,
+        }
+    return out
+
+
+@router.post("/command/alerts/ack")
+def ack_command_alert(payload: dict, request: Request, db: Session = Depends(get_db)):
+    """Acknowledge or snooze a Command-page alert. Upserts by alert_key."""
+    key = (payload or {}).get("alert_key") or ""
+    key = key.strip()
+    action = (payload or {}).get("action")
+    if not key:
+        raise HTTPException(status_code=400, detail="alert_key required")
+    if action not in ("acknowledge", "snooze"):
+        raise HTTPException(status_code=400, detail="action must be 'acknowledge' or 'snooze'")
+    minutes = 60
+    if action == "snooze":
+        try:
+            minutes = max(1, min(10080, int((payload or {}).get("snooze_minutes") or 60)))
+        except (TypeError, ValueError):
+            minutes = 60
+    _ensure_ack_table()
+    actor = _actor(request)
+    db.execute(text("""
+        INSERT INTO consumption.alert_acknowledgements (alert_key, action, actor, created_at, snooze_until)
+        VALUES (:k, :a, :actor, now(), CASE WHEN :a = 'snooze' THEN now() + make_interval(mins => :m) ELSE NULL END)
+        ON CONFLICT (alert_key) DO UPDATE SET
+            action = EXCLUDED.action, actor = EXCLUDED.actor,
+            created_at = EXCLUDED.created_at, snooze_until = EXCLUDED.snooze_until
+    """), {"k": key, "a": action, "actor": actor, "m": minutes})
+    db.commit()
+    return {"ok": True, "alert_key": key, "action": action, "actor": actor,
+            "snooze_minutes": minutes if action == "snooze" else None, "at": _now_iso()}
+
+
+@router.get("/command/alerts/acks")
+def command_alert_acks(db: Session = Depends(get_db)):
+    """Active dismissals map for the Command page (ack + unexpired snoozes)."""
+    return {"acks": _ack_map(db), "as_of": _now_iso()}
+
+
+def _alert_action(tag, ref_id):
+    """Primary action verb for an attention item. Only wired to real
+    endpoints: 'reconnect' exists solely for ibkr (POST /api/ib/tws/connect);
+    ETL-side feeds have no reconnect — honest 'open' (Settings data sources)."""
+    if (tag or "").upper() == "DATA" and ref_id == "ibkr":
+        return "reconnect"
+    return "open"
 
 
 def _is_cash_position(p):
@@ -193,11 +307,13 @@ def get_command_overview(db: Session = Depends(get_db)):
         ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, created_at DESC
         LIMIT 20
     """, label="command_attention_queue")
+    acks = _ack_map(db)
     attention = [{
-        "sev": r.sev, "tag": r.tag, "title": r.title, "impact": r.impact,
-        "target": r.target, "ref_id": r.ref_id,
+        "id": str(r.item_id), "sev": r.sev, "tag": r.tag, "title": r.title,
+        "impact": r.impact, "target": r.target, "ref_id": r.ref_id,
+        "action": _alert_action(r.tag, r.ref_id),
         "created_at": r.created_at.isoformat() if r.created_at else None,
-    } for r in attention_rows]
+    } for r in attention_rows if str(r.item_id) not in acks]
 
     # Strategy-perspective risks: computed from the real paper ledger
     # (gold.paper_trades, closed non-rehearsal trades — same source as
@@ -233,13 +349,29 @@ def get_command_overview(db: Session = Depends(get_db)):
         if pnl <= -2000:
             sev = 'critical'
         if sev:
+            # Only the metrics that BREACHED, with their thresholds — the UI
+            # renders these as labeled chips; the full metric set stays
+            # available on hover (P0-3). Falls back gracefully if absent.
+            triggers = []
+            if pf is not None and pf < 0.5:
+                triggers.append(f"PF {pf:.2f} < 0.50")
+            elif pf is not None and pf < 0.8:
+                triggers.append(f"PF {pf:.2f} < 0.80")
+            if pnl <= -2000:
+                triggers.append(f"P&L {pnl:+,.0f} ≤ -2K")
+            elif pnl < 0:
+                triggers.append(f"P&L {pnl:+,.0f} < 0")
+            if wr < 30:
+                triggers.append(f"WR {wr:.0f}% < 30%")
             strategy_risks.append({
                 "strategy_id": r.strategy_id, "name": r.name or r.strategy_id,
                 "sev": sev, "closed_trades": closed,
                 "paper_pf": round(pf, 2) if pf is not None else None,
                 "paper_pnl": round(pnl, 2),
                 "paper_wr": round(wr, 1),
+                "triggers": triggers,
             })
+    strategy_risks = [s for s in strategy_risks if f"risk:{s['strategy_id']}" not in acks]
     strategy_risks.sort(key=lambda x: (SEV_ORDER.get(x['sev'], 9), x['paper_pf'] if x['paper_pf'] is not None else 9))
 
     # Monitoring gap: strategies marked PAPER in the registry but without an
@@ -257,6 +389,8 @@ def get_command_overview(db: Session = Depends(get_db)):
           )
     """, label="command_monitoring_gap")
     monitoring_gap = int(gap_row.n) if gap_row and gap_row.n is not None else 0
+    if 'gap:monitoring' in acks:
+        monitoring_gap = 0
 
     # Current-calendar-month realized P&L per execution mode, from the canonical
     # ledgers (realized closed trades only — no estimates, no synthetic rows):
@@ -420,28 +554,39 @@ def get_command_overview(db: Session = Depends(get_db)):
 
     # Regime-fit over active strategies (registry is the active-set source of
     # truth; regime_scope declared in the extended book).
+    # regime_scope_declared (2026-08-19 contract, qr_etl t_469a21c1): the view
+    # defaults every unmapped strategy to regime_scope='ANY'. Counting those
+    # rows inflates 'agnostic' with DEFAULTS, not researched declarations, so
+    # matched/conflicted/agnostic are computed ONLY over declared=true rows.
+    # Undeclared actives are surfaced via `classified` (declared-row count);
+    # classified==0 with active>0 means the whole active book is unclassified.
     fit_rows = safe_query(db, """
-        SELECT b.regime_scope, COUNT(*) AS n
+        SELECT b.regime_scope, b.regime_scope_declared, COUNT(*) AS n
         FROM gold.strategy_registry r
         LEFT JOIN gold.v_strategy_book_extended b ON b.strategy_id = r.strategy_id
         WHERE UPPER(r.execution_mode) IN ('PAPER', 'PAPER_TRADING', 'LIVE', 'LIVE_TRADING')
           AND r.status NOT IN ('retired', 'DEPRECATED', 'rejected', 'paused')
-        GROUP BY b.regime_scope
+        GROUP BY b.regime_scope, b.regime_scope_declared
     """, label="command_regime_fit")
 
     def _fit(regime):
-        matched = agnostic = conflicted = active = 0
+        matched = agnostic = conflicted = active = classified = 0
         for r in fit_rows:
-            scope = (r.regime_scope or 'ANY').upper()
             n = int(r.n or 0)
             active += n
+            # NULL (join miss) or false = unmapped default, not a declaration
+            if not r.regime_scope_declared:
+                continue
+            classified += n
+            scope = (r.regime_scope or 'ANY').upper()
             if scope == 'ANY':
                 agnostic += n
             elif regime and scope == regime.upper():
                 matched += n
             else:
                 conflicted += n
-        return {"matched": matched, "agnostic": agnostic, "conflicted": conflicted, "active": active}
+        return {"matched": matched, "agnostic": agnostic, "conflicted": conflicted,
+                "classified": classified, "active": active}
 
     regime_alignment = {}
     for region in ('US', 'HK'):
