@@ -158,9 +158,9 @@ const BreadthBar = ({ label, bd }) => {
       <div className="flex h-1.5 rounded overflow-hidden bg-white/5">
         {total > 0 ? (
           <>
-            <div className="bg-emerald-500" style={{ width: `${(bd.advancing / total) * 100}%` }} />
-            <div className="bg-slate-500" style={{ width: `${(bd.unchanged / total) * 100}%` }} />
-            <div className="bg-rose-500" style={{ width: `${(bd.declining / total) * 100}%` }} />
+            <div className="bg-emerald-500/70" style={{ width: `${(bd.advancing / total) * 100}%` }} />
+            <div className="bg-slate-600" style={{ width: `${(bd.unchanged / total) * 100}%` }} />
+            <div className="bg-rose-500/70" style={{ width: `${(bd.declining / total) * 100}%` }} />
           </>
         ) : <div className="w-full bg-slate-800" />}
       </div>
