@@ -381,6 +381,80 @@ def get_command_overview(db: Session = Depends(get_db)):
         b["open_pnl"] = round(b["open_pnl"], 2)
         b["closed_pnl_ytd"] = round(b["closed_pnl_ytd"], 2)
 
+    # --- Regime + Alignment (Command P0-2) ---
+    # Per market: current regime label (consumption.market_sentiment, canonical),
+    # HMM posterior confidence + days-in-regime run length (gold.regime_label,
+    # US-scope — SPY/VIX features), and count of active strategies whose
+    # declared regime_scope (gold.v_strategy_book_extended) matches vs conflicts
+    # with the current regime. 'ANY' scope counts as agnostic, never conflict.
+    # Missing data stays null so the UI renders '—' instead of inventing zeros.
+    sentiment_rows = safe_query(db, """
+        SELECT region, regime, updated_at FROM consumption.market_sentiment
+        WHERE region IN ('US', 'HK')
+    """, label="command_regime_sentiment")
+    regime_by_region = {r.region: r for r in sentiment_rows}
+
+    # US regime series: latest label + consecutive run length
+    rl_rows = safe_query(db, """
+        SELECT date, regime, confidence FROM gold.regime_label ORDER BY date DESC LIMIT 120
+    """, label="command_regime_label")
+    us_series = None
+    if rl_rows:
+        latest = rl_rows[0]
+        run = 0
+        for r in rl_rows:
+            if r.regime == latest.regime:
+                run += 1
+            else:
+                break
+        us_series = {
+            "regime": latest.regime,
+            "confidence": round(float(latest.confidence), 4) if latest.confidence is not None else None,
+            "days_in_regime": run,
+            "as_of": str(latest.date),
+            "staleness_days": (datetime.now(timezone.utc).date() - latest.date).days,
+        }
+
+    # Regime-fit over active strategies (registry is the active-set source of
+    # truth; regime_scope declared in the extended book).
+    fit_rows = safe_query(db, """
+        SELECT b.regime_scope, COUNT(*) AS n
+        FROM gold.strategy_registry r
+        LEFT JOIN gold.v_strategy_book_extended b ON b.strategy_id = r.strategy_id
+        WHERE UPPER(r.execution_mode) IN ('PAPER', 'PAPER_TRADING', 'LIVE', 'LIVE_TRADING')
+          AND r.status NOT IN ('retired', 'DEPRECATED', 'rejected', 'paused')
+        GROUP BY b.regime_scope
+    """, label="command_regime_fit")
+
+    def _fit(regime):
+        matched = agnostic = conflicted = active = 0
+        for r in fit_rows:
+            scope = (r.regime_scope or 'ANY').upper()
+            n = int(r.n or 0)
+            active += n
+            if scope == 'ANY':
+                agnostic += n
+            elif regime and scope == regime.upper():
+                matched += n
+            else:
+                conflicted += n
+        return {"matched": matched, "agnostic": agnostic, "conflicted": conflicted, "active": active}
+
+    regime_alignment = {}
+    for region in ('US', 'HK'):
+        sent = regime_by_region.get(region)
+        regime = (sent.regime if sent else None) or (us_series["regime"] if region == 'US' and us_series else None)
+        entry = {
+            "regime": regime,
+            "confidence": us_series["confidence"] if region == 'US' and us_series else None,
+            "days_in_regime": us_series["days_in_regime"] if region == 'US' and us_series else None,
+            "as_of": us_series["as_of"] if region == 'US' and us_series else None,
+            "staleness_days": us_series["staleness_days"] if region == 'US' and us_series else None,
+            "sentiment_updated_at": sent.updated_at.isoformat() if sent and sent.updated_at else None,
+            "fit": _fit(regime),
+        }
+        regime_alignment[region] = entry
+
     return {
         "account": account,
         "equity_curve": equity_curve,
@@ -392,6 +466,7 @@ def get_command_overview(db: Session = Depends(get_db)):
         "attention": attention,
         "strategy_risks": strategy_risks,
         "monitoring_gap": monitoring_gap,
+        "regime_alignment": regime_alignment,
         "as_of": _now_iso(),
     }
 
