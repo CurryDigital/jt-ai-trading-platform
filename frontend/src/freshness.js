@@ -59,6 +59,10 @@ export const PANEL_SOURCES = {
   strategyRisks:  ['gold:refresh_paper_trades_synthetic', 'consumption:performance_strategy_results'],
   platform:       ['attention_items'],
   regime:         ['market_sentiment', 'regime_forecast', 'gold:gold_builder'],
+  // Command redesign (2026-08-20) zones:
+  pnlByMode:      ['gold:refresh_paper_trades_synthetic', 'consumption:portfolio_performance_attribution'],
+  orderBook:      ['gold:promote_ibkr_orders', 'gold:refresh_paper_trades_synthetic'],
+  opportunities:  ['signal_redesign'],
 };
 // Merged Command attention panel inherits from both alert feeds.
 PANEL_SOURCES.attention = [...PANEL_SOURCES.strategyRisks, ...PANEL_SOURCES.platform];

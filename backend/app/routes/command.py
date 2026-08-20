@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from app.dependencies import get_db, logger
 from app.db.safe_query import safe_query, safe_query_one
@@ -627,3 +627,329 @@ def get_account_equity_curve(days: int = 30, book: str = "live", db: Session = D
     """, {"book": book, "days": days}, label="account_equity_curve")
     data = [{"d": str(r.d), "equity": float(r.equity)} for r in reversed(rows)]
     return {"data": data, "as_of": _now_iso() if data else None}
+
+
+# ---------------------------------------------------------------------------
+# Command redesign (2026-08-20): P&L-by-Mode hero + Order Book.
+# Per-mode realized ledgers (canonical mapping, qr_etl-owned):
+#   SIM   -> gold.paper_trades_synthetic (closed, exit_date)
+#   PAPER -> gold.paper_trades (closed, rehearsal=false, updated_at)
+#   LIVE  -> gold.trade_executions (LIVE modes, executed_at)
+# Everything is read-only; a mode with no data returns nulls (never a
+# misleading $0) so the UI can render '—'.
+# ---------------------------------------------------------------------------
+
+def _mode_ledger_queries(mode):
+    """Query block per mode. Date columns differ per ledger, so the mode
+    selects whole SQL statements; nothing is interpolated at request time."""
+    if mode == "sim":
+        return {
+            "closed": """
+                SELECT COUNT(*) AS closed,
+                       COUNT(*) FILTER (WHERE pnl > 0) AS wins,
+                       SUM(pnl) AS cum_pnl
+                FROM gold.paper_trades_synthetic
+                WHERE status = 'closed' AND (ticker IS NULL OR ticker != 'CASH')
+            """,
+            "today": """
+                SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
+                FROM gold.paper_trades_synthetic
+                WHERE status = 'closed' AND exit_date = CURRENT_DATE
+                  AND (ticker IS NULL OR ticker != 'CASH')
+            """,
+            "daily": """
+                SELECT exit_date AS d, SUM(pnl) AS pnl
+                FROM gold.paper_trades_synthetic
+                WHERE status = 'closed' AND exit_date IS NOT NULL
+                  AND exit_date >= CURRENT_DATE - 29
+                  AND (ticker IS NULL OR ticker != 'CASH')
+                GROUP BY exit_date ORDER BY exit_date
+            """,
+            "open_strats": """
+                SELECT t.strategy_id, r.name, COUNT(*) AS n
+                FROM gold.paper_trades_synthetic t
+                LEFT JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
+                WHERE t.status = 'open' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                GROUP BY t.strategy_id, r.name ORDER BY n DESC
+            """,
+            "open_count": """
+                SELECT COUNT(*) AS n FROM gold.paper_trades_synthetic
+                WHERE status = 'open' AND (ticker IS NULL OR ticker != 'CASH')
+            """,
+        }
+    if mode == "paper":
+        return {
+            "closed": """
+                SELECT COUNT(*) AS closed,
+                       COUNT(*) FILTER (WHERE pnl > 0) AS wins,
+                       SUM(pnl) AS cum_pnl
+                FROM gold.paper_trades
+                WHERE status = 'closed' AND rehearsal = false
+                  AND (ticker IS NULL OR ticker != 'CASH')
+            """,
+            "today": """
+                SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
+                FROM gold.paper_trades
+                WHERE status = 'closed' AND rehearsal = false
+                  AND updated_at::date = CURRENT_DATE
+                  AND (ticker IS NULL OR ticker != 'CASH')
+            """,
+            "daily": """
+                SELECT updated_at::date AS d, SUM(pnl) AS pnl
+                FROM gold.paper_trades
+                WHERE status = 'closed' AND rehearsal = false
+                  AND updated_at >= CURRENT_DATE - 29
+                  AND (ticker IS NULL OR ticker != 'CASH')
+                GROUP BY updated_at::date ORDER BY 1
+            """,
+            "open_strats": """
+                SELECT t.strategy_id, r.name, COUNT(*) AS n
+                FROM gold.paper_trades t
+                LEFT JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
+                WHERE t.status = 'open' AND t.rehearsal = false
+                  AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                GROUP BY t.strategy_id, r.name ORDER BY n DESC
+            """,
+            "open_count": """
+                SELECT COUNT(*) AS n FROM gold.paper_trades
+                WHERE status = 'open' AND rehearsal = false
+                  AND (ticker IS NULL OR ticker != 'CASH')
+            """,
+        }
+    # live
+    return {
+        "closed": """
+            SELECT COUNT(*) AS closed,
+                   COUNT(*) FILTER (WHERE pnl > 0) AS wins,
+                   SUM(pnl) AS cum_pnl
+            FROM gold.trade_executions
+            WHERE UPPER(execution_mode) IN ('LIVE', 'LIVE_TRADING')
+              AND pnl IS NOT NULL
+        """,
+        "today": """
+            SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
+            FROM gold.trade_executions
+            WHERE UPPER(execution_mode) IN ('LIVE', 'LIVE_TRADING')
+              AND pnl IS NOT NULL AND executed_at::date = CURRENT_DATE
+        """,
+        "daily": """
+            SELECT executed_at::date AS d, SUM(pnl) AS pnl
+            FROM gold.trade_executions
+            WHERE UPPER(execution_mode) IN ('LIVE', 'LIVE_TRADING')
+              AND pnl IS NOT NULL AND executed_at >= CURRENT_DATE - 29
+            GROUP BY executed_at::date ORDER BY 1
+        """,
+        "open_strats": """
+            SELECT t.strategy_id, r.name, COUNT(*) AS n
+            FROM gold.trade_executions t
+            LEFT JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
+            WHERE UPPER(t.execution_mode) IN ('LIVE', 'LIVE_TRADING')
+              AND UPPER(COALESCE(t.status, '')) IN ('OPEN', 'WORKING', 'FILLED')
+            GROUP BY t.strategy_id, r.name ORDER BY n DESC
+        """,
+        "open_count": """
+            SELECT COUNT(*) AS n FROM gold.trade_executions
+            WHERE UPPER(execution_mode) IN ('LIVE', 'LIVE_TRADING')
+              AND UPPER(COALESCE(status, '')) IN ('OPEN', 'WORKING', 'FILLED')
+        """,
+    }
+
+
+@router.get("/command/pnl-by-mode")
+def get_command_pnl_by_mode(db: Session = Depends(get_db)):
+    """P&L by execution mode — the Command page hero.
+
+    Per mode: cumulative realized P&L, today's realized P&L (null when no
+    exits today), win rate over closed trades, open/closed trade counts,
+    strategies currently deployed in that mode (open-trade bearers), and a
+    30-day cumulative realized P&L sparkline (carry-forward over quiet days).
+    """
+    modes = {}
+    for mode in ("live", "paper", "sim"):
+        q = _mode_ledger_queries(mode)
+        closed_row = safe_query_one(db, q["closed"], label=f"pnl_mode_{mode}_closed")
+        today_row = safe_query_one(db, q["today"], label=f"pnl_mode_{mode}_today")
+        daily_rows = safe_query(db, q["daily"], label=f"pnl_mode_{mode}_daily")
+        strat_rows = safe_query(db, q["open_strats"], label=f"pnl_mode_{mode}_strats")
+        open_row = safe_query_one(db, q["open_count"], label=f"pnl_mode_{mode}_open")
+
+        closed = int(closed_row.closed or 0) if closed_row else 0
+        wins = int(closed_row.wins or 0) if closed_row else 0
+        cum_pnl = float(closed_row.cum_pnl) if closed_row and closed_row.cum_pnl is not None else None
+        today = None
+        if today_row and today_row.trades:
+            today = {"trades": int(today_row.trades), "pnl": float(today_row.pnl or 0)}
+
+        # 30-day carry-forward cumulative sparkline
+        by_day = {r.d: float(r.pnl or 0) for r in daily_rows}
+        spark = []
+        if by_day or cum_pnl is not None:
+            start = datetime.now(timezone.utc).date() - timedelta(days=29)
+            # Anchor the cumulation on all-time P&L before the window so the
+            # sparkline level matches cum_pnl, not just the window's delta.
+            prior = (cum_pnl or 0.0) - sum(by_day.values()) if cum_pnl is not None else 0.0
+            run = prior
+            for i in range(30):
+                d = start + timedelta(days=i)
+                run += by_day.get(d, 0.0)
+                spark.append({"d": str(d), "cum": round(run, 2)})
+
+        strategies = [{"strategy_id": r.strategy_id, "name": r.name or r.strategy_id,
+                       "open_trades": int(r.n or 0)} for r in strat_rows[:6]]
+        modes[mode] = {
+            "cum_pnl": round(cum_pnl, 2) if cum_pnl is not None else None,
+            "today": today,
+            "win_rate": round(wins / closed * 100, 1) if closed else None,
+            "closed_trades": closed,
+            "open_trades": int(open_row.n or 0) if open_row else 0,
+            "strategies": strategies,
+            "strategies_overflow": max(0, len(strat_rows) - 6),
+            "spark": spark,
+        }
+    return {"modes": modes, "as_of": _now_iso()}
+
+
+# Order Book (Command redesign): working orders across the live and paper
+# books, unified into one queue. Sources (all read-only):
+#   gold.paper_pending_orders (status='pending')  -> paper working orders
+#   gold.ibkr_orders (IBKR working statuses)      -> live working orders
+# Last price = latest gold.daily_ohlcv close (canonical mark, exact ticker
+# match only — no invented suffix mapping). est_gain is side-aware limit-vs-
+# last and stays null for MKT orders or unpriced tickers.
+_IBKR_WORKING = ('PreSubmitted', 'Submitted', 'ApiPending', 'PendingSubmit', 'PartiallyFilled')
+_ORDER_STATUS_MAP = {
+    'PartiallyFilled': 'Part Fill',
+    'Submitted': 'Working',
+    'PreSubmitted': 'Pending',
+    'ApiPending': 'Pending',
+    'PendingSubmit': 'Pending',
+}
+
+
+@router.get("/command/order-book")
+def get_command_order_book(db: Session = Depends(get_db)):
+    orders = []
+
+    paper_rows = safe_query(db, """
+        SELECT p.ticker, p.order_kind, p.n_shares, p.signal_weight,
+               p.assigned_capital, p.signal_date, p.created_at,
+               p.strategy_id, r.name AS strategy_name
+        FROM gold.paper_pending_orders p
+        LEFT JOIN gold.strategy_registry r ON r.strategy_id = p.strategy_id
+        WHERE p.status = 'pending'
+        ORDER BY p.created_at DESC LIMIT 50
+    """, label="command_order_book_paper")
+    for r in paper_rows:
+        orders.append({
+            "source": "paper",
+            "ticker": r.ticker,
+            "side": "BUY" if (r.order_kind or "").upper() == "OPEN" else (r.order_kind or None),
+            "qty": float(r.n_shares) if r.n_shares is not None else None,
+            "limit_price": None,  # paper orders fill at next mark — no limit
+            "status": "Pending",
+            "venue": "PAPER",
+            "strategy_id": r.strategy_id,
+            "strategy_name": r.strategy_name,
+            "assigned_capital": float(r.assigned_capital) if r.assigned_capital is not None else None,
+            "submitted_at": r.created_at.isoformat() if r.created_at else None,
+            "signal_date": str(r.signal_date) if r.signal_date else None,
+        })
+
+    ibkr_rows = safe_query(db, """
+        SELECT ticker, action, quantity, order_type, price, status,
+               filled, remaining, submit_time
+        FROM gold.ibkr_orders
+        WHERE status = ANY(:st)
+        ORDER BY submit_time DESC NULLS LAST LIMIT 50
+    """, {"st": list(_IBKR_WORKING)}, label="command_order_book_ibkr")
+    for r in ibkr_rows:
+        limit = float(r.price) if r.price is not None and float(r.price) > 0 else None
+        orders.append({
+            "source": "live",
+            "ticker": r.ticker,
+            "side": (r.action or "").upper() or None,
+            "qty": float(r.quantity) if r.quantity is not None else None,
+            "limit_price": limit,
+            "status": _ORDER_STATUS_MAP.get(r.status, r.status),
+            "venue": "IBKR",
+            "order_type": r.order_type,
+            "filled": int(r.filled or 0),
+            "remaining": int(r.remaining or 0),
+            "submitted_at": r.submit_time.isoformat() if r.submit_time else None,
+        })
+
+    # Latest close per ticker (exact match; tickers that don't resolve keep
+    # last_price=null rather than guessing a suffix mapping).
+    tickers = sorted({o["ticker"] for o in orders if o.get("ticker")})
+    last_px = {}
+    if tickers:
+        px_rows = safe_query(db, """
+            SELECT DISTINCT ON (ticker) ticker, close, date
+            FROM gold.daily_ohlcv
+            WHERE ticker = ANY(:t)
+            ORDER BY ticker, date DESC
+        """, {"t": tickers}, label="command_order_book_marks")
+        for r in px_rows:
+            last_px[r.ticker] = {"last": float(r.close), "as_of": str(r.date)}
+
+    for o in orders:
+        mark = last_px.get(o["ticker"])
+        o["last_price"] = mark["last"] if mark else None
+        o["last_price_as_of"] = mark["as_of"] if mark else None
+        est = None
+        if o.get("limit_price") is not None and o.get("last_price") is not None and o.get("qty"):
+            if o["side"] == "BUY":
+                est = (o["last_price"] - o["limit_price"]) * o["qty"]
+            elif o["side"] == "SELL":
+                est = (o["limit_price"] - o["last_price"]) * o["qty"]
+        o["est_gain"] = round(est, 2) if est is not None else None
+
+    return {"orders": orders, "as_of": _now_iso()}
+
+
+# Regime Forecast (Command redesign): 7-day risk-on probability per market
+# from consumption.macro_regime_7d (qr_etl-owned, momentum_nowcast). The raw
+# table carries forecast_date per day_offset so the UI labels bars with real
+# weekdays instead of guessing offsets from the client clock. Label rule is
+# display policy: >=60 Risk-On, <=40 Risk-Off, else Neutral.
+def _risk_label(pct):
+    if pct is None:
+        return None
+    if pct >= 60:
+        return "Risk-On"
+    if pct <= 40:
+        return "Risk-Off"
+    return "Neutral"
+
+
+@router.get("/command/regime-forecast")
+def get_command_regime_forecast(db: Session = Depends(get_db)):
+    rows = safe_query(db, """
+        SELECT scope, day_offset, risk_on_pct, forecast_date, method, is_stale, updated_at
+        FROM consumption.macro_regime_7d
+        WHERE scope IN ('US', 'HK')
+        ORDER BY scope, day_offset
+    """, label="command_regime_forecast")
+    markets = {}
+    for r in rows:
+        m = markets.setdefault(r.scope, {"days": [], "method": r.method,
+                                         "is_stale": bool(r.is_stale),
+                                         "updated_at": r.updated_at.isoformat() if r.updated_at else None})
+        m["days"].append({
+            "offset": int(r.day_offset),
+            "date": str(r.forecast_date) if r.forecast_date else None,
+            "risk_on": float(r.risk_on_pct) if r.risk_on_pct is not None else None,
+        })
+    out = {}
+    for scope, m in markets.items():
+        days = sorted(m["days"], key=lambda d: d["offset"])
+        latest = days[0]["risk_on"] if days else None
+        out[scope] = {
+            "days": days,
+            "latest": latest,
+            "label": _risk_label(latest),
+            "method": m["method"],
+            "is_stale": m["is_stale"],
+            "updated_at": m["updated_at"],
+        }
+    return {"markets": out, "as_of": _now_iso()}
