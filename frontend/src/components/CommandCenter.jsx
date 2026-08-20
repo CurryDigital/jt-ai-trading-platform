@@ -178,9 +178,9 @@ const FreshWrap = ({ fresh, lastKnown, className = '', children }) => {
 // ZONE 1 — P&L by Mode
 // ---------------------------------------------------------------------------
 const MODE_DEFS = [
-  { key: 'live', label: 'Live' },
-  { key: 'paper', label: 'Paper' },
   { key: 'sim', label: 'Simulation' },
+  { key: 'paper', label: 'Paper' },
+  { key: 'live', label: 'Live' },
 ];
 
 const ModePanel = ({ label, m, fresh }) => {
@@ -729,15 +729,42 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
               ) : null}
             </div>
 
-            {/* Net Cash Flow: NO ledger exists (verified 2026-08-20 across
-                gold/consumption/silver). Honest '—' + pending badge naming the
-                qr_etl task — never an estimated zero. */}
-            <div className="qr-surface p-2.5 flex flex-col justify-center"
-              title="No cash-flow ledger exists yet (deposits/withdrawals are not tracked in gold/consumption/silver). Pending qr_etl task t_b662b4e9.">
-              <div className="qr-label">Net Cash Flow</div>
-              <div className="font-mono text-lg font-bold mt-0.5 text-slate-600">—</div>
-              <div className="text-[9px] text-slate-600 mt-0.5">no ledger · pending t_b662b4e9</div>
-            </div>
+            {/* Net Cash Flow (t_98afd0f5): overview.cash_flow from
+                consumption.account_cash_flow_summary. NULL = no data → '—',
+                never a coerced 0. Paper book is wired (t_b662b4e9); the live
+                book has NO cash-flow source yet (IBKR cash transactions not
+                ingested) → distinct 'no live source' treatment. */}
+            {(() => {
+              const cfL = overview?.cash_flow?.live;
+              const cfP = overview?.cash_flow?.paper;
+              const mtdParts = [cfL?.mtd_net, cfP?.mtd_net].filter(v => v != null);
+              const mtd = mtdParts.length ? mtdParts.reduce((a, b) => a + b, 0) : null;
+              const todayParts = [cfL?.today_net, cfP?.today_net].filter(v => v != null);
+              const today = todayParts.length ? todayParts.reduce((a, b) => a + b, 0) : null;
+              const liveHasSource = !!(cfL && (cfL.mtd_net != null || cfL.net_all_time != null || cfL.last_flow_date != null));
+              const tip = 'Net cash flow (deposits − withdrawals), consumption.account_cash_flow_summary.'
+                + ` Paper: MTD ${cfP?.mtd_net != null ? fmtK(cfP.mtd_net) : '—'} (${cfP?.flows_mtd_count ?? 0} flows this month, last ${cfP?.last_flow_date ?? '—'}, all-time ${cfP?.net_all_time != null ? fmtK(cfP.net_all_time) : '—'}).`
+                + (liveHasSource
+                    ? ` Live: MTD ${cfL.mtd_net != null ? fmtK(cfL.mtd_net) : '—'} (${cfL.flows_mtd_count} flows, last ${cfL.last_flow_date ?? '—'}).`
+                    : ' Live: no cash-flow source (IBKR cash transactions not yet ingested).');
+              return (
+                <div className="qr-surface p-2.5 flex flex-col justify-center" title={tip}>
+                  <div className="qr-label flex items-center gap-1.5">Net Cash Flow
+                    <span className="text-[8px] uppercase tracking-wide text-slate-500">mtd</span>
+                  </div>
+                  <div className={`font-mono text-lg font-bold mt-0.5 ${mtd != null ? pnlCl(mtd) : 'text-slate-600'}`}>
+                    {mtd != null ? `${mtd >= 0 ? '+' : ''}${fmtK(mtd)}` : '—'}
+                  </div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">
+                    today {today != null ? `${today >= 0 ? '+' : ''}${fmtK(today)}` : '—'}
+                    {cfP?.flows_mtd_count ? ` · paper ${cfP.flows_mtd_count} flows` : ''}
+                  </div>
+                  {!liveHasSource && (
+                    <div className="text-[8px] text-slate-600 mt-0.5">live book: no source</div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="qr-surface p-2.5 flex flex-col justify-center">
               <div className="qr-label">Buying Power</div>

@@ -249,6 +249,42 @@ def get_command_overview(db: Session = Depends(get_db)):
 
     account = _combined_account(live_book, paper_book)
 
+    # Net Cash Flow (t_b662b4e9 delivered the source; t_98afd0f5 wires it):
+    # consumption.account_cash_flow_summary is the canonical per-book ledger
+    # rollup (live SQL view over consumption.account_cash_flows). NULL means
+    # 'no data' — never coerced to 0. The live book currently has NO
+    # cash-flow source (IBKR cash transactions are not yet ingested), so
+    # live stays all-NULL and the UI renders '—' with a distinct no-source
+    # treatment rather than a fake zero.
+    cf_rows = safe_query(db, """
+        SELECT book, today_net, mtd_net, flows_today_count, flows_mtd_count,
+               last_flow_date, net_all_time, updated_at
+        FROM consumption.account_cash_flow_summary
+        WHERE book IN ('live', 'paper')
+    """, label="command_cash_flow_summary")
+
+    def _cf_row(row):
+        m = row._mapping
+
+        def _f(k):
+            v = m[k]
+            return float(v) if v is not None else None
+
+        return {
+            "today_net": _f("today_net"),
+            "mtd_net": _f("mtd_net"),
+            "flows_today_count": int(m["flows_today_count"] or 0),
+            "flows_mtd_count": int(m["flows_mtd_count"] or 0),
+            "last_flow_date": str(m["last_flow_date"]) if m["last_flow_date"] else None,
+            "net_all_time": _f("net_all_time"),
+            "updated_at": m["updated_at"].isoformat() if m["updated_at"] else None,
+        }
+
+    cash_flow = {"live": None, "paper": None}
+    for r in cf_rows:
+        if r.book in cash_flow:
+            cash_flow[r.book] = _cf_row(r)
+
     curve_rows = safe_query(db, """
         SELECT d, equity FROM consumption.account_equity_curve
         WHERE book = 'live' ORDER BY d DESC LIMIT 30
@@ -605,6 +641,7 @@ def get_command_overview(db: Session = Depends(get_db)):
 
     return {
         "account": account,
+        "cash_flow": cash_flow,
         "equity_curve": equity_curve,
         "pipeline": pipeline,
         "monthly_pnl": monthly_pnl,
