@@ -23,6 +23,7 @@ import logging
 from app.routes import market, stocks, fx, crypto, strategies, positions, research
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex, backtest, agents
 from app.routes import command, markets_v2, macro, signals, settings as settings_routes
+from app.routes import watchlist
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ from app.db.session import (
     ConsumptionStock, ConsumptionMarket, ConsumptionFx, ConsumptionCommodity, ConsumptionCrypto, Trade, QuantStrategy, StrategyRegistry, AgentActivity
 )
 from app.db.safe_query import safe_query, safe_query_one
+from app.dependencies import api_to_registry_mode, registry_to_api_mode
 from app.core_logic.data.wholistic_pipeline import (
     refresh_indices_and_mood, refresh_fx_layer, refresh_commodity_layer, refresh_crypto_layer, refresh_stock_layer, refresh_hft_layer
 )
@@ -110,6 +112,7 @@ app.include_router(agents.router)
 app.include_router(command.router)
 app.include_router(markets_v2.router)
 app.include_router(macro.router)
+app.include_router(watchlist.router)
 app.include_router(signals.router)
 # Include research router
 app.include_router(research.router)
@@ -148,12 +151,6 @@ async def sqlalchemy_programming_error_handler(request: Request, exc: Programmin
             "strategies": [], "count": 0,
             "execution_mode": "SIMULATION",
             "message": "No paper strategies available yet."
-        })
-    if path == "/api/strategies/pipeline-summary":
-        return JSONResponse(status_code=200, content={
-            "experimental": 0, "near_golden": 0, "golden": 0,
-            "deployed": 0, "total": 0,
-            "message": "Pipeline data not yet available."
         })
     if path == "/api/portfolio/positions":
         return JSONResponse(status_code=200, content={
@@ -290,6 +287,19 @@ async def startup_event():
     if DEMOTE_SCAN_INTERVAL_S > 0:
         asyncio.create_task(_demote_scanner_loop())
         print(f"✅ Auto-demote scanner started (interval: {DEMOTE_SCAN_INTERVAL_S}s)")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Cleanly stop the IBKR worker thread so the TWS session disconnects
+    # instead of lingering at the gateway until it times out. Guards against
+    # instantiating the singleton when IB was never used in this process.
+    try:
+        from app.services import ib_service as _ibs
+        if _ibs._ib_threaded_service_instance is not None:
+            _ibs._ib_threaded_service_instance.stop()
+            print("✅ IBKR service stopped cleanly on shutdown")
+    except Exception as e:
+        print(f"⚠️ IBKR shutdown stop failed: {e}")
 
 async def run_deep_sell_analysis(db: Session):
     """
@@ -535,6 +545,14 @@ def system_freshness(db: Session = Depends(get_db)):
 
     Degrades to {"sources": None} when the registry view is missing so the
     client treats every source as UNKNOWN rather than FRESH.
+
+    bar_quality section (gold.v_us_equity_bar_quality, qr_etl-owned, shipped
+    2026-08-24): authoritative list of Yahoo synthetic zero-volume flat bars
+    across gold.daily_ohlcv (pre-guard contamination) and bronze.yf_suspect_bars
+    (post-guard quarantined). Recent unresolved suspects are a YELLOW-quality
+    signal, NOT a hard failure — episodes can self-heal (EA 2026-08-05..10
+    resolved on its own). Degrades to bar_quality=None when the view is
+    missing so the client treats bar quality as UNKNOWN.
     """
     rows = safe_query(db, """
         SELECT source, asset_class, expected_frequency,
@@ -545,10 +563,9 @@ def system_freshness(db: Session = Depends(get_db)):
     """, label="system_freshness")
     # safe_query falls back to [] on missing view — an empty registry is as
     # uninformative as a missing one, so degrade to sources=None (UNKNOWN).
-    if not rows:
-        return {"sources": None, "as_of": datetime.datetime.utcnow().isoformat() + "Z"}
-    return {
-        "sources": [{
+    sources = None
+    if rows:
+        sources = [{
             "source": r.source,
             "asset_class": r.asset_class,
             "expected_frequency": r.expected_frequency,
@@ -558,7 +575,42 @@ def system_freshness(db: Session = Depends(get_db)):
             "staleness_h": round(float(r.staleness_hours), 2) if r.staleness_hours is not None else None,
             "registry_status": r.freshness_status,
             "last_error": r.last_error,
-        } for r in rows],
+        } for r in rows]
+
+    bq_rows = safe_query(db, """
+        SELECT
+            MAX(date)            AS latest_suspect_date,
+            COUNT(*)             AS total_rows,
+            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30) AS recent_30d_rows,
+            COUNT(DISTINCT offending_ticker) AS distinct_tickers,
+            ARRAY_AGG(DISTINCT offending_ticker)
+                FILTER (WHERE date >= CURRENT_DATE - 30) AS recent_30d_tickers,
+            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30
+                             AND layer = 'gold.daily_ohlcv') AS recent_30d_gold_rows,
+            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30
+                             AND layer = 'bronze.yf_suspect_bars') AS recent_30d_quarantined_rows
+        FROM gold.v_us_equity_bar_quality
+    """, label="system_bar_quality")
+    bar_quality = None
+    if bq_rows:
+        b = bq_rows[0]
+        recent = int(b.recent_30d_rows or 0)
+        bar_quality = {
+            # YELLOW when unresolved suspects exist in the last 30d — a
+            # warning signal, not a hard failure (self-heal is possible).
+            "quality": "YELLOW" if recent > 0 else "GREEN",
+            "latest_suspect_date": b.latest_suspect_date.isoformat() if b.latest_suspect_date else None,
+            "total_rows": int(b.total_rows or 0),
+            "recent_30d_rows": recent,
+            "distinct_tickers": int(b.distinct_tickers or 0),
+            "recent_30d_tickers": sorted(b.recent_30d_tickers) if b.recent_30d_tickers else [],
+            "recent_30d_gold_rows": int(b.recent_30d_gold_rows or 0),
+            "recent_30d_quarantined_rows": int(b.recent_30d_quarantined_rows or 0),
+        }
+
+    return {
+        "sources": sources,
+        "bar_quality": bar_quality,
         "as_of": datetime.datetime.utcnow().isoformat() + "Z",
     }
 
@@ -571,16 +623,19 @@ def get_open_positions(db: Session = Depends(get_db)):
     # Use safe_query to handle missing tables gracefully
     positions = safe_query(db, """
         SELECT 
-            position_id as id,
+            id,
             ticker,
-            asset_class,
+            side,
+            strategy_id,
             quantity,
-            avg_entry_price as buy_price,
+            entry_price as buy_price,
             current_price,
             unrealized_pnl,
-            days_held as purchase_date
-        FROM consumption.Portfolio_Positions_Current
-        WHERE quantity > 0
+            market_value,
+            entry_date as purchase_date,
+            (CURRENT_DATE - entry_date) as days_held
+        FROM consumption.portfolio_positions_current
+        WHERE status = 'ACTIVE' AND quantity > 0
         ORDER BY market_value DESC
     """, label="open_positions")
 
@@ -595,13 +650,16 @@ def get_open_positions(db: Session = Depends(get_db)):
         result.append({
             "id": p.id,
             "ticker": p.ticker,
-            "asset_class": p.asset_class,
+            "asset_class": None,  # no asset_class column on portfolio_positions_current
+            "side": p.side,
+            "strategy_id": p.strategy_id,
             "quantity": quantity,
             "buy_price": buy_price,
             "current_price": current_price,
             "unrealized_pnl": round(unrealized_pnl, 2),
             "unrealized_pnl_pct": round(pnl_pct, 2),
-            "purchase_date": p.purchase_date,
+            "purchase_date": p.purchase_date.isoformat() if p.purchase_date else None,
+            "days_held": p.days_held,
             "estimates": {"1d": "---", "7d": "---", "1m": "---"},
             "analysis": {},
             "status": "held"
@@ -769,7 +827,7 @@ def get_signals(db: Session = Depends(get_db)):
     signals_result = safe_query(db, """
         SELECT
             s.strategy_id, s.ticker, s.signal as action, s.signal_strength as total_conf,
-            s.confidence_score, s.entry_price, s.current_price, s.stop_loss, s.take_profit,
+            s.confidence_score, s.current_price,
             s.win_rate, s.updated_at as timestamp, m.market, m.change_pct as daily_change
         FROM consumption.Strategies_Signals_Current s
         LEFT JOIN consumption.Markets_Stocks_Overview m ON s.ticker = m.ticker
@@ -797,7 +855,7 @@ def get_signals(db: Session = Depends(get_db)):
             info = ticker.info
 
             # Get current price
-            live_price = info.get('currentPrice') or info.get('regularMarketPrice') or s.current_price or s.entry_price
+            live_price = info.get('currentPrice') or info.get('regularMarketPrice') or s.current_price
 
             # Get change percentage
             live_change = info.get('regularMarketChangePercent') or s.daily_change
@@ -806,7 +864,7 @@ def get_signals(db: Session = Depends(get_db)):
 
         except Exception as e:
             # Fallback to database price
-            live_price = s.current_price or s.entry_price
+            live_price = s.current_price
             live_change = s.daily_change
 
         res.append({
@@ -1738,18 +1796,20 @@ def get_market_sentiment(country: str = "US", db: Session = Depends(get_db)):
 @app.get("/api/inventory/evaluate")
 def get_inventory_evaluate(db: Session = Depends(get_db)):
     result = safe_query(db, """
-        SELECT position_id, ticker, name, asset_class, side, quantity,
-               avg_entry_price as entry_price, current_price, market_value,
+        SELECT id, ticker, side, quantity, strategy_id,
+               entry_price, current_price, market_value,
                weight_pct as portfolio_weight, unrealized_pnl as pnl,
-               unrealized_pnl_pct as pnl_pct, strategy_name, days_held
-        FROM consumption.Portfolio_Positions_Current ORDER BY market_value DESC
+               entry_date, (CURRENT_DATE - entry_date) as days_held
+        FROM consumption.portfolio_positions_current
+        WHERE status = 'ACTIVE'
+        ORDER BY market_value DESC
     """, label="inventory_evaluate")
-    positions = [{"id": r.position_id, "ticker": r.ticker, "name": r.name,
-                  "asset_class": r.asset_class, "side": r.side,
+    positions = [{"id": r.id, "ticker": r.ticker, "name": r.ticker,
+                  "asset_class": None, "side": r.side,
                   "quantity": float(r.quantity or 0), "entry_price": float(r.entry_price or 0),
                   "current_price": float(r.current_price or 0),
                   "market_value": float(r.market_value or 0),
-                  "pnl": float(r.pnl or 0), "strategy": r.strategy_name,
+                  "pnl": float(r.pnl or 0), "strategy": r.strategy_id,
                   "days_held": r.days_held} for r in result]
     total_value = sum(p["market_value"] for p in positions)
     return {"positions": positions, "active_positions": len(positions),
@@ -1888,8 +1948,8 @@ def close_position(position_id: str, payload: dict = None, db: Session = Depends
                 unrealized_pnl = 0,
                 invested_capital = 0,
                 status = 'CLOSED',
-                closed_at = NOW(),
-                close_price = :close_price
+                current_price = :close_price,
+                updated_at = NOW()
             WHERE id = :position_id
         """), {
             "position_id": position_id,
@@ -1924,38 +1984,39 @@ def get_portfolio_positions(db: Session = Depends(get_db)):
     """
     result = safe_query(db, """
         SELECT
-            position_id as id,
+            id,
             ticker,
-            name as strategy_name,
-            asset_class,
+            strategy_id,
             side,
             quantity,
-            avg_entry_price as entry_price,
+            entry_price,
             current_price,
             market_value,
             unrealized_pnl as pnl,
-            unrealized_pnl_pct as pnl_pct,
-            strategy_name as strategy,
-            days_held
-        FROM consumption.Portfolio_Positions_Current
-        WHERE quantity > 0
+            entry_date,
+            (CURRENT_DATE - entry_date) as days_held
+        FROM consumption.portfolio_positions_current
+        WHERE status = 'ACTIVE' AND quantity > 0
         ORDER BY market_value DESC
     """, label="portfolio_positions")
 
     positions = []
     for r in result:
+        entry_price = float(r.entry_price or 0)
+        current_price = float(r.current_price or 0)
+        pnl_pct = ((current_price / entry_price) - 1) * 100 if entry_price > 0 else 0
         positions.append({
             "id": r.id,
             "ticker": r.ticker,
-            "strategy": r.strategy,
-            "asset_class": r.asset_class,
+            "strategy": r.strategy_id,
+            "asset_class": None,  # no asset_class column on portfolio_positions_current
             "side": r.side,
             "quantity": float(r.quantity or 0),
-            "entry_price": float(r.entry_price or 0),
-            "current_price": float(r.current_price or 0),
+            "entry_price": entry_price,
+            "current_price": current_price,
             "market_value": float(r.market_value or 0),
             "pnl": float(r.pnl or 0),
-            "pnl_pct": float(r.pnl_pct or 0),
+            "pnl_pct": round(pnl_pct, 2),
             "days_held": r.days_held
         })
 
@@ -2473,7 +2534,7 @@ def toggle_strategy(strat_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/api/quant/strategies/delete/{strat_id}")
 def delete_strategy(strat_id: int, db: Session = Depends(get_db)):
-    db.execute(text("DELETE FROM gold.strategy_registry WHERE asset_class = 'quant' WHERE id = :sid"), {"sid": strat_id})
+    db.query(QuantStrategy).filter(QuantStrategy.id == strat_id).delete()
     db.commit()
     return {"status": "success"}
 
@@ -3156,7 +3217,7 @@ def get_strategy_score(strategy_id: str, db: Session = Depends(get_db)):
         """), {"sid": strategy_id}).fetchone()
         
         # Calculate dynamic score (0-100)
-        win_rate = float(backtest.win_rate if backtest and backtest.win_rate else (strategy.win_rate / 100 if strategy.win_rate else 0.5))
+        win_rate = float(backtest.win_rate if backtest and backtest.win_rate else (strategy.win_rate_oos if strategy.win_rate_oos is not None else 0.5))
         profit_factor = float(backtest.profit_factor if backtest and backtest.profit_factor else 1.5)
         
         base_wr = win_rate * 100  # 0-100
@@ -3221,7 +3282,7 @@ def get_strategy_signals(strategy_id: str, db: Session = Depends(get_db)):
         sell_signals = []
         
         # Parse entry/exit logic from strategy
-        entry_logic = strategy.entry_logic or ""
+        entry_logic = strategy.signal_logic or ""
         exit_logic = strategy.exit_logic or ""
         
         # Generate signals based on position status
@@ -3253,7 +3314,7 @@ def get_strategy_signals(strategy_id: str, db: Session = Depends(get_db)):
                     "ticker": ticker,
                     "signal": "POSITION_ACTIVE",
                     "criteria": f"Entry @ ${pos.entry_price:.2f}" if pos.entry_price else "Deployed",
-                    "confidence": min(95, 60 + (strategy.win_rate / 100 if strategy.win_rate else 0.5) * 40),
+                    "confidence": min(95, 60 + (float(strategy.win_rate_oos) * 40 if strategy.win_rate_oos is not None else 0.5 * 40)),
                     "timestamp": datetime.datetime.now().isoformat()
                 })
         
@@ -3556,8 +3617,7 @@ def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
             strategy_id,
             name,
             assigned_capital,
-            in_market_capital,
-            capacity_millions
+            in_market_capital
         FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id 
     """), {"strategy_id": strategy_id}).fetchone()
@@ -3578,7 +3638,7 @@ def get_strategy_capital(strategy_id: str, db: Session = Depends(get_db)):
         "assigned_capital": float(result.assigned_capital) if result.assigned_capital else 100000,
         "in_market_capital": float(in_market),
         "available_for_buying": max(0, float(result.assigned_capital or 100000) - float(in_market)),
-        "capacity_millions": float(result.capacity_millions) if result.capacity_millions else 100
+        "capacity_millions": 100
     }
 
 
@@ -3852,8 +3912,8 @@ def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
     # 1. Count and demote LIVE strategies
     affected = db.execute(text("""
         UPDATE gold.strategy_registry
-        SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
-        WHERE execution_mode = 'LIVE_TRADING'
+        SET execution_mode = 'PAPER', updated_at = NOW()
+        WHERE execution_mode = 'LIVE'
         RETURNING strategy_id
     """)).fetchall()
 
@@ -4400,15 +4460,17 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
     current_mode = mode_result.value if mode_result else 'SIMULATION'
 
     strategy = safe_query_one(db, """
-        SELECT strategy_id, name FROM gold.strategy_registry WHERE strategy_id = :sid
+        SELECT strategy_id, name, execution_mode FROM gold.strategy_registry WHERE strategy_id = :sid
     """, {"sid": strategy_id}, label="deploy_pool_strategy")
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
+    # Used capital is read the same way /api/strategies/{id}/capital-pool does:
+    # post-sync consumption rows for the strategy, no execution_mode filter.
     pool_status = safe_query_one(db, """
         SELECT COALESCE(SUM(capital), 0) as used FROM consumption.portfolio_positions_current
-        WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
-    """, {"strategy_id": strategy_id, "mode": current_mode}, label="deploy_pool_status")
+        WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
+    """, {"strategy_id": strategy_id}, label="deploy_pool_status")
 
     current_used = float(pool_status.used) if pool_status else 0
     available = total_pool - current_used
@@ -4416,6 +4478,26 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
 
     if available < trade_size:
         return {"success": False, "error": "Capital pool exhausted", "available": available, "required": trade_size}
+
+    # For PAPER/SIMULATION registry strategies the paper ledger
+    # (gold.paper_trades_synthetic, written by the ETL rebalancer and synced
+    # into consumption.portfolio_positions_current) is the source of truth.
+    # Do NOT write placeholder capital rows here.
+    registry_api_mode = registry_to_api_mode(getattr(strategy, "execution_mode", None))
+    if registry_api_mode in ("PAPER_TRADING", "SIMULATION"):
+        return {
+            "success": True,
+            "positions_created": 0,
+            "tickers": [],
+            "pool_remaining": available,
+            "execution_mode": current_mode,
+            "note": (
+                f"Registry execution_mode is {registry_api_mode}; positions are owned by the "
+                "paper ledger (gold.paper_trades_synthetic) and synced into "
+                "consumption.portfolio_positions_current by ETL each signal cycle. "
+                "No placeholder rows written."
+            ),
+        }
 
     created = []
     for ticker in tickers:
@@ -4477,8 +4559,11 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
-    # Parse universe
-    universe = [t.strip() for t in strategy.target_assets.split(',')] if strategy.target_assets else []
+    # Parse universe_tickers as an array; filter out CASH placeholder
+    raw_universe = strategy.universe_tickers or []
+    if isinstance(raw_universe, str):
+        raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+    universe = [t for t in raw_universe if t and t.upper() != 'CASH']
 
     if not universe:
         return {
@@ -4500,12 +4585,13 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
             "universe_size": len(universe)
         }
 
-    # Check pool availability
+    # Check pool availability — same source as /api/strategies/{id}/capital-pool:
+    # post-sync consumption rows for the strategy, no execution_mode filter.
     pool_status = safe_query_one(db, """
         SELECT COALESCE(SUM(capital), 0) as used, COUNT(*) as position_count
         FROM consumption.portfolio_positions_current
-        WHERE strategy_id = :strategy_id AND status = 'ACTIVE' AND execution_mode = :mode
-    """, {"strategy_id": strategy_id, "mode": current_mode}, label="deploy_pool")
+        WHERE strategy_id = :strategy_id AND status = 'ACTIVE'
+    """, {"strategy_id": strategy_id}, label="deploy_pool")
 
     current_used = float(pool_status.used) if pool_status else 0
     current_positions = int(pool_status.position_count) if pool_status else 0
@@ -4520,6 +4606,32 @@ def deploy_strategy_auto(payload: dict, db: Session = Depends(get_db)):
             "error": f"Max positions ({max_positions}) already reached",
             "current_positions": current_positions,
             "max_positions": max_positions
+        }
+
+    # For PAPER/SIMULATION registry strategies the paper ledger
+    # (gold.paper_trades_synthetic, written by the ETL rebalancer and synced
+    # into consumption.portfolio_positions_current) is the source of truth.
+    # Do NOT write placeholder capital rows here.
+    registry_api_mode = registry_to_api_mode(getattr(strategy, "execution_mode", None))
+    if registry_api_mode in ("PAPER_TRADING", "SIMULATION"):
+        return {
+            "success": True,
+            "strategy_id": strategy_id,
+            "execution_mode": current_mode,
+            "positions_created": 0,
+            "tickers_deployed": [],
+            "tickers_skipped": [],
+            "universe_size": len(universe),
+            "tickers_with_buy_signal": len(tickers_with_buy),
+            "pool_remaining": available,
+            "total_pool": total_pool,
+            "trade_size": trade_size,
+            "note": (
+                f"Registry execution_mode is {registry_api_mode}; positions are owned by the "
+                "paper ledger (gold.paper_trades_synthetic) and synced into "
+                "consumption.portfolio_positions_current by ETL each signal cycle. "
+                "No placeholder rows written."
+            ),
         }
 
     # Deploy up to max positions
@@ -4620,15 +4732,18 @@ def get_strategy_review_queue(db: Session = Depends(get_db)):
 
         result = []
         for s in strategies:
-            tickers = [t.strip() for t in s.target_assets.split(',')] if s.target_assets else []
+            raw_universe = s.universe_tickers or []
+            if isinstance(raw_universe, str):
+                raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+            tickers = [t for t in raw_universe if t and t.upper() != 'CASH']
             result.append({
                 "id": s.strategy_id,
-                "name": s.strategy_name,
+                "name": s.name,
                 "priority": s.priority,
                 "status": s.status,
-                "version": s.version,
-                "win_rate": float(s.win_rate) if s.win_rate else None,
-                "entry_logic": s.entry_logic,
+                "version": None,
+                "win_rate": float(s.win_rate_oos) if s.win_rate_oos is not None else None,
+                "entry_logic": s.signal_logic,
                 "exit_logic": s.exit_logic,
                 "target_assets": tickers,
             })
@@ -4678,43 +4793,6 @@ def reject_strategy(strategy_id: str, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Reject error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/strategies/pipeline-summary")
-def get_strategy_pipeline_summary(db: Session = Depends(get_db)):
-    """Get counts of strategies at each pipeline stage"""
-    try:
-        counts = db.execute(text("""
-            SELECT status, COUNT(*) as cnt
-            FROM gold.strategy_registry
-            GROUP BY status
-        """)).fetchall()
-
-        summary = {"active": 0, "testing": 0, "paper": 0, "paused": 0, "retired": 0, "total": 0}
-        for row in counts:
-            key = row.status.lower() if row.status else "experimental"
-            if key in summary:
-                summary[key] = row.cnt
-            summary["total"] += row.cnt
-
-        # Count deployed strategies from portfolio_positions_current (paper_strategies may not exist)
-        try:
-            deployed = db.execute(text("""
-                SELECT COUNT(DISTINCT strategy_id) as cnt
-                FROM consumption.portfolio_positions_current
-                WHERE status = 'ACTIVE' AND quantity > 0
-            """)).fetchone()
-            summary["deployed"] = deployed.cnt if deployed else 0
-        except Exception:
-            summary["deployed"] = 0
-
-        # Add last_update timestamp
-        summary["last_update"] = datetime.datetime.utcnow().isoformat() + "Z"
-
-        return summary
-    except Exception as e:
-        logger.error(f"Pipeline summary error: {e}")
-        return {"active": 0, "testing": 0, "paper": 0, "paused": 0, "retired": 0, "deployed": 0, "total": 0}
 
 
 @app.get("/api/strategies/researcher")
@@ -4821,18 +4899,21 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
 
         result = []
         for s in strategies:
-            # Parse target_assets into universe array
-            tickers = [t.strip() for t in s.target_assets.split(',')] if s.target_assets else []
+            # Parse universe_tickers as an array; filter out CASH placeholder
+            raw_universe = s.universe_tickers or []
+            if isinstance(raw_universe, str):
+                raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+            tickers = [t for t in raw_universe if t and t.upper() != 'CASH']
 
             # Get backtest data for this strategy
             bt = backtest_data.get(s.strategy_id, {})
 
             # Compute win_rate from registry or backtest
-            win_rate = bt.get('win_rate') or (float(s.win_rate) / 100 if s.win_rate else None)
+            win_rate = bt.get('win_rate') or (float(s.win_rate_oos) if s.win_rate_oos is not None else None)
             total_return = bt.get('total_return')
             total_trades = bt.get('total_trades')
 
-            # Get top 5 tickers for this strategy
+            # Get top 5 signals by confidence for this strategy
             strategy_signals = top_signals_data.get(s.strategy_id, [])
             # If no signals, use universe tickers as fallback
             top_tickers = []
@@ -4848,12 +4929,12 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
 
             result.append({
                 "strategy_id": s.strategy_id,
-                "strategy_name": s.strategy_name or s.strategy_id,
-                "name": s.strategy_name or s.strategy_id,
-                "description": f"{s.priority} strategy v{s.version}",
+                "strategy_name": s.name or s.strategy_id,
+                "name": s.name or s.strategy_id,
+                "description": f"{s.priority} strategy" if s.priority else "Strategy",
                 "asset_class": "STOCK",
                 "direction": "LONG",
-                "time_horizon": None,
+                "time_horizon": s.frequency,
                 "win_rate": win_rate,
                 "returns": total_return,
                 "live_trades": total_trades,
@@ -4871,8 +4952,8 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
                 "status": s.status,
                 "priority": s.priority,
                 "tier": s.priority,
-                "version": s.version,
-                "entry_logic": s.entry_logic,
+                "version": None,
+                "entry_logic": s.signal_logic,
                 "exit_logic": s.exit_logic,
                 "top_tickers": top_tickers,
                 "yearly_backtest": yearly_data,
@@ -4887,50 +4968,52 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, db:
 
 
 def _get_strategies_from_definitions(db: Session, asset_class: str = None):
-    """Legacy fallback - read from strategy_definitions during migration"""
+    """Fallback - read from gold.strategy_registry when ORM query fails"""
     query = """
         SELECT
             strategy_id as id,
             name,
             description,
             asset_class,
-            direction,
-            time_horizon,
-            sharpe_ratio,
-            max_drawdown,
-            win_rate,
             universe_tickers,
-            max_position_pct,
-            venue,
-            status
+            status,
+            sharpe_oos,
+            max_drawdown_oos,
+            win_rate_oos,
+            trade_count_oos,
+            frequency,
+            execution_mode
         FROM gold.strategy_registry
-        
+        WHERE 1=1
     """
     if asset_class:
         query += " AND asset_class = :asset_class"
-    query += " ORDER BY sharpe_ratio DESC"
+    query += " ORDER BY sharpe_oos DESC NULLS LAST"
 
     result = db.execute(text(query), {"asset_class": asset_class} if asset_class else {})
 
     strategies = []
     for row in result:
-        tickers = row.universe_tickers.split(',') if row.universe_tickers else []
+        raw_universe = row.universe_tickers or []
+        if isinstance(raw_universe, str):
+            raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+        tickers = [t for t in raw_universe if t and t.upper() != 'CASH']
         strategies.append({
             "id": row.id,
             "name": row.name,
             "description": row.description,
             "asset_class": row.asset_class,
-            "direction": row.direction,
-            "time_horizon": row.time_horizon,
-            "sharpe_ratio": float(row.sharpe_ratio) if row.sharpe_ratio else 0,
-            "max_drawdown": float(row.max_drawdown) if row.max_drawdown else 0,
-            "win_rate": float(row.win_rate) if row.win_rate else 0,
+            "direction": "LONG",
+            "time_horizon": row.frequency,
+            "sharpe_ratio": float(row.sharpe_oos) if row.sharpe_oos else 0,
+            "max_drawdown": float(row.max_drawdown_oos) if row.max_drawdown_oos else 0,
+            "win_rate": float(row.win_rate_oos) if row.win_rate_oos else 0,
             "universe": tickers,
             "universe_count": len(tickers),
-            "max_position_pct": float(row.max_position_pct) if row.max_position_pct else 0.05,
-            "venue": row.venue,
+            "max_position_pct": 0.05,
+            "venue": "IBKR",
             "status": row.status,
-            "source": "strategy_definitions_fallback"
+            "source": "strategy_registry_fallback"
         })
 
     return {"strategies": strategies, "count": len(strategies)}
@@ -4952,16 +5035,15 @@ def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
 
     results = []
     for sid in strategy_ids:
-        registry = safe_query_one(db, """
-            SELECT strategy_id, strategy_name, version, status, priority
+        strategy = safe_query_one(db, """
+            SELECT strategy_id, name, asset_class, universe_tickers, frequency, execution_mode, status,
+                   sharpe_oos, max_drawdown_oos, trade_count_oos, win_rate_oos, conviction_score,
+                   assigned_capital, in_market_capital, signal_logic, exit_logic, description,
+                   created_at, updated_at, priority
             FROM gold.strategy_registry WHERE strategy_id = :sid
-        """, {"sid": sid}, label="cmp_registry")
-        definitions = safe_query_one(db, """
-            SELECT strategy_id, name, asset_class, direction, execution_mode
-            FROM gold.strategy_registry WHERE strategy_id = :sid
-        """, {"sid": sid}, label="cmp_definitions")
+        """, {"sid": sid}, label="cmp_strategy")
 
-        if not registry and not definitions:
+        if not strategy:
             results.append({"strategy_id": sid, "found": False})
             continue
 
@@ -5014,12 +5096,12 @@ def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
         results.append({
             "strategy_id": sid,
             "found": True,
-            "name": (registry.strategy_name if registry else None) or (definitions.name if definitions else sid),
-            "priority": registry.priority if registry else None,
-            "status": (registry.status if registry else None) or (definitions.status if definitions else None),
-            "execution_mode": definitions.execution_mode if definitions else None,
-            "asset_class": definitions.asset_class if definitions else None,
-            "direction": definitions.direction if definitions else None,
+            "name": strategy.name or sid,
+            "priority": strategy.priority,
+            "status": strategy.status,
+            "execution_mode": strategy.execution_mode,
+            "asset_class": strategy.asset_class,
+            "direction": "LONG",
             "metrics": {
                 "backtest": {
                     "win_rate":      float(bt.win_rate) if bt and bt.win_rate is not None else None,
@@ -5047,43 +5129,53 @@ def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
 # NOTE: this route must be declared BEFORE the catch-all
 # `/api/strategies/{strategy_id:path}` so that `/evaluation` is matched first.
 @app.get("/api/strategies/{strategy_id}/evaluation")
-def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depends(get_db)):
+def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int = 50, db: Session = Depends(get_db)):
     """One-shot evaluation payload powering the Strategy Detail page.
 
     Aggregates: header metadata, backtest metrics, live metrics, monthly returns,
     equity curve (cumulative live PnL), recent trades, recent signals, and a
     backtest-vs-live divergence verdict. Resilient to missing consumption views.
+
+    Query parameters:
+      days: rolling window for the equity curve (default 90).
+      trade_limit: max trade events to return for the ledger (default 50, capped at 1000).
     """
     # ---- Header / metadata -------------------------------------------------
-    registry = safe_query_one(db, """
-        SELECT strategy_id, strategy_name, version, status, priority,
-               win_rate, entry_logic, exit_logic, target_assets
+    strategy = safe_query_one(db, """
+        SELECT strategy_id, name, asset_class, universe_tickers, frequency, execution_mode, status,
+               sharpe_oos, max_drawdown_oos, trade_count_oos, win_rate_oos, profit_factor_oos, returns_oos,
+               conviction_score, assigned_capital, in_market_capital, signal_logic, exit_logic, description,
+               created_at, updated_at, priority
         FROM gold.strategy_registry
         WHERE strategy_id = :sid
-    """, {"sid": strategy_id}, label="eval_registry")
+    """, {"sid": strategy_id}, label="eval_strategy")
 
-    definitions = safe_query_one(db, """
-        SELECT strategy_id, name, description, asset_class, direction, time_horizon,
-               sharpe_ratio, max_drawdown, win_rate, universe_tickers, max_position_pct,
-               venue, status, signal_logic, exit_logic, execution_mode
-        FROM gold.strategy_registry
-        WHERE strategy_id = :sid
-    """, {"sid": strategy_id}, label="eval_definitions")
-
-    if not registry and not definitions:
+    if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
-    name = (registry.strategy_name if registry else None) or (definitions.name if definitions else strategy_id)
-    asset_class = definitions.asset_class if definitions else "STOCK"
-    direction = definitions.direction if definitions else "LONG"
-    universe = []
-    if registry and registry.target_assets:
-        universe = [t.strip() for t in registry.target_assets.split(',') if t.strip()]
-    elif definitions and definitions.universe_tickers:
-        universe = [t.strip() for t in definitions.universe_tickers.split(',') if t.strip()]
+    name = strategy.name or strategy_id
+    asset_class = strategy.asset_class or "STOCK"
+    direction = "LONG"  # No direction column in registry; default to LONG
+    raw_universe = strategy.universe_tickers or []
+    if isinstance(raw_universe, str):
+        # Defensive: some legacy paths may still return a comma-separated string
+        raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+    # CASH is a cash-bucket placeholder, not a tradeable ticker; exclude it from
+    # the universe display so the UI never renders CASH as a ticker chip.
+    universe = [t for t in raw_universe if t and t.upper() != 'CASH']
 
     # ---- Backtest metrics --------------------------------------------------
-    # NOTE: consumption.Strategies_Backtest_Results does not exist — skip query
+    # Prefer gold.strategy_backtest_runs (IS/OOS metrics keyed by text strategy_id),
+    # fall back to registry OOS columns.
+    backtest_row = safe_query_one(db, """
+        SELECT win_rate_oos, profit_factor_oos, sharpe_oos, max_drawdown_oos,
+               trade_count_oos, returns_oos
+        FROM gold.strategy_backtest_runs
+        WHERE strategy_id = :sid
+        ORDER BY run_number DESC, created_at DESC
+        LIMIT 1
+    """, {"sid": strategy_id}, label="eval_backtest_runs")
+
     backtest_metrics = {
         "win_rate": None,
         "profit_factor": None,
@@ -5091,31 +5183,97 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
         "max_drawdown": None,
         "total_trades": None,
         "total_return": None,
+        "avg_holding_days": None,
     }
 
-    # Fallback to definitions if no backtest results view
-    if definitions and definitions.win_rate is not None:
-        backtest_metrics["win_rate"] = float(definitions.win_rate) / 100
-    if definitions and definitions.sharpe_ratio is not None:
-        backtest_metrics["sharpe"] = float(definitions.sharpe_ratio)
-    if definitions and definitions.max_drawdown is not None:
-        backtest_metrics["max_drawdown"] = float(definitions.max_drawdown)
+    if backtest_row:
+        if backtest_row.win_rate_oos is not None:
+            backtest_metrics["win_rate"] = float(backtest_row.win_rate_oos)
+        if backtest_row.profit_factor_oos is not None:
+            backtest_metrics["profit_factor"] = float(backtest_row.profit_factor_oos)
+        if backtest_row.sharpe_oos is not None:
+            backtest_metrics["sharpe"] = float(backtest_row.sharpe_oos)
+        if backtest_row.max_drawdown_oos is not None:
+            backtest_metrics["max_drawdown"] = float(backtest_row.max_drawdown_oos)
+        if backtest_row.trade_count_oos is not None:
+            backtest_metrics["total_trades"] = int(backtest_row.trade_count_oos)
+        if backtest_row.returns_oos is not None:
+            backtest_metrics["total_return"] = float(backtest_row.returns_oos)
+    else:
+        # Fallback to registry OOS metrics if no backtest run record
+        if strategy.win_rate_oos is not None:
+            backtest_metrics["win_rate"] = float(strategy.win_rate_oos)
+        if strategy.profit_factor_oos is not None:
+            backtest_metrics["profit_factor"] = float(strategy.profit_factor_oos)
+        if strategy.sharpe_oos is not None:
+            backtest_metrics["sharpe"] = float(strategy.sharpe_oos)
+        if strategy.max_drawdown_oos is not None:
+            backtest_metrics["max_drawdown"] = float(strategy.max_drawdown_oos)
+        if strategy.trade_count_oos is not None:
+            backtest_metrics["total_trades"] = int(strategy.trade_count_oos)
+        if strategy.returns_oos is not None:
+            backtest_metrics["total_return"] = float(strategy.returns_oos)
 
-    # ---- Live metrics (from gold.trade_executions) -------------------------
-    live = safe_query_one(db, """
-        SELECT COUNT(*)                                                AS total_trades,
-               SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
-               SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
-               SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
-               COALESCE(SUM(pnl), 0)                                   AS total_pnl,
-               MAX(executed_at)                                        AS last_trade_at,
-               MIN(executed_at)                                        AS first_trade_at
-        FROM gold.trade_executions
-        WHERE strategy_id = :sid AND pnl IS NOT NULL
-    """, {"sid": strategy_id}, label="eval_live_summary")
+    # Average holding duration over ALL OOS per-trade rows (not the
+    # trade_limit-trimmed ledger below). holding_days column preferred, date
+    # diff as fallback. NULL when the strategy stored aggregate metrics only
+    # (no per-trade rows) — the UI renders '—', never a fake zero.
+    bt_hold_row = safe_query_one(db, """
+        SELECT AVG(COALESCE(holding_days, exit_date - entry_date)) AS avg_hold
+        FROM gold.strategy_backtest_trades
+        WHERE strategy_id = :sid
+          AND period = 'OOS'
+          AND exit_date IS NOT NULL
+          AND (ticker IS NULL OR ticker != 'CASH')
+    """, {"sid": strategy_id}, label="eval_bt_avg_hold")
+    if bt_hold_row and bt_hold_row.avg_hold is not None:
+        backtest_metrics["avg_holding_days"] = round(float(bt_hold_row.avg_hold), 1)
+
+    # ---- Live data source selection ----------------------------------------
+    # Prefer gold.trade_executions for LIVE_TRADING only. For PAPER/SIMULATION
+    # strategies the canonical live ledger is gold.paper_trades_synthetic, which
+    # is maintained by the position-aware rebalancer and enforces one open
+    # position per ticker.
+    use_trade_executions = registry_to_api_mode(strategy.execution_mode) == 'LIVE_TRADING'
+
+    # ---- Live metrics -------------------------------------------------------
+    # CASH is a cash-bucket placeholder, not a tradeable ticker; exclude it from
+    # live performance metrics so they reflect security trades only.
+    if use_trade_executions:
+        live = safe_query_one(db, """
+            SELECT COUNT(*)                                                AS total_trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
+                   SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
+                   SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
+                   COALESCE(SUM(pnl), 0)                                   AS total_pnl,
+                   MAX(executed_at)                                        AS last_trade_at,
+                   MIN(executed_at)                                        AS first_trade_at
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+        """, {"sid": strategy_id}, label="eval_live_summary")
+    else:
+        # t_8b58b2bc (memo 2026-08-17 section 2.3): metrics must be computed
+        # from CLOSED round-trips only. Open rows previously carried pnl=0 and
+        # passed the `pnl IS NOT NULL` filter, so every open position was
+        # counted as a losing closed trade (WR/PF/trade-count corruption).
+        live = safe_query_one(db, """
+            SELECT COUNT(*)                                                AS total_trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
+                   SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
+                   SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
+                   COALESCE(SUM(pnl), 0)                                   AS total_pnl,
+                   MAX(exit_date)                                          AS last_trade_at,
+                   MIN(entry_date)                                         AS first_trade_at,
+                   AVG(exit_date - entry_date)                             AS avg_hold_days
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid AND status = 'closed' AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+        """, {"sid": strategy_id}, label="eval_live_summary_synthetic")
 
     live_metrics = {"total_trades": 0, "win_rate": None, "profit_factor": None,
-                    "total_pnl": 0.0, "last_trade_at": None, "first_trade_at": None}
+                    "total_pnl": 0.0, "last_trade_at": None, "first_trade_at": None,
+                    "avg_holding_days": None}
     if live and live.total_trades and live.total_trades > 0:
         wr = (live.winners or 0) / live.total_trades
         pf = float(live.gross_win) / float(live.gross_loss) if live.gross_loss and live.gross_loss > 0 else None
@@ -5126,18 +5284,37 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
             "total_pnl": float(live.total_pnl or 0),
             "last_trade_at": live.last_trade_at.isoformat() if live.last_trade_at else None,
             "first_trade_at": live.first_trade_at.isoformat() if live.first_trade_at else None,
+            # NULL for LIVE_TRADING (trade_executions has no entry/exit pairing)
+            # and when no closed paper round-trips exist yet.
+            "avg_holding_days": (round(float(live.avg_hold_days), 1)
+                                 if getattr(live, "avg_hold_days", None) is not None else None),
         }
 
     # ---- Equity curve (cumulative live pnl per day, last `days` days) ------
-    equity_rows = safe_query(db, """
-        SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
-        FROM gold.trade_executions
-        WHERE strategy_id = :sid
-          AND pnl IS NOT NULL
-          AND executed_at > NOW() - (:days || ' days')::INTERVAL
-        GROUP BY DATE(executed_at)
-        ORDER BY d ASC
-    """, {"sid": strategy_id, "days": str(days)}, label="eval_equity")
+    # Exclude CASH-bucket placeholder trades so the curve reflects security P&L only.
+    if use_trade_executions:
+        equity_rows = safe_query(db, """
+            SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid
+              AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+              AND executed_at > NOW() - (:days || ' days')::INTERVAL
+            GROUP BY DATE(executed_at)
+            ORDER BY d ASC
+        """, {"sid": strategy_id, "days": str(days)}, label="eval_equity")
+    else:
+        equity_rows = safe_query(db, """
+            SELECT exit_date AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid
+              AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+              AND status = 'closed'
+              AND exit_date > CURRENT_DATE - (:days || ' days')::INTERVAL
+            GROUP BY exit_date
+            ORDER BY d ASC
+        """, {"sid": strategy_id, "days": str(days)}, label="eval_equity_synthetic")
 
     equity_curve = []
     cum = 0.0
@@ -5146,31 +5323,176 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
         equity_curve.append({"date": r.d.isoformat(), "pnl": float(r.day_pnl or 0), "cum_pnl": round(cum, 2)})
 
     # ---- Monthly returns ---------------------------------------------------
-    # NOTE: consumption.Performance_Monthly_Returns does not exist — skip query
-    monthly_returns = []
+    # Source: consumption.strategy_monthly_returns (qr_etl-managed view keyed by strategy_id).
+    # This view aggregates closed backtest trades from gold.strategy_backtest_trades and
+    # normalizes pnl_pct units to decimal fractions. See refresh_strategy_monthly_returns.py
+    # in the qr_etl profile for implementation details.
+    monthly_rows = safe_query(db, """
+        SELECT year, month, return_pct
+        FROM consumption.strategy_monthly_returns
+        WHERE strategy_id = :sid
+        ORDER BY year, month
+    """, {"sid": strategy_id}, label="eval_monthly_returns")
+
+    monthly_returns = [{"year": int(r.year), "month": int(r.month),
+                        "return": float(r.return_pct or 0)} for r in monthly_rows]
 
     # ---- Recent trades (last 50) ------------------------------------------
-    trades = safe_query(db, """
-        SELECT executed_at, ticker, side, quantity, price, pnl, mode
-        FROM gold.trade_executions
-        WHERE strategy_id = :sid
-        ORDER BY executed_at DESC
-        LIMIT 50
-    """, {"sid": strategy_id}, label="eval_trades")
+    # Exclude CASH placeholder trades from the ticker-level ledger.
+    # For PAPER/SIMULATION strategies, gold.paper_trades_synthetic stores one row
+    # per position. We expand each closed position into a BUY entry event and a SELL
+    # exit event so the UI can show round-trips and group them by rebalance date.
+    # For LIVE trading, gold.trade_executions already contains one row per execution.
+    trade_limit = max(1, min(trade_limit, 1000))
+    if use_trade_executions:
+        trades = safe_query(db, """
+            SELECT executed_at, ticker, side, quantity, price, pnl, execution_mode AS mode
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid
+              AND (ticker IS NULL OR ticker != 'CASH')
+            ORDER BY executed_at DESC
+            LIMIT :limit
+        """, {"sid": strategy_id, "limit": trade_limit}, label="eval_trades")
 
-    recent_trades = [{
-        "ts": t.executed_at.isoformat() if t.executed_at else None,
-        "ticker": t.ticker,
-        "side": t.side,
-        "quantity": float(t.quantity) if t.quantity is not None else None,
-        "price": float(t.price) if t.price is not None else None,
-        "pnl": float(t.pnl) if t.pnl is not None else None,
-        "mode": getattr(t, "mode", None),
-    } for t in trades]
+        recent_trades = [{
+            "ts": t.executed_at.isoformat() if t.executed_at else None,
+            "ticker": t.ticker,
+            "side": t.side,
+            "quantity": float(t.quantity) if t.quantity is not None else None,
+            "price": float(t.price) if t.price is not None else None,
+            "pnl": float(t.pnl) if t.pnl is not None else None,
+            "mode": getattr(t, "mode", None),
+        } for t in trades]
+    else:
+        # Fetch up to 1000 positions then expand into round-trip events. The event
+        # list is then trimmed to the requested trade_limit so we never return
+        # more than the UI asked for, but we still capture the full BUY/SELL pair.
+        pos_limit = 1000
+        trades = safe_query(db, """
+            SELECT entry_date, exit_date, ticker, direction, n_shares AS quantity,
+                   entry_price, exit_price, pnl, status
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid
+              AND (ticker IS NULL OR ticker != 'CASH')
+            ORDER BY entry_date DESC, exit_date DESC
+            LIMIT :limit
+        """, {"sid": strategy_id, "limit": pos_limit}, label="eval_trades_synthetic")
+
+        recent_trades = []
+        for t in trades:
+            if t.status == 'closed' and t.exit_date:
+                recent_trades.append({
+                    "ts": t.entry_date.isoformat() if t.entry_date else None,
+                    "ticker": t.ticker,
+                    "side": "BUY",
+                    "quantity": float(t.quantity) if t.quantity is not None else None,
+                    "price": float(t.entry_price) if t.entry_price is not None else None,
+                    "pnl": None,
+                    "mode": strategy.execution_mode,
+                })
+                recent_trades.append({
+                    "ts": t.exit_date.isoformat() if t.exit_date else None,
+                    "ticker": t.ticker,
+                    "side": "SELL",
+                    "quantity": float(t.quantity) if t.quantity is not None else None,
+                    "price": float(t.exit_price) if t.exit_price is not None else None,
+                    "pnl": float(t.pnl) if t.pnl is not None else None,
+                    "mode": strategy.execution_mode,
+                })
+            else:
+                recent_trades.append({
+                    "ts": t.entry_date.isoformat() if t.entry_date else None,
+                    "ticker": t.ticker,
+                    "side": "BUY",
+                    "quantity": float(t.quantity) if t.quantity is not None else None,
+                    "price": float(t.entry_price) if t.entry_price is not None else None,
+                    "pnl": None,
+                    "mode": strategy.execution_mode,
+                })
+        recent_trades.sort(key=lambda x: x['ts'] or '', reverse=True)
+        recent_trades = recent_trades[:trade_limit]
 
     # ---- Recent signals ----------------------------------------------------
-    # NOTE: consumption.Strategies_Signals_Current does not exist — skip query
-    recent_signals = []
+    # CASH is a cash-bucket placeholder, not a tradeable ticker; exclude it from
+    # the active-signals table. safe_query swallows the error if the view is missing.
+    # ORDER BY updated_at is meaningless here (batch refresh gives every row the
+    # same timestamp), and a bare LIMIT 50 silently dropped BUY rows when the
+    # universe exceeded 50 tickers (hk_stk_52wh_mom_04 showed Allocation (4)
+    # instead of 10). Actionable signals first, deterministic tiebreak, and a
+    # limit sized so BUY/SELL rows can never be truncated by HOLD noise.
+    signal_rows = safe_query(db, """
+        SELECT ticker, signal, signal_strength, confidence_score, current_price, updated_at
+        FROM consumption.strategies_signals_current
+        WHERE strategy_id = :sid
+          AND (ticker IS NULL OR ticker != 'CASH')
+        ORDER BY CASE signal WHEN 'BUY' THEN 0 WHEN 'SELL' THEN 1 ELSE 2 END,
+                 ticker
+        LIMIT 200
+    """, {"sid": strategy_id}, label="eval_signals")
+    recent_signals = [{
+        "ticker": s.ticker,
+        "signal": s.signal,
+        "strength": float(s.signal_strength) if s.signal_strength is not None else None,
+        "confidence": float(s.confidence_score) if s.confidence_score is not None else None,
+        "price": float(s.current_price) if s.current_price is not None else None,
+        "ts": s.updated_at.isoformat() if s.updated_at else None,
+    } for s in signal_rows]
+
+    # ---- Backtest trade ledger (simulation side of the detail page) --------
+    # Per-trade OOS records from gold.strategy_backtest_trades. Not all
+    # strategies have per-trade rows (portfolio-level backtests only store
+    # aggregate metrics) — the UI shows an honest empty state in that case.
+    bt_trade_rows = safe_query(db, """
+        SELECT entry_date, exit_date, ticker, entry_price, exit_price,
+               pnl_pct, holding_days, exit_reason
+        FROM gold.strategy_backtest_trades
+        WHERE strategy_id = :sid
+          AND period = 'OOS'
+          AND (ticker IS NULL OR ticker != 'CASH')
+        ORDER BY entry_date DESC
+        LIMIT :limit
+    """, {"sid": strategy_id, "limit": trade_limit}, label="eval_bt_trades")
+
+    backtest_trades = [{
+        "entry_date": r.entry_date.isoformat() if r.entry_date else None,
+        "exit_date": r.exit_date.isoformat() if r.exit_date else None,
+        "ticker": r.ticker,
+        "entry_price": float(r.entry_price) if r.entry_price is not None else None,
+        "exit_price": float(r.exit_price) if r.exit_price is not None else None,
+        "pnl_pct": float(r.pnl_pct) if r.pnl_pct is not None else None,
+        "holding_days": int(r.holding_days) if r.holding_days is not None else None,
+        "exit_reason": r.exit_reason,
+    } for r in bt_trade_rows]
+
+    # ---- Paper-book skip surface -------------------------------------------
+    # consumption.strategy_paper_skips_current (qr_etl, refreshed every paper
+    # rebalancer run): one row per (strategy_id, ticker) BUY signal the paper
+    # rebalancer sized to zero — explains why the paper book is flat despite an
+    # active BUY signal. skip_kind: BELOW_ONE_LOT | UNSUPPORTED_ASSET_CLASS |
+    # NO_PRICE. Rows disappear when the skip no longer applies. Empty table =
+    # no skips; safe_query returns [] if the table is missing, so this never
+    # breaks the payload.
+    skip_rows = safe_query(db, """
+        SELECT ticker, signal_action, score, weight, slot_notional, price,
+               lot_size, lot_cost, skip_kind, reason, skip_date, updated_at
+        FROM consumption.strategy_paper_skips_current
+        WHERE strategy_id = :sid
+        ORDER BY ticker
+    """, {"sid": strategy_id}, label="eval_paper_skips")
+    paper_skips = [{
+        "ticker": r.ticker,
+        "signal_action": r.signal_action,
+        "score": float(r.score) if r.score is not None else None,
+        "weight": float(r.weight) if r.weight is not None else None,
+        "slot_notional": float(r.slot_notional) if r.slot_notional is not None else None,
+        "price": float(r.price) if r.price is not None else None,
+        "lot_size": float(r.lot_size) if r.lot_size is not None else None,
+        "lot_cost": float(r.lot_cost) if r.lot_cost is not None else None,
+        "skip_kind": r.skip_kind,
+        "reason": r.reason,
+        "skip_date": r.skip_date.isoformat() if r.skip_date else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    } for r in skip_rows]
 
     # ---- Divergence verdict ------------------------------------------------
     bt_wr = backtest_metrics["win_rate"]
@@ -5194,19 +5516,24 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
     return {
         "strategy_id": strategy_id,
         "name": name,
-        "version": registry.version if registry else None,
-        "status": (registry.status if registry else None) or (definitions.status if definitions else None),
-        "priority": registry.priority if registry else None,
+        "version": None,
+        "status": strategy.status,
+        "priority": strategy.priority,
         "asset_class": asset_class,
         "direction": direction,
-        "time_horizon": definitions.time_horizon if definitions else None,
-        "execution_mode": definitions.execution_mode if definitions else None,
-        "venue": definitions.venue if definitions else "IBKR",
+        "time_horizon": strategy.frequency,
+        "execution_mode": registry_to_api_mode(strategy.execution_mode),
+        "venue": "IBKR",
+        "assigned_capital": float(strategy.assigned_capital) if strategy.assigned_capital is not None else None,
+        "in_market_capital": float(strategy.in_market_capital) if strategy.in_market_capital is not None else None,
+        "conviction_score": float(strategy.conviction_score) if strategy.conviction_score is not None else None,
+        "created_at": strategy.created_at.isoformat() if strategy.created_at else None,
+        "updated_at": strategy.updated_at.isoformat() if strategy.updated_at else None,
         "universe": universe,
         "universe_count": len(universe),
-        "entry_logic": (registry.entry_logic if registry else None) or (definitions.signal_logic if definitions else None),
-        "exit_logic": (registry.exit_logic if registry else None) or (definitions.exit_logic if definitions else None),
-        "description": definitions.description if definitions else None,
+        "entry_logic": strategy.signal_logic,
+        "exit_logic": strategy.exit_logic,
+        "description": strategy.description,
         "metrics": {
             "backtest": backtest_metrics,
             "live": live_metrics,
@@ -5220,9 +5547,243 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, db: Session = Depe
         "monthly_returns": monthly_returns,
         "recent_trades": recent_trades,
         "recent_signals": recent_signals,
+        "backtest_trades": backtest_trades,
+        "paper_skips": paper_skips,
         "window_days": days,
     }
 
+
+def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
+    """Evaluate risk rules against live trade history. Returns rule status list."""
+    # CASH is a cash-bucket placeholder, not a tradeable ticker; exclude from risk math.
+    # Determine data source by strategy execution mode. Paper/simulation strategies
+    # are tracked in gold.paper_trades_synthetic; live strategies in gold.trade_executions.
+    mode_row = safe_query_one(db, """
+        SELECT execution_mode FROM gold.strategy_registry WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="demote_mode")
+    use_trade_executions = bool(mode_row and registry_to_api_mode(mode_row.execution_mode) == 'LIVE_TRADING')
+
+    if use_trade_executions:
+        recent = safe_query(db, """
+            SELECT executed_at, pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+            ORDER BY executed_at DESC
+            LIMIT 50
+        """, {"sid": strategy_id}, label="demote_recent")
+
+        daily = safe_query(db, """
+            SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+            GROUP BY DATE(executed_at)
+            ORDER BY d ASC
+        """, {"sid": strategy_id}, label="demote_daily")
+    else:
+        recent = safe_query(db, """
+            SELECT COALESCE(exit_date, entry_date) AS executed_at, pnl
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+              AND status = 'closed'
+            ORDER BY COALESCE(exit_date, entry_date) DESC
+            LIMIT 50
+        """, {"sid": strategy_id}, label="demote_recent_synthetic")
+
+        daily = safe_query(db, """
+            SELECT exit_date AS d, COALESCE(SUM(pnl), 0) AS day_pnl
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+              AND status = 'closed'
+            GROUP BY exit_date
+            ORDER BY d ASC
+        """, {"sid": strategy_id}, label="demote_daily_synthetic")
+
+    # Pool size to compute pct losses
+    pool = safe_query_one(db, """
+        SELECT assigned_capital
+        FROM gold.strategy_registry
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="demote_pool")
+    pool_size = float(pool.assigned_capital) if pool and pool.assigned_capital else 100_000.0
+
+    rules = []
+
+    # Rule 1: rolling max drawdown from peak cumulative P&L
+    cum = 0.0
+    peak = 0.0
+    max_dd_pct = 0.0
+    for r in daily:
+        cum += float(r.day_pnl or 0)
+        peak = max(peak, cum)
+        if peak > 0:
+            dd_pct = ((cum - peak) / pool_size) * 100
+            max_dd_pct = min(max_dd_pct, dd_pct)
+    rules.append({
+        "id": "max_drawdown",
+        "label": f"Max DD ≥ {DEMOTE_RULES['max_drawdown_pct']:.1f}%",
+        "actual": round(max_dd_pct, 2),
+        "threshold": DEMOTE_RULES["max_drawdown_pct"],
+        "breach": max_dd_pct < DEMOTE_RULES["max_drawdown_pct"],
+        "reason": "Live drawdown exceeds risk limit",
+    })
+
+    # Rule 2: worst daily loss (% of pool)
+    worst_daily_pct = 0.0
+    if daily:
+        worst_day = min((float(r.day_pnl or 0) for r in daily), default=0)
+        worst_daily_pct = (worst_day / pool_size) * 100
+    rules.append({
+        "id": "max_daily_loss",
+        "label": f"Daily loss ≥ {DEMOTE_RULES['max_daily_loss_pct']:.1f}%",
+        "actual": round(worst_daily_pct, 2),
+        "threshold": DEMOTE_RULES["max_daily_loss_pct"],
+        "breach": worst_daily_pct < DEMOTE_RULES["max_daily_loss_pct"],
+        "reason": "Single-day loss exceeds risk limit",
+    })
+
+    # Rule 3: consecutive losses (most recent streak)
+    streak = 0
+    for r in recent:  # already DESC
+        if (r.pnl or 0) < 0:
+            streak += 1
+        else:
+            break
+    rules.append({
+        "id": "consecutive_losses",
+        "label": f"Consecutive losses ≤ {DEMOTE_RULES['max_consecutive_losses']}",
+        "actual": streak,
+        "threshold": DEMOTE_RULES["max_consecutive_losses"],
+        "breach": streak >= DEMOTE_RULES["max_consecutive_losses"],
+        "reason": f"{streak} losing trades in a row",
+    })
+
+    # Rule 4: live PF over last 20 trades
+    last_n = recent[:20]
+    gross_win = sum(float(r.pnl) for r in last_n if (r.pnl or 0) > 0)
+    gross_loss = sum(-float(r.pnl) for r in last_n if (r.pnl or 0) < 0)
+    pf = (gross_win / gross_loss) if gross_loss > 0 else None
+    eligible = len(last_n) >= DEMOTE_RULES["min_live_trades_for_pf"]
+    rules.append({
+        "id": "min_live_pf",
+        "label": f"Rolling PF ≥ {DEMOTE_RULES['min_live_pf']:.2f} (last 20 trades)",
+        "actual": round(pf, 3) if pf is not None else None,
+        "threshold": DEMOTE_RULES["min_live_pf"],
+        "breach": eligible and pf is not None and pf < DEMOTE_RULES["min_live_pf"],
+        "reason": "Profit factor degraded below threshold",
+    })
+
+    breaches = [r for r in rules if r["breach"]]
+    return {
+        "strategy_id": strategy_id,
+        "rules": rules,
+        "breaches": breaches,
+        "should_demote": len(breaches) > 0,
+        "trades_analyzed": len(recent),
+    }
+
+
+@app.get("/api/strategies/{strategy_id:path}/risk-status")
+def get_risk_status(strategy_id: str, db: Session = Depends(get_db)):
+    """Return the demote-rule status for a strategy without taking action."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_registry WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    status = _evaluate_demote_rules(db, strategy_id)
+    return {
+        **status,
+        "name": strat.name,
+        "execution_mode": strat.execution_mode,
+    }
+
+
+def _demote_strategy(db: Session, strategy_id: str, breaches: list, source: str = "auto"):
+    """Demote a LIVE strategy to PAPER. Audits + emits WS event."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_registry WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat or strat.execution_mode != "LIVE":
+        return False
+
+    db.execute(text("""
+        UPDATE gold.strategy_registry
+        SET execution_mode = 'PAPER', updated_at = NOW()
+        WHERE strategy_id = :sid
+    """), {"sid": strategy_id})
+    db.commit()
+
+    _audit(db, "strategy.auto_demote", strategy_id, {
+        "from": "LIVE_TRADING",
+        "to": "PAPER_TRADING",
+        "source": source,
+        "breaches": [{"id": b["id"], "actual": b["actual"], "threshold": b["threshold"]} for b in breaches],
+    })
+
+    event_bus.publish_sync("auto_demote", {
+        "strategy_id": strategy_id,
+        "name": strat.name,
+        "from": "LIVE_TRADING",
+        "to": "PAPER_TRADING",
+        "breaches": [b["id"] for b in breaches],
+    })
+    logger.warning(f"AUTO-DEMOTE {strategy_id} ({strat.name}) — breaches: {[b['id'] for b in breaches]}")
+    return True
+
+
+# Background scanner — checks every LIVE strategy and demotes breached ones.
+DEMOTE_SCAN_INTERVAL_S = int(os.environ.get("JTCML_DEMOTE_SCAN_S", "300"))
+
+async def _demote_scanner_loop():
+    while True:
+        try:
+            await asyncio.sleep(DEMOTE_SCAN_INTERVAL_S)
+            db = SessionLocal()
+            try:
+                live = db.execute(text("""
+                    SELECT strategy_id FROM gold.strategy_registry
+                    WHERE execution_mode = 'LIVE'
+                """)).fetchall()
+                for row in live:
+                    sid = row.strategy_id
+                    try:
+                        status = _evaluate_demote_rules(db, sid)
+                        if status["should_demote"]:
+                            _demote_strategy(db, sid, status["breaches"], source="auto_scanner")
+                    except Exception as e:
+                        logger.error(f"Demote check failed for {sid}: {e}")
+                        db.rollback()
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Demote scanner loop error: {e}")
+
+
+@app.post("/api/strategies/{strategy_id}/auto-demote-check")
+def force_demote_check(strategy_id: str, db: Session = Depends(get_db)):
+    """Manually trigger an auto-demote check for one strategy (for testing/UI)."""
+    strat = db.execute(text("""
+        SELECT strategy_id, name, execution_mode
+        FROM gold.strategy_registry WHERE strategy_id = :sid
+    """), {"sid": strategy_id}).fetchone()
+    if not strat:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    status = _evaluate_demote_rules(db, strategy_id)
+    demoted = False
+    if status["should_demote"] and registry_to_api_mode(strat.execution_mode) == "LIVE_TRADING":
+        demoted = _demote_strategy(db, strategy_id, status["breaches"], source="manual_check")
+
+    return {**status, "demoted": demoted, "execution_mode": registry_to_api_mode(strat.execution_mode)}
 
 @app.get("/api/strategies/{strategy_id:path}")
 def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
@@ -5233,20 +5794,22 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
             name,
             description,
             asset_class,
-            direction,
-            time_horizon,
-            sharpe_ratio,
-            max_drawdown,
-            win_rate,
             universe_tickers,
-            max_position_pct,
-            venue,
             status,
+            sharpe_oos,
+            max_drawdown_oos,
+            win_rate_oos,
+            trade_count_oos,
             signal_logic,
             exit_logic,
-            trigger_example,
-            why_it_works,
-            execution_mode
+            execution_mode,
+            frequency,
+            assigned_capital,
+            in_market_capital,
+            conviction_score,
+            created_at,
+            updated_at,
+            priority
         FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
@@ -5254,29 +5817,32 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
-    # Parse signal logic and exit logic
-    tickers = result.universe_tickers.split(',') if result.universe_tickers else []
+    # Parse universe_tickers as an array; filter out the CASH placeholder.
+    raw_universe = result.universe_tickers or []
+    if isinstance(raw_universe, str):
+        raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+    tickers = [t for t in raw_universe if t and t.upper() != 'CASH']
 
     return {
         "strategy_id": result.strategy_id,
         "name": result.name,
         "description": result.description,
         "asset_class": result.asset_class,
-        "direction": result.direction,
-        "time_horizon": result.time_horizon,
-        "sharpe_ratio": float(result.sharpe_ratio) if result.sharpe_ratio else 0,
-        "max_drawdown": float(result.max_drawdown) if result.max_drawdown else 0,
-        "win_rate": float(result.win_rate) if result.win_rate else 0,
+        "direction": "LONG",
+        "time_horizon": result.frequency,
+        "sharpe_ratio": float(result.sharpe_oos) if result.sharpe_oos else 0,
+        "max_drawdown": float(result.max_drawdown_oos) if result.max_drawdown_oos else 0,
+        "win_rate": float(result.win_rate_oos) if result.win_rate_oos else 0,
         "universe": tickers,
         "universe_count": len(tickers),
-        "max_position_pct": float(result.max_position_pct) if result.max_position_pct else 0.05,
-        "venue": result.venue,
+        "max_position_pct": 0.05,
+        "venue": "IBKR",
         "status": result.status,
         "execution_mode": result.execution_mode,
         "signal_logic": result.signal_logic or "Entry conditions not specified",
         "exit_logic": result.exit_logic or "Exit at +5% profit (win) or -5% loss (stop loss)",
-        "trigger_example": result.trigger_example or "See strategy description",
-        "why_it_works": result.why_it_works or "",
+        "trigger_example": result.signal_logic or "See strategy description",
+        "why_it_works": result.description or "",
         # Derived fields for frontend
         "buy_signal": result.signal_logic or "BUY signal triggered by strategy logic",
         "sell_signal": result.exit_logic or "SELL at +5% profit target or -5% stop loss",
@@ -5320,15 +5886,22 @@ VALID_MODES = {"SIMULATION", "PAPER_TRADING", "LIVE_TRADING"}
 
 
 def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
-    """Gather backtest + live metrics needed by promotion gates."""
+    """Gather backtest + live metrics needed by promotion gates.
+
+    The canonical OOS backtest results live in gold.strategy_backtest_runs (DE-owned).
+    The live/paper ledger is gold.paper_trades_synthetic (maintained by the position-aware
+    rebalancer); gold.trade_executions is reserved for actual LIVE_TRADING executions.
+    """
     bt = safe_query_one(db, """
-        SELECT AVG(win_rate)            AS win_rate,
-               AVG(profit_factor)       AS profit_factor,
-               AVG(sharpe_ratio)        AS sharpe,
-               AVG(max_drawdown_pct)    AS max_drawdown,
-               SUM(total_trades)        AS total_trades
-        FROM consumption.Strategies_Backtest_Results
+        SELECT win_rate_oos            AS win_rate,
+               profit_factor_oos       AS profit_factor,
+               sharpe_oos              AS sharpe,
+               max_drawdown_oos        AS max_drawdown,
+               trade_count_oos         AS total_trades
+        FROM gold.strategy_backtest_runs
         WHERE strategy_id = :sid
+        ORDER BY run_number DESC, is_end DESC
+        LIMIT 1
     """, {"sid": strategy_id}, label="promote_bt")
 
     live = safe_query_one(db, """
@@ -5336,11 +5909,12 @@ def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)                AS winners,
                SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)              AS gross_win,
                SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)             AS gross_loss,
-               COALESCE(MIN(executed_at), NULL)                        AS first_trade_at,
-               COALESCE(MAX(executed_at), NULL)                        AS last_trade_at,
-               COALESCE(SUM(pnl), 0)                                   AS total_pnl
-        FROM gold.trade_executions
+               COALESCE(SUM(pnl), 0)                                   AS total_pnl,
+               MAX(CASE WHEN status = 'closed' THEN exit_date ELSE entry_date END) AS last_trade_at,
+               MIN(entry_date)                                           AS first_trade_at
+        FROM gold.paper_trades_synthetic
         WHERE strategy_id = :sid AND pnl IS NOT NULL
+          AND (ticker IS NULL OR ticker != 'CASH')
     """, {"sid": strategy_id}, label="promote_live")
 
     bt_metrics = {
@@ -5355,7 +5929,7 @@ def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
     live_wr = (float(live.winners) / live_total) if live_total else None
     live_days = 0
     if live and live.first_trade_at and live.last_trade_at:
-        live_days = max(0, (live.last_trade_at.date() - live.first_trade_at.date()).days)
+        live_days = max(0, (live.last_trade_at - live.first_trade_at).days)
     live_metrics = {
         "total_trades":  live_total,
         "win_rate":      live_wr,
@@ -5477,7 +6051,7 @@ def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)
     if not strat:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
-    current_mode = strat.execution_mode or "SIMULATION"
+    current_mode = registry_to_api_mode(strat.execution_mode)
     if current_mode == target:
         return {"strategy_id": strategy_id, "current_mode": current_mode, "target_mode": target,
                 "passed": True, "blocked": False, "gates": [],
@@ -5521,7 +6095,7 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     if not strat:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
 
-    current_mode = strat.execution_mode or "SIMULATION"
+    current_mode = registry_to_api_mode(strat.execution_mode)
     if current_mode == target:
         return {"success": True, "no_op": True, "current_mode": current_mode,
                 "message": f"Strategy already in {target}"}
@@ -5551,12 +6125,13 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
             "message": "Promotion blocked by gates. Pass override_gates=true to force (audited).",
         }
 
-    # Apply mode change
+    # Apply mode change (registry stores constrained values)
+    registry_mode = api_to_registry_mode(target)
     db.execute(text("""
         UPDATE gold.strategy_registry
         SET execution_mode = :mode, updated_at = NOW()
         WHERE strategy_id = :sid
-    """), {"sid": strategy_id, "mode": target})
+    """), {"sid": strategy_id, "mode": registry_mode})
     db.commit()
 
     _audit(db, "strategy.mode_change", strategy_id, {
@@ -5604,209 +6179,6 @@ DEMOTE_RULES = {
 }
 
 
-def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
-    """Evaluate risk rules against live trade history. Returns rule status list."""
-    # Pull recent live trades (limit 50 to stay fast)
-    recent = safe_query(db, """
-        SELECT executed_at, pnl
-        FROM gold.trade_executions
-        WHERE strategy_id = :sid AND pnl IS NOT NULL
-        ORDER BY executed_at DESC
-        LIMIT 50
-    """, {"sid": strategy_id}, label="demote_recent")
-
-    # Pull all-time live cumulative pnl for drawdown calc
-    daily = safe_query(db, """
-        SELECT DATE(executed_at) AS d, COALESCE(SUM(pnl), 0) AS day_pnl
-        FROM gold.trade_executions
-        WHERE strategy_id = :sid AND pnl IS NOT NULL
-        GROUP BY DATE(executed_at)
-        ORDER BY d ASC
-    """, {"sid": strategy_id}, label="demote_daily")
-
-    # Pool size to compute pct losses
-    pool = safe_query_one(db, """
-        SELECT assigned_capital
-        FROM gold.strategy_registry
-        WHERE strategy_id = :sid
-    """, {"sid": strategy_id}, label="demote_pool")
-    pool_size = float(pool.assigned_capital) if pool and pool.assigned_capital else 100_000.0
-
-    rules = []
-
-    # Rule 1: rolling max drawdown from peak cumulative P&L
-    cum = 0.0
-    peak = 0.0
-    max_dd_pct = 0.0
-    for r in daily:
-        cum += float(r.day_pnl or 0)
-        peak = max(peak, cum)
-        if peak > 0:
-            dd_pct = ((cum - peak) / pool_size) * 100
-            max_dd_pct = min(max_dd_pct, dd_pct)
-    rules.append({
-        "id": "max_drawdown",
-        "label": f"Max DD ≥ {DEMOTE_RULES['max_drawdown_pct']:.1f}%",
-        "actual": round(max_dd_pct, 2),
-        "threshold": DEMOTE_RULES["max_drawdown_pct"],
-        "breach": max_dd_pct < DEMOTE_RULES["max_drawdown_pct"],
-        "reason": "Live drawdown exceeds risk limit",
-    })
-
-    # Rule 2: worst daily loss (% of pool)
-    worst_daily_pct = 0.0
-    if daily:
-        worst_day = min((float(r.day_pnl or 0) for r in daily), default=0)
-        worst_daily_pct = (worst_day / pool_size) * 100
-    rules.append({
-        "id": "max_daily_loss",
-        "label": f"Daily loss ≥ {DEMOTE_RULES['max_daily_loss_pct']:.1f}%",
-        "actual": round(worst_daily_pct, 2),
-        "threshold": DEMOTE_RULES["max_daily_loss_pct"],
-        "breach": worst_daily_pct < DEMOTE_RULES["max_daily_loss_pct"],
-        "reason": "Single-day loss exceeds risk limit",
-    })
-
-    # Rule 3: consecutive losses (most recent streak)
-    streak = 0
-    for r in recent:  # already DESC
-        if (r.pnl or 0) < 0:
-            streak += 1
-        else:
-            break
-    rules.append({
-        "id": "consecutive_losses",
-        "label": f"Consecutive losses ≤ {DEMOTE_RULES['max_consecutive_losses']}",
-        "actual": streak,
-        "threshold": DEMOTE_RULES["max_consecutive_losses"],
-        "breach": streak >= DEMOTE_RULES["max_consecutive_losses"],
-        "reason": f"{streak} losing trades in a row",
-    })
-
-    # Rule 4: live PF over last 20 trades
-    last_n = recent[:20]
-    gross_win = sum(float(r.pnl) for r in last_n if (r.pnl or 0) > 0)
-    gross_loss = sum(-float(r.pnl) for r in last_n if (r.pnl or 0) < 0)
-    pf = (gross_win / gross_loss) if gross_loss > 0 else None
-    eligible = len(last_n) >= DEMOTE_RULES["min_live_trades_for_pf"]
-    rules.append({
-        "id": "min_live_pf",
-        "label": f"Rolling PF ≥ {DEMOTE_RULES['min_live_pf']:.2f} (last 20 trades)",
-        "actual": round(pf, 3) if pf is not None else None,
-        "threshold": DEMOTE_RULES["min_live_pf"],
-        "breach": eligible and pf is not None and pf < DEMOTE_RULES["min_live_pf"],
-        "reason": "Profit factor degraded below threshold",
-    })
-
-    breaches = [r for r in rules if r["breach"]]
-    return {
-        "strategy_id": strategy_id,
-        "rules": rules,
-        "breaches": breaches,
-        "should_demote": len(breaches) > 0,
-        "trades_analyzed": len(recent),
-    }
-
-
-@app.get("/api/strategies/{strategy_id}/risk-status")
-def get_risk_status(strategy_id: str, db: Session = Depends(get_db)):
-    """Return the demote-rule status for a strategy without taking action."""
-    strat = db.execute(text("""
-        SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_registry WHERE strategy_id = :sid
-    """), {"sid": strategy_id}).fetchone()
-    if not strat:
-        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-
-    status = _evaluate_demote_rules(db, strategy_id)
-    return {
-        **status,
-        "name": strat.name,
-        "execution_mode": strat.execution_mode,
-    }
-
-
-def _demote_strategy(db: Session, strategy_id: str, breaches: list, source: str = "auto"):
-    """Demote a LIVE strategy to PAPER. Audits + emits WS event."""
-    strat = db.execute(text("""
-        SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_registry WHERE strategy_id = :sid
-    """), {"sid": strategy_id}).fetchone()
-    if not strat or strat.execution_mode != "LIVE_TRADING":
-        return False
-
-    db.execute(text("""
-        UPDATE gold.strategy_registry
-        SET execution_mode = 'PAPER_TRADING', updated_at = NOW()
-        WHERE strategy_id = :sid
-    """), {"sid": strategy_id})
-    db.commit()
-
-    _audit(db, "strategy.auto_demote", strategy_id, {
-        "from": "LIVE_TRADING",
-        "to": "PAPER_TRADING",
-        "source": source,
-        "breaches": [{"id": b["id"], "actual": b["actual"], "threshold": b["threshold"]} for b in breaches],
-    })
-
-    event_bus.publish_sync("auto_demote", {
-        "strategy_id": strategy_id,
-        "name": strat.name,
-        "from": "LIVE_TRADING",
-        "to": "PAPER_TRADING",
-        "breaches": [b["id"] for b in breaches],
-    })
-    logger.warning(f"AUTO-DEMOTE {strategy_id} ({strat.name}) — breaches: {[b['id'] for b in breaches]}")
-    return True
-
-
-# Background scanner — checks every LIVE strategy and demotes breached ones.
-DEMOTE_SCAN_INTERVAL_S = int(os.environ.get("JTCML_DEMOTE_SCAN_S", "300"))
-
-async def _demote_scanner_loop():
-    while True:
-        try:
-            await asyncio.sleep(DEMOTE_SCAN_INTERVAL_S)
-            db = SessionLocal()
-            try:
-                live = db.execute(text("""
-                    SELECT strategy_id FROM gold.strategy_registry
-                    WHERE execution_mode = 'LIVE_TRADING'
-                """)).fetchall()
-                for row in live:
-                    sid = row.strategy_id
-                    try:
-                        status = _evaluate_demote_rules(db, sid)
-                        if status["should_demote"]:
-                            _demote_strategy(db, sid, status["breaches"], source="auto_scanner")
-                    except Exception as e:
-                        logger.error(f"Demote check failed for {sid}: {e}")
-                        db.rollback()
-            finally:
-                db.close()
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.error(f"Demote scanner loop error: {e}")
-
-
-@app.post("/api/strategies/{strategy_id}/auto-demote-check")
-def force_demote_check(strategy_id: str, db: Session = Depends(get_db)):
-    """Manually trigger an auto-demote check for one strategy (for testing/UI)."""
-    strat = db.execute(text("""
-        SELECT strategy_id, name, execution_mode
-        FROM gold.strategy_registry WHERE strategy_id = :sid
-    """), {"sid": strategy_id}).fetchone()
-    if not strat:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-
-    status = _evaluate_demote_rules(db, strategy_id)
-    demoted = False
-    if status["should_demote"] and strat.execution_mode == "LIVE_TRADING":
-        demoted = _demote_strategy(db, strategy_id, status["breaches"], source="manual_check")
-
-    return {**status, "demoted": demoted, "execution_mode": strat.execution_mode}
-
 
 @app.post("/api/strategies/{strategy_id:path}/mode")
 def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
@@ -5816,13 +6188,14 @@ def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(ge
     if mode not in ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"]:
         raise HTTPException(status_code=400, detail="Invalid mode. Use SIMULATION, PAPER_TRADING, or LIVE_TRADING")
 
+    registry_mode = api_to_registry_mode(mode)
     result = db.execute(text("""
         UPDATE gold.strategy_registry
         SET execution_mode = :mode,
             updated_at = NOW()
         WHERE strategy_id = :strategy_id
         RETURNING strategy_id, name, execution_mode
-    """), {"strategy_id": strategy_id, "mode": mode}).fetchone()
+    """), {"strategy_id": strategy_id, "mode": registry_mode}).fetchone()
 
     if not result:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
@@ -5833,7 +6206,7 @@ def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(ge
         "success": True,
         "strategy_id": result.strategy_id,
         "strategy_name": result.name,
-        "execution_mode": result.execution_mode,
+        "execution_mode": registry_to_api_mode(result.execution_mode),
         "message": f"Execution mode set to {mode}"
     }
 
@@ -5854,7 +6227,7 @@ def execute_strategy_order(payload: dict, db: Session = Depends(get_db)):
 
     # Get strategy execution mode
     strategy = db.execute(text("""
-        SELECT strategy_id, name, execution_mode, venue
+        SELECT strategy_id, name, execution_mode
         FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
@@ -5965,13 +6338,15 @@ async def execute_jt_ready_strategies(db: Session = Depends(get_db)):
 def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
     """Get current execution mode for a strategy"""
     result = db.execute(text("""
-        SELECT strategy_id, name, execution_mode, venue
+        SELECT strategy_id, name, execution_mode
         FROM gold.strategy_registry
         WHERE strategy_id = :strategy_id
     """), {"strategy_id": strategy_id}).fetchone()
 
     if not result:
         raise HTTPException(status_code=404, detail="Strategy not found")
+
+    api_mode = registry_to_api_mode(result.execution_mode)
 
     # Count positions by mode
     sim_count = db.execute(text("""
@@ -5982,15 +6357,15 @@ def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
     return {
         "strategy_id": result.strategy_id,
         "strategy_name": result.name,
-        "execution_mode": result.execution_mode or "SIMULATION",
-        "venue": result.venue,
+        "execution_mode": api_mode,
+        "venue": "IBKR",
         "positions_count": sim_count,
         "available_modes": ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"],
         "risk_level": {
             "SIMULATION": "ZERO",
             "PAPER_TRADING": "LOW",
             "LIVE_TRADING": "HIGH"
-        }.get(result.execution_mode or "SIMULATION", "UNKNOWN")
+        }.get(api_mode, "UNKNOWN")
     }
 
 
@@ -6012,10 +6387,12 @@ def add_stocks_to_paper_trading(payload: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="strategy_id and tickers required")
 
     # Get strategy definition
-    strategy = db.execute(text("""
+    registry_row = db.execute(text("""
         SELECT * FROM gold.strategy_registry
         WHERE strategy_id = :sid 
     """), {"sid": strategy_id}).fetchone()
+
+    strategy = registry_row
 
     if not strategy:
         # Check if it's a regular template
@@ -6026,6 +6403,27 @@ def add_stocks_to_paper_trading(payload: dict, db: Session = Depends(get_db)):
 
     if not strategy:
         raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+    # For PAPER/SIMULATION registry strategies the paper ledger
+    # (gold.paper_trades_synthetic, written by the ETL rebalancer and synced
+    # into consumption.portfolio_positions_current) is the source of truth.
+    # Do NOT write placeholder capital rows here.
+    if registry_row is not None:
+        registry_api_mode = registry_to_api_mode(getattr(registry_row, "execution_mode", None))
+        if registry_api_mode in ("PAPER_TRADING", "SIMULATION"):
+            return {
+                "success": True,
+                "strategy_id": strategy_id,
+                "added": [],
+                "failed": [],
+                "total_added": 0,
+                "note": (
+                    f"Registry execution_mode is {registry_api_mode}; positions are owned by the "
+                    "paper ledger (gold.paper_trades_synthetic) and synced into "
+                    "consumption.portfolio_positions_current by ETL each signal cycle. "
+                    "No placeholder rows written."
+                ),
+            }
 
     created = []
     failed = []
@@ -6071,40 +6469,48 @@ def get_strategy_description(strategy_id: str, db: Session = Depends(get_db)):
             name,
             description,
             asset_class,
-            direction,
-            time_horizon,
-            sharpe_ratio,
-            max_drawdown,
-            win_rate,
-            avg_hold_days,
-            universe_count,
-            max_position_pct,
-            venue,
-            capacity_millions,
-            backtest_period
+            universe_tickers,
+            frequency,
+            sharpe_oos,
+            max_drawdown_oos,
+            win_rate_oos,
+            trade_count_oos,
+            profit_factor_oos,
+            returns_oos,
+            assigned_capital,
+            signal_logic,
+            exit_logic,
+            execution_mode,
+            status,
+            priority
         FROM gold.strategy_registry
         WHERE strategy_id = :sid 
     """), {"sid": strategy_id}).fetchone()
 
     if result:
+        raw_universe = result.universe_tickers or []
+        if isinstance(raw_universe, str):
+            raw_universe = [t.strip() for t in raw_universe.split(',') if t.strip()]
+        tickers = [t for t in raw_universe if t and t.upper() != 'CASH']
+
         return {
             "id": result.id,
             "name": result.name,
             "description": result.description,
             "asset_class": result.asset_class,
-            "direction": result.direction,
-            "time_horizon": result.time_horizon,
+            "direction": "LONG",
+            "time_horizon": result.frequency,
             "metrics": {
-                "sharpe_ratio": float(result.sharpe_ratio) if result.sharpe_ratio else None,
-                "max_drawdown": float(result.max_drawdown) if result.max_drawdown else None,
-                "win_rate": float(result.win_rate) if result.win_rate else None,
-                "avg_hold_days": float(result.avg_hold_days) if result.avg_hold_days else None,
-                "universe_count": result.universe_count,
-                "max_position_pct": float(result.max_position_pct) if result.max_position_pct else None,
-                "capacity_millions": float(result.capacity_millions) if result.capacity_millions else None
+                "sharpe_ratio": float(result.sharpe_oos) if result.sharpe_oos else None,
+                "max_drawdown": float(result.max_drawdown_oos) if result.max_drawdown_oos else None,
+                "win_rate": float(result.win_rate_oos) if result.win_rate_oos else None,
+                "avg_hold_days": None,
+                "universe_count": len(tickers),
+                "max_position_pct": 0.05,
+                "capacity_millions": None
             },
-            "venue": result.venue,
-            "backtest_period": result.backtest_period,
+            "venue": "IBKR",
+            "backtest_period": None,
             "source": "trade_algo_researcher"
         }
 
