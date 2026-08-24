@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { api, usePoll, fmtK, fmtPct, fmtAge, pnlCl, marketClock, marketStatus } from '../utils';
-import { FR, FR_NAME, PANEL_SOURCES, panelFreshness, useFreshness, fmtAgeSec } from '../freshness';
+import { FR, FR_NAME, PANEL_SOURCES, panelFreshness, useFreshness, fmtAgeSec, useBarQuality, barQualityView } from '../freshness';
 
 // Command home — 2026-08-20 redesign. Priority: what am I making/losing,
 // where's my cash, what's working, what to buy next.
@@ -506,6 +506,8 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   const [regimeFc, setRegimeFc] = useState(null);
   const [oppPicks, setOppPicks] = useState([]);
   const registry = useFreshness();
+  const barQ = useBarQuality();
+  const bqView = barQualityView(barQ.loaded, barQ.bq);
 
   usePoll(async () => {
     const res = await api.get('/api/command/overview');
@@ -602,9 +604,25 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
         key: `plat-${a.id || a.ref_id || a.title}`, ackKey: a.id ? String(a.id) : null,
       });
     }
+    // Yahoo suspect-bar guard (bar_quality, t_285be732): YELLOW is a SOFT
+    // warning — never critical, episodes can self-heal as Yahoo backfills
+    // real bars. Client-side item (no ackKey → not dismissible; it clears
+    // itself when the 30d window heals). UNKNOWN/null is NOT surfaced here —
+    // the Settings badge carries that state; the queue stays for real signal.
+    if (bqView.level === 'YELLOW') {
+      const bq = barQ.bq || {};
+      const tickers = bq.recent_30d_tickers || [];
+      items.push({
+        kind: 'platform', sev: 'warning', tag: 'DATA',
+        title: `Yahoo suspect bars — ${tickers.join(', ') || 'unknown tickers'}`,
+        impact: `${bq.recent_30d_rows ?? 0} unresolved synthetic zero-volume flat-bar suspects in 30d (latest ${bq.latest_suspect_date ?? '—'}): ${bq.recent_30d_gold_rows ?? 0} pre-guard gold rows + ${bq.recent_30d_quarantined_rows ?? 0} quarantined post-guard. Soft warning — can self-heal as Yahoo backfills. Source: gold.v_us_equity_bar_quality (qr_etl).`,
+        ts: null, age: null, target: 'settings', action: 'open',
+        key: 'bar-quality', ackKey: null,
+      });
+    }
     items.sort((x, y) => (SEV_RANK[x.sev] ?? 9) - (SEV_RANK[y.sev] ?? 9) || (y.ts ?? -1) - (x.ts ?? -1));
     return items;
-  }, [overview, strategyRisks, monitoringGap]);
+  }, [overview, strategyRisks, monitoringGap, bqView.level, barQ.bq]);
 
   // Server-side dismissals filter the payload already; this set is the
   // optimistic local removal after the user acks/snoozes in THIS session.
@@ -814,6 +832,12 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
           platform alerts in a single panel, severity then recency. */}
       <Panel title="Action Center" fresh={fAttention} action={
         <span className="flex items-center gap-2 whitespace-nowrap">
+          {/* Bar-quality badge (bar_quality from /api/system/freshness).
+              Always rendered so UNKNOWN/PENDING are visible — never
+              silently treated as GREEN. */}
+          <span className={`text-[9px] font-bold ${bqView.badgeCl}`} title={bqView.tip}>
+            Bar quality {bqView.label}
+          </span>
           {sevCounts.critical > 0 && <span className="text-[9px] font-bold text-rose-400">{sevCounts.critical} critical</span>}
           {sevCounts.warning > 0 && <span className="text-[9px] font-bold text-slate-400">{sevCounts.warning} warning</span>}
           {sevCounts.info > 0 && <span className="text-[9px] text-slate-500">{sevCounts.info} info</span>}

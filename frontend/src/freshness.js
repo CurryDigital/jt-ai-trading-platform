@@ -138,3 +138,50 @@ export const fmtAgeSec = (ageSec) => {
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
 };
+
+// Bar-quality model — Yahoo suspect-bar guard (backend contract t_285be732).
+// GET /api/system/freshness → `bar_quality` section sourced from
+// gold.v_us_equity_bar_quality (qr_etl, migration 2026-08-24_us_equity_bar_quality.sql).
+//   GREEN  no unresolved suspects in the last 30d
+//   YELLOW unresolved Yahoo synthetic zero-volume flat-bar suspects in 30d —
+//          a SOFT warning, never a hard failure; episodes can self-heal
+//          (EA 2026-08-05..10 did) as Yahoo backfills real bars
+//   null   the view is missing → UNKNOWN, NEVER render as GREEN
+export function useBarQuality(pollMs = 60000) {
+  const [state, setState] = useState({ loaded: false, bq: undefined });
+
+  usePoll(async () => {
+    const res = await api.get('/api/system/freshness');
+    if (res && Array.isArray(res.sources)) {
+      setState({ loaded: true, bq: res.bar_quality ?? null });
+    }
+  }, pollMs);
+
+  return state; // { loaded, bq } — bq: undefined = probe pending, null = UNKNOWN (view missing)
+}
+
+// Shared presentational classification for Command + Settings.
+// Palette rule: rose is reserved for critical severity; YELLOW here is a
+// soft warning (self-heal possible) → teal, matching the LAGGING convention.
+// GREEN and UNKNOWN both stay neutral slate — UNKNOWN must never look green.
+export function barQualityView(loaded, bq) {
+  if (!loaded || bq === undefined) {
+    return { level: 'PENDING', badgeCl: 'text-slate-600', label: '…',
+      tip: 'bar_quality probe pending — /api/system/freshness has not answered yet.' };
+  }
+  if (bq == null) {
+    return { level: 'UNKNOWN', badgeCl: 'text-slate-500', label: 'UNKNOWN',
+      tip: 'gold.v_us_equity_bar_quality is missing — bar quality cannot be determined. Treated as UNKNOWN, not GREEN. Owner: qr_etl (migration 2026-08-24_us_equity_bar_quality.sql).' };
+  }
+  const q = (bq.quality || '').toUpperCase();
+  const tickers = bq.recent_30d_tickers || [];
+  if (q === 'YELLOW') {
+    return { level: 'YELLOW', badgeCl: 'text-teal-300', label: 'YELLOW',
+      tip: `Soft warning — unresolved Yahoo synthetic zero-volume flat-bar suspects in the last 30d (latest ${bq.latest_suspect_date ?? '—'}). Episodes can self-heal as Yahoo backfills real bars (EA 2026-08-05..10 did). `
+        + `${bq.recent_30d_rows ?? 0} suspect rows across ${tickers.length} ticker${tickers.length === 1 ? '' : 's'}: ${tickers.join(', ') || '—'} · `
+        + `${bq.recent_30d_gold_rows ?? 0} pre-guard gold rows + ${bq.recent_30d_quarantined_rows ?? 0} quarantined post-guard (bronze.yf_suspect_bars) · ${bq.total_rows ?? 0} rows all-time. `
+        + `Source: gold.v_us_equity_bar_quality (qr_etl).` };
+  }
+  return { level: 'GREEN', badgeCl: 'text-slate-500', label: 'GREEN',
+    tip: `No unresolved Yahoo suspect bars in the last 30d. ${bq.total_rows ?? 0} historical suspect rows on record. Source: gold.v_us_equity_bar_quality (qr_etl).` };
+}

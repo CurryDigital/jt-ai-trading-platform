@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
 import { AuditLog } from './AuditLog';
 import { marketClock, marketStatus } from '../utils';
+import { useBarQuality, barQualityView } from '../freshness';
 
 // Enhanced Settings Tab with Configuration Management + System Health
 export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
@@ -25,6 +26,10 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   const [dataSourcesLoading, setDataSourcesLoading] = useState(false);
   const [clocks, setClocks] = useState(marketClock());
   const [statuses, setStatuses] = useState(marketStatus());
+  // Yahoo suspect-bar guard — /api/system/freshness bar_quality section
+  // (gold.v_us_equity_bar_quality, qr_etl). Polled alongside data sources.
+  const barQ = useBarQuality();
+  const bqView = barQualityView(barQ.loaded, barQ.bq);
 
   useEffect(() => {
     fetchSettings();
@@ -710,6 +715,72 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
               </div>
             </div>
           )}
+
+          {/* US Equity Bar Quality (gold.v_us_equity_bar_quality, qr_etl).
+              YELLOW = soft warning (self-heal possible), never a hard
+              failure. null/missing view → UNKNOWN, never rendered GREEN. */}
+          <div className="qr-surface p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                US Equity Bar Quality
+              </h3>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-bold bg-white/[0.06] ${bqView.badgeCl}`}
+                title={bqView.tip}
+              >
+                {bqView.level === 'PENDING' ? '…' : bqView.level}
+              </span>
+            </div>
+            {bqView.level === 'PENDING' && (
+              <div className="text-[11px] text-slate-600">
+                Probe pending — /api/system/freshness has not answered yet.
+              </div>
+            )}
+            {bqView.level === 'UNKNOWN' && (
+              <div className="text-[11px] text-slate-500">
+                gold.v_us_equity_bar_quality is missing — bar quality cannot be
+                determined. Owner: qr_etl (migration
+                2026-08-24_us_equity_bar_quality.sql).
+              </div>
+            )}
+            {(bqView.level === 'GREEN' || bqView.level === 'YELLOW') && barQ.bq && (
+              <div className="space-y-2 text-xs">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <div className="text-[10px] text-slate-500 uppercase">Latest suspect</div>
+                    <div className="text-slate-300 font-mono">{barQ.bq.latest_suspect_date || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 uppercase">Suspect rows (30d)</div>
+                    <div className="text-slate-300 font-mono">{barQ.bq.recent_30d_rows ?? 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 uppercase">Gold / quarantined (30d)</div>
+                    <div className="text-slate-300 font-mono">
+                      {barQ.bq.recent_30d_gold_rows ?? 0} / {barQ.bq.recent_30d_quarantined_rows ?? 0}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 uppercase">All-time rows</div>
+                    <div className="text-slate-300 font-mono">{barQ.bq.total_rows ?? 0}</div>
+                  </div>
+                </div>
+                {(barQ.bq.recent_30d_tickers || []).length > 0 && (
+                  <div className="text-[11px] text-slate-400">
+                    Blocking tickers (30d):{' '}
+                    <span className="text-slate-200 font-mono">{barQ.bq.recent_30d_tickers.join(', ')}</span>
+                    {' '}· {barQ.bq.distinct_tickers ?? 0} tickers all-time
+                  </div>
+                )}
+                <div className="text-[10px] text-slate-600">
+                  {bqView.level === 'YELLOW'
+                    ? 'Soft warning — unresolved Yahoo synthetic zero-volume flat-bar suspects in the last 30d; episodes can self-heal as Yahoo backfills real bars (EA 2026-08-05..10 did). Quarantined rows live in bronze.yf_suspect_bars.'
+                    : 'No unresolved Yahoo suspect bars in the last 30d.'}
+                  {' '}Source: gold.v_us_equity_bar_quality (qr_etl).
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Data Source Legend */}
           <div className="p-4 qr-surface">
