@@ -28,7 +28,9 @@ def _now_iso():
 def get_dashboard_indices(regions: str = "US,HK", db: Session = Depends(get_db)):
     region_list = [r.strip() for r in regions.split(",") if r.strip()]
     rows = safe_query(db, """
-        SELECT sym, name, region, last, change_pct, spark
+        SELECT sym, name, region, last, change_pct,
+               change_1d, change_1w, change_1m, change_ytd,
+               est_1d, est_1w, est_1m, spark
         FROM consumption.dashboard_indices
         WHERE region = ANY(:regions) ORDER BY region, sym
     """, {"regions": region_list}, label="markets_indices")
@@ -36,6 +38,13 @@ def get_dashboard_indices(regions: str = "US,HK", db: Session = Depends(get_db))
         "sym": r.sym, "name": r.name, "region": r.region,
         "last": float(r.last) if r.last is not None else None,
         "change_pct": float(r.change_pct) if r.change_pct is not None else None,
+        "change_1d": float(r.change_1d) if r.change_1d is not None else None,
+        "change_1w": float(r.change_1w) if r.change_1w is not None else None,
+        "change_1m": float(r.change_1m) if r.change_1m is not None else None,
+        "change_ytd": float(r.change_ytd) if r.change_ytd is not None else None,
+        "est_1d": r.est_1d,
+        "est_1w": r.est_1w,
+        "est_1m": r.est_1m,
         "spark": list(r.spark) if r.spark is not None else [],
     } for r in rows]
     return {"data": data, "as_of": _now_iso() if data else None}
@@ -106,9 +115,7 @@ def get_market_sentiment_v2(regions: str = "US,HK", db: Session = Depends(get_db
 
     # Fallback: keep legacy flat keys for backwards compatibility if only one region present.
     if len(data) == 1:
-        solo = next(iter(data.values()))
-        solo.update(data)
-        return solo
+        return next(iter(data.values()))
     return data
 
 

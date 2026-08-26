@@ -16,8 +16,8 @@ router = APIRouter(prefix="/api/execution", tags=["execution"])
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
-# Cache for IBKR account balance (5 min TTL)
-_ibkr_balance_cache = {"data": None, "timestamp": None}
+# Cache for IBKR account balance (5 min TTL), keyed per session
+_ibkr_balance_cache: dict = {"data": None, "timestamp": None, "session": None}
 
 
 @router.get("/global-mode")
@@ -44,25 +44,34 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
 
     response = {
         "execution_mode": current_mode,
-        "available_modes": ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"],
-        "risk_level": {"SIMULATION": "ZERO", "PAPER_TRADING": "LOW", "LIVE_TRADING": "HIGH"}.get(current_mode, "UNKNOWN"),
+        "available_modes": ["SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"],
+        "risk_level": {"SIMULATION": "ZERO", "PAPER_TRADING": "LOW", "PAPER_UAT": "LOW", "LIVE_TRADING": "HIGH"}.get(current_mode, "UNKNOWN"),
         "simulation_capital": sim_amount, "simulation_used": sim_used,
         "simulation_available": sim_amount - sim_used, "simulation_positions": sim_positions,
     }
 
-    # IBKR balance for paper/live modes
-    if current_mode in ["PAPER_TRADING", "LIVE_TRADING"]:
+    # IBKR balance for broker-backed modes.
+    # PAPER_UAT reads the dedicated UAT paper session; PAPER_TRADING /
+    # LIVE_TRADING read the primary session (existing behaviour).
+    if current_mode in ["PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"]:
         try:
-            from app.services.ib_service import ib_quant_service
+            if current_mode == "PAPER_UAT":
+                from app.services.ib_service import ib_uat_service as _svc
+                session_name = "uat"
+            else:
+                from app.services.ib_service import ib_quant_service as _svc
+                session_name = "primary"
             now = time.time()
-            if _ibkr_balance_cache["data"] and _ibkr_balance_cache["timestamp"] and (now - _ibkr_balance_cache["timestamp"]) < 300:
+            if (_ibkr_balance_cache["data"] and _ibkr_balance_cache["timestamp"]
+                    and (now - _ibkr_balance_cache["timestamp"]) < 300
+                    and _ibkr_balance_cache.get("session") == session_name):
                 response.update(_ibkr_balance_cache["data"])
                 response["cached"] = True
             else:
                 try:
-                    tws_status = ib_quant_service.get_status()
+                    tws_status = _svc.get_status()
                     if tws_status.get("is_connected"):
-                        account_info = ib_quant_service.get_account_summary()
+                        account_info = _svc.get_account_summary()
                         if account_info:
                             is_hkd = account_info.get("currency") == "HKD" or account_info.get("cash_hkd", 0) > 0
                             if is_hkd:
@@ -72,7 +81,8 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                                     "net_liquidation": account_info.get("net_liquidation_hkd", 0) or account_info.get("net_liquidation", 0),
                                     "buying_power": account_info.get("buying_power_hkd", 0) or account_info.get("buying_power", 0),
                                     "account": account_info.get("account", "Unknown"),
-                                    "account_type": "PAPER" if current_mode == "PAPER_TRADING" else "LIVE",
+                                    "account_type": "LIVE" if current_mode == "LIVE_TRADING" else "PAPER",
+                                    "session": session_name,
                                 }
                             else:
                                 ibkr_data = {
@@ -81,21 +91,26 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                                     "net_liquidation": account_info.get("net_liquidation", 0),
                                     "buying_power": account_info.get("buying_power", 0),
                                     "account": account_info.get("account", "Unknown"),
-                                    "account_type": "PAPER" if current_mode == "PAPER_TRADING" else "LIVE",
+                                    "account_type": "LIVE" if current_mode == "LIVE_TRADING" else "PAPER",
+                                    "session": session_name,
                                 }
                             _ibkr_balance_cache["data"] = ibkr_data
                             _ibkr_balance_cache["timestamp"] = now
+                            _ibkr_balance_cache["session"] = session_name
                             response.update(ibkr_data)
                             response["cached"] = False
                         else:
                             response["ibkr_connected"] = True
+                            response["session"] = session_name
                             response["warning"] = "Connected but could not fetch account details"
                     else:
                         response["ibkr_connected"] = False
-                        response["warning"] = "TWS not connected"
+                        response["session"] = session_name
+                        response["warning"] = "TWS not connected" if session_name == "primary" else "UAT paper session not connected"
                 except Exception as ibkr_err:
                     response["ibkr_connected"] = False
-                    response["warning"] = f"IBKR check failed: {ibkr_err}"
+                    response["session"] = session_name
+                    response["warning"] = f"IBKR check failed ({session_name} session): {ibkr_err}"
         except Exception:
             response["ibkr_connected"] = False
 
@@ -107,7 +122,7 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
     mode = payload.get("execution_mode", "SIMULATION")
     sim_capital = payload.get("simulation_capital")
 
-    if mode not in ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"]:
+    if mode not in ["SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"]:
         raise HTTPException(status_code=400, detail="Invalid mode")
 
     db.execute(text("""
@@ -277,7 +292,13 @@ def get_execution_fills(db: Session = Depends(get_db)):
 
 @router.get("/gateway")
 def get_execution_gateway(db: Session = Depends(get_db)):
-    """IBKR Gateway panel — connection state, latency, account, plus the current global_mode."""
+    """IBKR Gateway panel — connection state, latency, account, plus the current global_mode.
+
+    Per-session truth: top-level fields stay the primary session (backwards
+    compatible); `sessions` carries one entry per gateway session (primary, uat)
+    combining the DB heartbeat (consumption.ib_gateway_state_sessions) with the
+    backend's live in-process session state.
+    """
     mode_result = db.execute(text(
         "SELECT value FROM gold.platform_settings WHERE key = 'global_execution_mode'"
     )).fetchone()
@@ -287,15 +308,60 @@ def get_execution_gateway(db: Session = Depends(get_db)):
         SELECT connected, host, port, latency_ms, account, last_heartbeat
         FROM consumption.ib_gateway_state LIMIT 1
     """, label="execution_gateway")
-    if not row_list:
-        return {"connected": None, "host": None, "port": None, "latency_ms": None,
-                "account": None, "last_heartbeat": None, "global_mode": global_mode}
-    r = row_list[0]
+    primary = {"connected": None, "host": None, "port": None, "latency_ms": None,
+               "account": None, "last_heartbeat": None}
+    if row_list:
+        r = row_list[0]
+        primary = {
+            "connected": r.connected, "host": r.host, "port": r.port,
+            "latency_ms": r.latency_ms, "account": r.account,
+            "last_heartbeat": r.last_heartbeat.isoformat() if r.last_heartbeat else None,
+        }
+
+    # Per-session DB heartbeat rows (primary + uat)
+    sessions = {"primary": dict(primary)}
+    session_rows = safe_query(db, """
+        SELECT session, connected, host, port, latency_ms, account, last_heartbeat
+        FROM consumption.ib_gateway_state_sessions
+    """, label="execution_gateway_sessions")
+    for r in session_rows:
+        sessions[r.session] = {
+            "connected": r.connected, "host": r.host, "port": r.port,
+            "latency_ms": r.latency_ms, "account": r.account,
+            "last_heartbeat": r.last_heartbeat.isoformat() if r.last_heartbeat else None,
+        }
+
+    # Live in-process truth per session (no side effects — never starts threads)
+    live_state = {}
+    try:
+        from app.services.ib_service import ib_quant_service
+        live_state["primary"] = {
+            "connected": ib_quant_service.is_connected,
+            "host": ib_quant_service.host, "port": ib_quant_service.port,
+            "client_id": ib_quant_service.client_id,
+            "account": ib_quant_service.account,
+        }
+    except Exception as e:
+        live_state["primary"] = {"connected": None, "error": str(e)}
+    try:
+        from app.services.ib_service import ib_uat_service
+        live_state["uat"] = {
+            "connected": ib_uat_service.is_connected,
+            "host": ib_uat_service.host, "port": ib_uat_service.port,
+            "client_id": ib_uat_service.client_id,
+            "account": ib_uat_service.account,
+        }
+    except Exception as e:
+        live_state["uat"] = {"connected": None, "error": str(e)}
+
+    for name, state in live_state.items():
+        sessions.setdefault(name, {})
+        sessions[name]["live"] = state
+
     return {
-        "connected": r.connected, "host": r.host, "port": r.port,
-        "latency_ms": r.latency_ms, "account": r.account,
-        "last_heartbeat": r.last_heartbeat.isoformat() if r.last_heartbeat else None,
+        **primary,
         "global_mode": global_mode,
+        "sessions": sessions,
     }
 
 

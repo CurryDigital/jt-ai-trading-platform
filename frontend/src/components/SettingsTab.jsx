@@ -18,7 +18,6 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   });
   const [riskConfig, setRiskConfig] = useState({ max_drawdown: '15', min_sharpe_oos: '0.8', high_turnover: '500', low_trade_count: '20' });
   const [notifConfig, setNotifConfig] = useState({ telegram_token: '', telegram_chat_id: '', fills: true, demotes: true, stalls: true, promotions: false });
-  const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
@@ -34,7 +33,6 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   useEffect(() => {
     fetchSettings();
     fetchSyncStatus();
-    fetchExecutionMode();
     fetchDataSources();
     const id = setInterval(() => {
       setClocks(marketClock());
@@ -73,16 +71,6 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
         setSyncStatus(data);
       }
     } catch (e) { console.error('Failed to fetch sync status:', e); }
-  };
-
-  const fetchExecutionMode = async () => {
-    try {
-      const res = await fetch('/api/execution/global-mode');
-      if (res.ok) {
-        const data = await res.json();
-        setExecutionMode(data.execution_mode);
-      }
-    } catch (e) { console.error('Failed to fetch execution mode:', e); }
   };
 
   const fetchDataSources = async () => {
@@ -201,29 +189,17 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
       {/* TRADING CONFIGURATION */}
       {activeSection === 'trading' && (
         <div className="space-y-4">
-          {/* Execution Mode Warning */}
-          <div className={`p-4 rounded-xl border ${
-            executionMode === 'LIVE_TRADING' 
-              ? 'bg-rose-500/10 border-rose-500/30' :
-            executionMode === 'PAPER_TRADING'
-              ? 'bg-amber-500/10 border-amber-500/30'
-              : 'bg-emerald-500/10 border-emerald-500/30'
-          }`}>
+          {/* 4-book model — no global execution mode */}
+          <div className="p-4 rounded-xl border bg-slate-500/10 border-slate-500/30">
             <div className="flex items-center gap-3">
-              <span className="text-2xl">
-                {executionMode === 'LIVE_TRADING' ? '💰' : 
-                 executionMode === 'PAPER_TRADING' ? '📝' : '🧪'}
-              </span>
+              <span className="text-2xl">📚</span>
               <div>
                 <h3 className="text-sm font-bold text-white">
-                  Current Mode: {executionMode.replaceAll('_', ' ')}
+                  Per-book execution — no global mode
                 </h3>
                 <p className="text-xs text-slate-400">
-                  {executionMode === 'LIVE_TRADING' 
-                    ? '⚠️ WARNING: Real money at risk! All trades will execute on live IBKR account.' :
-                   executionMode === 'PAPER_TRADING'
-                    ? 'Trades execute on IBKR paper account for testing.'
-                    : 'Trades are simulated only - no real orders placed.'}
+                  Each strategy carries its own book: SIM → PAPER → PAPER UAT (IBKR paper session) → LIVE.
+                  Promote/demote from the Strategies pipeline; the Execution tab shows each book separately.
                 </p>
               </div>
             </div>

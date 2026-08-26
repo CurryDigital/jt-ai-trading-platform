@@ -496,6 +496,7 @@ def create_agent_event(
 
 # ── GET /api/paper/system-status ─────────────────────────────────────────
 
+@router.get("/agents/paper/system-status")
 @router.get("/paper/system-status")
 def get_paper_system_status(db: Session = Depends(get_db)):
     """Section A status bar — regime, last run, NAV."""
@@ -524,29 +525,40 @@ def get_paper_system_status(db: Session = Depends(get_db)):
 
 # ── GET /api/paper/open-positions ────────────────────────────────────────
 
+@router.get("/agents/paper/open-positions")
 @router.get("/paper/open-positions")
 def get_paper_open_positions(db: Session = Depends(get_db)):
     """Section B — current open positions with unrealised PnL."""
     try:
-        rows = db.execute(text("SELECT * FROM gold.v_paper_open_positions")).fetchall()
+        rows = db.execute(text("SELECT * FROM gold.v_paper_open_positions")).mappings().fetchall()
         positions = []
         for r in rows:
+            entry_date = r.get("entry_date")
+            size = r.get("size")
+            n_shares = r.get("n_shares")
+            days_held = r.get("days_held")
+            pnl_usd = r.get("unrealised_pnl_usd")
+            pnl_pct = r.get("unrealised_pnl_pct")
             positions.append({
-                "id": str(r.id),
-                "strategy_id": r.strategy_id,
-                "instrument": r.instrument,
-                "ticker": r.ticker,
-                "direction": r.direction,
-                "contracts": float(r.contracts) if r.contracts else None,
-                "shares": float(r.shares) if r.shares else None,
-                "entry_price": float(r.entry_price) if r.entry_price else None,
-                "current_price": float(r.current_price) if r.current_price else None,
-                "unrealised_pnl": float(r.unrealised_pnl) if r.unrealised_pnl else None,
-                "regime_at_entry": r.regime_at_entry,
-                "ic_at_entry": float(r.ic_at_entry) if r.ic_at_entry else None,
-                "confidence_at_entry": float(r.confidence_at_entry) if r.confidence_at_entry else None,
-                "opened_at": r.opened_at.isoformat() if r.opened_at else None,
-                "hold_duration": str(r.hold_duration) if r.hold_duration else None,
+                # view has no id column — synthesize a stable key
+                "id": f"{r.get('strategy_id')}:{r.get('ticker')}:{entry_date}",
+                "strategy_id": r.get("strategy_id"),
+                "instrument": r.get("instrument"),
+                "ticker": r.get("ticker"),
+                "direction": r.get("direction"),
+                "contracts": float(size) if size is not None else None,
+                "shares": float(n_shares) if n_shares is not None else None,
+                "entry_price": float(r["entry_price"]) if r.get("entry_price") is not None else None,
+                "current_price": float(r["current_price"]) if r.get("current_price") is not None else None,
+                "unrealised_pnl": float(pnl_usd) if pnl_usd is not None else None,
+                "unrealised_pnl_pct": float(pnl_pct) if pnl_pct is not None else None,
+                # view carries no regime/ic/confidence at entry — leave null, never fake
+                "regime_at_entry": None,
+                "ic_at_entry": None,
+                "confidence_at_entry": None,
+                "opened_at": entry_date.isoformat() if entry_date else None,
+                "hold_duration": f"{days_held} days" if days_held is not None else None,
+                "price_as_of": r["price_as_of"].isoformat() if r.get("price_as_of") else None,
             })
         return {"positions": positions, "count": len(positions)}
     except Exception as e:
@@ -554,8 +566,135 @@ def get_paper_open_positions(db: Session = Depends(get_db)):
         return {"positions": [], "count": 0, "error": str(e)}
 
 
+# ── POST /api/paper/close-position ───────────────────────────────────────
+
+class ClosePositionRequest(BaseModel):
+    # synthesized id returned by GET /paper/open-positions: "<strategy_id>:<ticker>:<entry_date>"
+    position_id: Optional[str] = None
+    strategy_id: Optional[str] = None
+    ticker: Optional[str] = None
+
+
+@router.post("/agents/paper/close-position")
+@router.post("/paper/close-position")
+def close_paper_position(payload: ClosePositionRequest, db: Session = Depends(get_db)):
+    """Close an open paper position at the latest available mark.
+
+    Writes the closing update to the canonical simulated paper ledger
+    gold.paper_trades_synthetic (the table behind gold.v_paper_open_positions).
+    The legacy gold.paper_trades ledger is orphaned — never written here.
+    """
+    strategy_id = payload.strategy_id
+    ticker = payload.ticker
+    entry_date = None
+
+    if payload.position_id:
+        parts = payload.position_id.rsplit(":", 2)
+        if len(parts) != 3 or not all(parts):
+            raise HTTPException(
+                status_code=400,
+                detail="position_id must be '<strategy_id>:<ticker>:<entry_date>'",
+            )
+        strategy_id, ticker, entry_date = parts[0], parts[1], parts[2]
+
+    if not strategy_id or not ticker:
+        raise HTTPException(status_code=400, detail="Provide position_id or both strategy_id and ticker")
+
+    try:
+        # Locate open ledger row(s). Partial unique index guarantees at most one
+        # open row per (strategy_id, ticker); entry_date is extra precision.
+        sql = """
+            SELECT id, strategy_id, ticker, direction, entry_date, entry_price, n_shares
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :strategy_id AND ticker = :ticker AND status = 'open'
+        """
+        params = {"strategy_id": strategy_id, "ticker": ticker}
+        if entry_date:
+            sql += " AND entry_date = :entry_date"
+            params["entry_date"] = entry_date
+        rows = db.execute(text(sql), params).mappings().fetchall()
+
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No open paper position for {strategy_id}:{ticker}"
+                       + (f":{entry_date}" if entry_date else ""),
+            )
+
+        # Latest mark: silver.unified_prices (same source as the view), fallback gold.daily_ohlcv
+        mark = db.execute(text("""
+            SELECT close, date FROM silver.unified_prices
+            WHERE ticker = :ticker AND close IS NOT NULL
+            ORDER BY date DESC LIMIT 1
+        """), {"ticker": ticker}).fetchone()
+        price_source = "silver.unified_prices"
+        if not mark:
+            mark = db.execute(text("""
+                SELECT close, date FROM gold.daily_ohlcv
+                WHERE ticker = :ticker AND close IS NOT NULL
+                ORDER BY date DESC LIMIT 1
+            """), {"ticker": ticker}).fetchone()
+            price_source = "gold.daily_ohlcv"
+        if not mark:
+            raise HTTPException(
+                status_code=422,
+                detail=f"No price available for {ticker}; refusing to close unmarked",
+            )
+
+        closing_price = float(mark.close)
+        price_date = mark.date
+
+        total_pnl = 0.0
+        for r in rows:
+            direction = (r["direction"] or "LONG").lower()
+            sign = -1 if direction == "short" else 1
+            entry_price = float(r["entry_price"]) if r["entry_price"] is not None else None
+            n_shares = float(r["n_shares"]) if r["n_shares"] is not None else 0.0
+            pnl = sign * (closing_price - entry_price) * n_shares if entry_price is not None else None
+            pnl_pct = (sign * (closing_price - entry_price) / entry_price * 100) if entry_price else None
+            db.execute(text("""
+                UPDATE gold.paper_trades_synthetic
+                SET status = 'closed',
+                    exit_date = CURRENT_DATE,
+                    exit_price = :exit_price,
+                    exit_price_source_date = :price_date,
+                    exit_price_basis = 'MANUAL_CLOSE',
+                    pnl = :pnl,
+                    pnl_pct = :pnl_pct,
+                    updated_at = NOW()
+                WHERE id = :id AND status = 'open'
+            """), {
+                "exit_price": closing_price,
+                "price_date": price_date,
+                "pnl": pnl,
+                "pnl_pct": pnl_pct,
+                "id": r["id"],
+            })
+            total_pnl += pnl or 0.0
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Paper close-position error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to close position: {e}")
+
+    resolved_entry = entry_date or (rows[0]["entry_date"].isoformat() if rows[0]["entry_date"] else None)
+    return {
+        "success": True,
+        "position_id": f"{strategy_id}:{ticker}:{resolved_entry}",
+        "closing_price": closing_price,
+        "price_as_of": price_date.isoformat() if price_date else None,
+        "price_source": price_source,
+        "realized_pnl": round(total_pnl, 2),
+        "positions_closed": len(rows),
+    }
+
+
 # ── GET /api/paper/daily-runs ────────────────────────────────────────────
 
+@router.get("/agents/paper/daily-runs")
 @router.get("/paper/daily-runs")
 def get_paper_daily_runs(db: Session = Depends(get_db)):
     """Section C — today's run cards."""
@@ -583,6 +722,7 @@ def get_paper_daily_runs(db: Session = Depends(get_db)):
 
 # ── GET /api/paper/trade-history ─────────────────────────────────────────
 
+@router.get("/agents/paper/trade-history")
 @router.get("/paper/trade-history")
 def get_paper_trade_history(
     limit: int = Query(50, ge=1, le=500),
@@ -622,6 +762,7 @@ def get_paper_trade_history(
 
 # ── GET /api/paper/trade-summary ─────────────────────────────────────────
 
+@router.get("/agents/paper/trade-summary")
 @router.get("/paper/trade-summary")
 def get_paper_trade_summary(db: Session = Depends(get_db)):
     """Summary row above trade history."""
@@ -676,6 +817,7 @@ def get_paper_strategy_book(db: Session = Depends(get_db)):
 
 # ── GET /api/paper/agent-activity ────────────────────────────────────────
 
+@router.get("/agents/paper/agent-activity")
 @router.get("/paper/agent-activity")
 def get_paper_agent_activity(
     limit: int = Query(50, ge=1, le=200),
@@ -706,6 +848,7 @@ def get_paper_agent_activity(
 
 # ── GET /api/paper/upcoming-events ───────────────────────────────────────
 
+@router.get("/agents/paper/upcoming-events")
 @router.get("/paper/upcoming-events")
 def get_paper_upcoming_events(db: Session = Depends(get_db)):
     """Section C — earnings + macro calendar."""
@@ -792,6 +935,7 @@ def get_agents_paper_strategy_book_extended(db: Session = Depends(get_db)):
 
 # ── GET /api/paper/gateway-status ────────────────────────────────────────
 
+@router.get("/agents/paper/gateway-status")
 @router.get("/paper/gateway-status")
 def get_paper_gateway_status():
     """IBKR gateway connection check."""
@@ -815,6 +959,7 @@ def get_paper_gateway_status():
 
 # ── GET /api/agents/paper/signal-proximity ───────────────────────────────
 
+@router.get("/agents/paper/signal-proximity")
 @router.get("/paper/signal-proximity")
 def get_paper_signal_proximity(db: Session = Depends(get_db)):
     """Signal proximity to threshold — ordered by distance_pct DESC."""
@@ -848,6 +993,7 @@ def get_paper_signal_proximity(db: Session = Depends(get_db)):
 
 # ── GET /api/agents/paper/open-positions-pnl ─────────────────────────────
 
+@router.get("/agents/paper/open-positions-pnl")
 @router.get("/paper/open-positions-pnl")
 def get_paper_open_positions_pnl(db: Session = Depends(get_db)):
     """Open positions with unrealised PnL from gold.v_paper_open_positions."""
@@ -881,6 +1027,7 @@ def get_paper_open_positions_pnl(db: Session = Depends(get_db)):
 
 # ── GET /api/paper/cron-status ───────────────────────────────────────────
 
+@router.get("/agents/paper/cron-status")
 @router.get("/paper/cron-status")
 def get_paper_cron_status():
     """Hermes cron job status — parsed from `hermes cron list`."""

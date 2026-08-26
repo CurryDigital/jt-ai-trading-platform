@@ -10,12 +10,20 @@ const fmtRule = (id, v) => {
 
 export const RiskWatchPanel = ({ strategyId, executionMode, onDemoted }) => {
   const [status, setStatus] = useState(null);
+  const [error, setError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const res = await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/risk-status`);
-    if (res) setStatus(res);
+    setError(false);
+    const res = await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/risk-status?t=${Date.now()}`);
+    if (res) {
+      setStatus(res);
+      setError(false);
+    } else {
+      setError(true);
+      setStatus(null);
+    }
     setRefreshedAt(new Date().toISOString());
   };
 
@@ -27,14 +35,32 @@ export const RiskWatchPanel = ({ strategyId, executionMode, onDemoted }) => {
 
   const forceCheck = async () => {
     setBusy(true);
+    setError(false);
     const res = await api.post(`/api/strategies/${encodeURIComponent(strategyId)}/auto-demote-check`, {});
     setBusy(false);
     if (res?.demoted) onDemoted?.();
     if (res) {
       setStatus(res);
-      setRefreshedAt(new Date().toISOString());
+      setError(false);
+    } else {
+      setStatus(null);
+      setError(true);
     }
+    setRefreshedAt(new Date().toISOString());
   };
+
+  if (error) {
+    return (
+      <div className="qr-surface px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-[11px] text-rose-300">
+            ⚠ Risk status unavailable · endpoint returned an error.
+          </div>
+          <button onClick={load} className="qr-btn-ghost">↻ Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!status) {
     return (

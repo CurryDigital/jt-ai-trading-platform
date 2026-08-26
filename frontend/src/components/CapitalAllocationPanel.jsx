@@ -3,7 +3,7 @@ import { api, fmtK } from '../utils';
 
 const PRESETS = [25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
 
-export const CapitalAllocationPanel = ({ strategyId, executionMode }) => {
+export const CapitalAllocationPanel = ({ strategyId, executionMode, activeSignalCount }) => {
   const [pool, setPool] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(0);
@@ -53,6 +53,13 @@ export const CapitalAllocationPanel = ({ strategyId, executionMode }) => {
   const usagePct = pool.usage_pct || 0;
   const usageColor = usagePct > 90 ? 'bg-rose-500' : usagePct > 70 ? 'bg-amber-500' : 'bg-emerald-500';
 
+  // The backend pool counts cash-booking slots; the allocation tab counts actual
+  // active BUY signals. Prefer the live signal count so the two panels agree.
+  const activePositions = activeSignalCount != null ? activeSignalCount : pool.active_positions;
+  const maxPositions = activeSignalCount != null
+    ? Math.max(activeSignalCount, pool.max_positions)
+    : pool.max_positions;
+
   return (
     <div className="qr-surface overflow-hidden">
       <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between flex-wrap gap-2">
@@ -91,9 +98,9 @@ export const CapitalAllocationPanel = ({ strategyId, executionMode }) => {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           <Metric label="Pool Size" value={fmtK(pool.total_assigned)} sub="assigned" />
           <Metric label="Used"      value={fmtK(pool.used)}           sub={`${usagePct.toFixed(1)}%`} valClass={usagePct > 90 ? 'qr-pnl-neg' : 'text-slate-200'} />
-          <Metric label="Available" value={fmtK(pool.available)}      sub={pool.can_trade ? 'can trade' : 'pool exhausted'} valClass={pool.can_trade ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
-          <Metric label="Per Trade" value={fmtK(pool.trade_size)}     sub="25% of pool" />
-          <Metric label="Positions" value={`${pool.active_positions}/${pool.max_positions}`} sub="active" />
+          <Metric label="Available" value={fmtK(pool.available)}      sub={pool.can_trade ? 'can trade' : 'below 1 slot'} valClass={pool.can_trade ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
+          <Metric label="Slot Capital" value={fmtK(pool.trade_size)}  sub={pool.slot_pct != null ? `${(pool.slot_pct * 100).toFixed(0)}% of pool · 1/${pool.max_positions} slots` : 'per position'} />
+          <Metric label="Positions" value={`${activePositions}/${maxPositions}`} sub="active" />
         </div>
 
         {/* Usage bar */}
@@ -119,7 +126,7 @@ export const CapitalAllocationPanel = ({ strategyId, executionMode }) => {
                 className="px-2 py-1 bg-slate-900/60 border border-white/[0.08] rounded-md text-[12px] text-white w-32 focus:outline-none focus:border-blue-500/50 font-mono"
               />
               <span className="text-[10px] text-slate-500">USD</span>
-              <span className="text-[10px] text-slate-600 ml-2">→ {fmtK(draft * 0.25)} per trade × {pool.max_positions} max</span>
+              <span className="text-[10px] text-slate-600 ml-2">→ {fmtK(draft / Math.max(1, maxPositions))} per slot × {maxPositions} slots</span>
             </div>
             <div className="flex flex-wrap gap-1">
               {PRESETS.map(p => (

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { GlobalExecutionToggle } from './components/GlobalExecutionToggle';
 import { LoginPage } from './components/LoginPage';
-import { ManualTicket } from './components/ManualTicket';
+import { ExecScaffold, ExecStat, ExecTabs } from './components/execution/ExecScaffold';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, getToken, setToken, clearToken, onUnauthorized } from './utils';
@@ -10,20 +9,50 @@ import { FR, FR_NAME, classifySource, useFreshness, fmtAgeSec } from './freshnes
 
 // Tab-level code splitting: each view loads on first visit instead of shipping
 // one ~470kB monolith on initial paint. Vite emits a chunk per component.
-const CommandCenter = lazy(() => import('./components/CommandCenter').then(m => ({ default: m.CommandCenter })));
-const SettingsTab = lazy(() => import('./components/SettingsTab').then(m => ({ default: m.SettingsTab })));
-const StrategyLab = lazy(() => import('./components/StrategyLab').then(m => ({ default: m.StrategyLab })));
-const ResearchTab = lazy(() => import('./components/ResearchTab').then(m => ({ default: m.ResearchTab })));
-const StrategyDetail = lazy(() => import('./components/StrategyDetail').then(m => ({ default: m.StrategyDetail })));
-const StrategyPerformance = lazy(() => import('./components/StrategyPerformance').then(m => ({ default: m.StrategyPerformance })));
-const StrategyCompare = lazy(() => import('./components/StrategyCompare').then(m => ({ default: m.StrategyCompare })));
-const LiveOpsPanel = lazy(() => import('./components/LiveOpsPanel').then(m => ({ default: m.LiveOpsPanel })));
-const PaperStrategiesPage = lazy(() => import('./components/PaperStrategiesPage'));
-const SignalsTab = lazy(() => import('./components/SignalsTab').then(m => ({ default: m.SignalsTab })));
-const MacroTab = lazy(() => import('./components/MacroTab').then(m => ({ default: m.MacroTab })));
-const AnalyticsTab = lazy(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })));
-const StrategiesWorkspace = lazy(() => import('./components/StrategiesWorkspace').then(m => ({ default: m.StrategiesWorkspace })));
-const GoldenStrategies = lazy(() => import('./components/GoldenStrategies').then(m => ({ default: m.GoldenStrategies })));
+//
+// lazyRetry: deploys replace hashed chunks (rsync --delete), so an app shell
+// opened before a deploy can request a chunk that no longer exists — the
+// dynamic import rejects and, with no error boundary, the page went BLANK
+// (reported 2026-08-18: Lab → strategy Detail ↗). On import failure, force
+// one full reload to fetch the fresh index + chunks; if the chunk still fails
+// after that reload, render an explicit error box instead of a white screen.
+const lazyRetry = (factory, name) => lazy(async () => {
+  try {
+    return await factory();
+  } catch (err) {
+    const key = `lazy-retry:${name}`;
+    if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, '1');
+      window.location.reload();
+      return new Promise(() => {}); // suspend; the reload replaces the page
+    }
+    console.error(`[lazyRetry] chunk ${name} failed to load after reload`, err);
+    return {
+      default: () => (
+        <div className="qr-surface px-3 py-8 text-center text-[11px] text-slate-500">
+          This view failed to load — the app was updated while it was open.{' '}
+          <button onClick={() => window.location.reload()} className="text-blue-400 hover:text-blue-300 font-bold">Refresh</button>
+        </div>
+      ),
+    };
+  }
+});
+
+const CommandCenter = lazyRetry(() => import('./components/CommandCenter').then(m => ({ default: m.CommandCenter })), 'CommandCenter');
+const SettingsTab = lazyRetry(() => import('./components/SettingsTab').then(m => ({ default: m.SettingsTab })), 'SettingsTab');
+const StrategyLab = lazyRetry(() => import('./components/StrategyLab').then(m => ({ default: m.StrategyLab })), 'StrategyLab');
+const ResearchTab = lazyRetry(() => import('./components/ResearchTab').then(m => ({ default: m.ResearchTab })), 'ResearchTab');
+const StrategyDetail = lazyRetry(() => import('./components/StrategyDetail').then(m => ({ default: m.StrategyDetail })), 'StrategyDetail');
+const StrategyPerformance = lazyRetry(() => import('./components/StrategyPerformance').then(m => ({ default: m.StrategyPerformance })), 'StrategyPerformance');
+const StrategyCompare = lazyRetry(() => import('./components/StrategyCompare').then(m => ({ default: m.StrategyCompare })), 'StrategyCompare');
+const LiveOpsPanel = lazyRetry(() => import('./components/LiveOpsPanel').then(m => ({ default: m.LiveOpsPanel })), 'LiveOpsPanel');
+const PaperStrategiesPage = lazyRetry(() => import('./components/PaperStrategiesPage'), 'PaperStrategiesPage');
+const PaperUatPanel = lazyRetry(() => import('./components/execution/PaperUatPanel').then(m => ({ default: m.PaperUatPanel })), 'PaperUatPanel');
+const SignalsTab = lazyRetry(() => import('./components/SignalsTab').then(m => ({ default: m.SignalsTab })), 'SignalsTab');
+const MacroTab = lazyRetry(() => import('./components/MacroTab').then(m => ({ default: m.MacroTab })), 'MacroTab');
+const AnalyticsTab = lazyRetry(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })), 'AnalyticsTab');
+const NewsTab = lazyRetry(() => import('./components/NewsTab').then(m => ({ default: m.NewsTab })), 'NewsTab');
+const StrategiesWorkspace = lazyRetry(() => import('./components/StrategiesWorkspace').then(m => ({ default: m.StrategiesWorkspace })), 'StrategiesWorkspace');
 
 const TabFallback = () => (
   <div className="qr-surface px-3 py-8 flex items-center justify-center gap-2 text-[11px] text-slate-500">
@@ -44,7 +73,6 @@ const Icon = {
   Markets: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>),
   Settings: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>),
   Strategies: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>),
-  Golden: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 3l4 1.5L12 3l3 1.5L19 3v18l-4-1.5L12 21l-3-1.5L5 21V3z" /></svg>),
 };
 
 // =================================================================
@@ -122,20 +150,16 @@ const FeedHealth = () => {
   );
 };
 
-const WorkspaceRibbon = ({ summary, dailyPnl, latencyMs, mode, healthOk, onModeChange, onHalt, wsConnected }) => {
-  const [modeOpen, setModeOpen] = useState(false);
+const WorkspaceRibbon = ({ summary, dailyPnl, latencyMs, healthOk, onHalt, wsConnected }) => {
   const [haltConfirm, setHaltConfirm] = useState(false);
   const [haltPhrase, setHaltPhrase] = useState('');
   const [haltBusy, setHaltBusy] = useState(false);
   const [haltResult, setHaltResult] = useState(null);
 
   const todayPnL = dailyPnl?.[0]?.pnl ?? null;
-  const winRate = (summary?.win_rate || 0) * 100;
-  const totalTrades = summary?.total_trades || 0;
-
-  const modeLabel = mode === 'LIVE_TRADING' ? 'LIVE' : mode === 'PAPER_TRADING' ? 'PAPER' : 'SIM';
-  const modeColor = mode === 'LIVE_TRADING' ? 'text-rose-400' : mode === 'PAPER_TRADING' ? 'text-amber-400' : 'text-blue-400';
-  const isLive = mode === 'LIVE_TRADING';
+  // null = unmeasured (backend returns null, never placeholder 0) -> render '—'
+  const winRate = summary?.win_rate != null ? summary.win_rate * 100 : null;
+  const totalTrades = summary?.total_trades ?? null;
 
   const doHalt = async () => {
     setHaltBusy(true);
@@ -149,12 +173,6 @@ const WorkspaceRibbon = ({ summary, dailyPnl, latencyMs, mode, healthOk, onModeC
     } else {
       setHaltResult({ ok: false, msg: 'Failed — check phrase or server' });
     }
-  };
-
-  const doModeChange = async (newMode) => {
-    setModeOpen(false);
-    const res = await api.post('/api/execution/global-mode', { execution_mode: newMode });
-    if (res) onModeChange?.(res.execution_mode || newMode);
   };
 
   return (
@@ -173,39 +191,10 @@ const WorkspaceRibbon = ({ summary, dailyPnl, latencyMs, mode, healthOk, onModeC
           </div>
         </div>
 
-        {/* Right: mode badge (dropdown) + kill switch + P&L */}
+        {/* Right: kill switch + P&L (no global MODE — every book carries its own mode) */}
         <div className="flex items-center h-full">
-          {/* Mode badge — dropdown */}
-          <div className="relative px-3 border-r border-white/[0.05]">
-            <button onClick={() => setModeOpen(o => !o)} className="flex items-baseline gap-1.5 group">
-              <span className="qr-label">MODE</span>
-              <span className={`qr-num text-[12px] font-bold ${modeColor}`}>{modeLabel}</span>
-              <span className="text-[8px] text-slate-600 group-hover:text-slate-400 transition-colors">▾</span>
-            </button>
-            {modeOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setModeOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-[#0e111a] border border-white/[0.08] rounded-lg shadow-xl py-1">
-                  {['SIMULATION', 'PAPER_TRADING', 'LIVE_TRADING'].map(m => (
-                    <button
-                      key={m}
-                      disabled={m === mode}
-                      onClick={() => doModeChange(m)}
-                      className={`w-full text-left px-3 py-1.5 text-[11px] font-semibold transition-colors flex items-center justify-between ${
-                        m === mode ? 'text-slate-600 cursor-default' : 'text-slate-300 hover:bg-white/[0.05] hover:text-white'
-                      }`}
-                    >
-                      <span>{m === 'LIVE_TRADING' ? 'LIVE' : m === 'PAPER_TRADING' ? 'PAPER' : 'SIM'}</span>
-                      {m === mode && <span className="text-[8px] text-slate-600">current</span>}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Kill switch — only visible in LIVE mode */}
-          {isLive && !haltConfirm && (
+          {/* Kill switch — always visible; demotes LIVE strategies per-strategy (typed phrase) */}
+          {!haltConfirm && (
             <div className="px-2 border-r border-white/[0.05]">
               <button
                 onClick={() => setHaltConfirm(true)}
@@ -217,8 +206,8 @@ const WorkspaceRibbon = ({ summary, dailyPnl, latencyMs, mode, healthOk, onModeC
           )}
 
           <RibbonCell label="P&L D" value={todayPnL != null ? fmtK(todayPnL) : '—'} valClass={todayPnL == null ? 'text-slate-500' : todayPnL >= 0 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
-          <RibbonCell label="WR"  value={`${winRate.toFixed(1)}%`} valClass={winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
-          <RibbonCell label="TR"  value={totalTrades} />
+          <RibbonCell label="WR"  value={winRate != null ? `${winRate.toFixed(1)}%` : '—'} valClass={winRate == null ? 'text-slate-500' : winRate >= 50 ? 'qr-pnl-pos' : 'qr-pnl-neg'} />
+          <RibbonCell label="TR"  value={totalTrades != null ? totalTrades : '—'} valClass={totalTrades == null ? 'text-slate-500' : 'text-slate-200'} />
           <FeedHealth />
         </div>
       </div>
@@ -285,29 +274,30 @@ const KPI = ({ l, v, sub, pos, hint }) => (
 );
 
 // Portfolio Component — Split by Asset Class
-// Asset-class accent colors (dot swatch), consistent with the redesign's
-// hex-accent pattern used across Research/Signals rather than emoji icons.
+// Neutral labels only (2026-08-26 unification): no per-class accent hues —
+// colour carries meaning only (signed P&L via pnlCl, side chips).
 const CLASS_META = {
-  STOCK:  { label: 'Stocks',  hex: '#3b82f6' },
-  FX:     { label: 'FX',      hex: '#10b981' },
-  CRYPTO: { label: 'Crypto',  hex: '#f59e0b' },
-  BOND:   { label: 'Bonds',   hex: '#64748b' },
-  ETF:    { label: 'ETFs',    hex: '#8b5cf6' },
-  OPTION: { label: 'Options', hex: '#f43f5e' },
-  FUTURE: { label: 'Futures', hex: '#f97316' },
-  CASH:   { label: 'Cash',    hex: '#10b981' },
-  OTHER:  { label: 'Other',   hex: '#64748b' },
+  STOCK:  { label: 'Stocks' },
+  FX:     { label: 'FX' },
+  CRYPTO: { label: 'Crypto' },
+  BOND:   { label: 'Bonds' },
+  ETF:    { label: 'ETFs' },
+  OPTION: { label: 'Options' },
+  FUTURE: { label: 'Futures' },
+  CASH:   { label: 'Cash' },
+  OTHER:  { label: 'Other' },
 };
 
 // Hoisted to module scope so it doesn't remount on every PortfolioTab render.
-const PositionTable = ({ positions, title, hex }) => {
+// Table styling matches the Live book's base anatomy (qr-label headers,
+// sticky thead, hover rows, chip side badges).
+const PositionTable = ({ positions, title }) => {
   const grpValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
   const grpPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
   return (
-    <div className="qr-surface-strong overflow-hidden mb-3" style={{ border: `1px solid ${hex}33` }}>
+    <div className="qr-surface overflow-hidden mb-3">
       <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-sm flex-none" style={{ background: hex }} />
           <span className="qr-label">{title}</span>
           <span className="text-[10px] text-slate-500">{positions.length} positions</span>
         </div>
@@ -316,32 +306,32 @@ const PositionTable = ({ positions, title, hex }) => {
           <span className={`qr-num text-[11px] font-bold ${pnlCl(grpPnL)}`}>{grpPnL >= 0 ? '+' : ''}{fmtK(grpPnL)}</span>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-white/[0.02]">
-            <tr>
+      <div className="overflow-x-auto max-h-72 overflow-y-auto">
+        <table className="w-full">
+          <thead className="qr-th-sticky">
+            <tr className="border-b border-white/[0.06]">
               {['Ticker', 'Name', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
-                <th key={h} className="qr-label text-right py-2 px-2 first:text-left">{h}</th>)}
+                <th key={h} className="qr-label text-right py-1 px-2 first:text-left">{h}</th>)}
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-white/[0.04]">
             {positions.map(p => {
               const entry = p.avg_entry_price || p.entry_price || 0;
               const current = p.current_price || 0;
               const pnlPct = entry > 0 ? ((current - entry) / entry * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
               return (
-                <tr key={p.id || p.ticker} className="hover:bg-white/[0.03] transition-colors">
-                  <td className="py-2 px-2 font-bold text-white">{p.ticker}</td>
-                  <td className="py-2 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
-                  <td className="py-2 px-2 text-center">
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${p.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : p.side === 'SHORT' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-400'}`}>{p.side || '—'}</span>
+                <tr key={p.id || p.ticker} className="qr-tr-hover">
+                  <td className="py-1 px-2 text-[11px] font-mono text-white">{p.ticker}</td>
+                  <td className="py-1 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
+                  <td className="py-1 px-2 text-right">
+                    <span className={`qr-chip ${p.side === 'LONG' ? 'qr-chip-emerald' : p.side === 'SHORT' ? 'qr-chip-rose' : 'qr-chip-slate'}`}>{p.side || '—'}</span>
                   </td>
-                  <td className="py-2 px-2 text-right font-mono">{fmt(p.quantity, 0)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-slate-400">${fmt(entry)}</td>
-                  <td className="py-2 px-2 text-right font-mono text-white">${fmt(current)}</td>
-                  <td className="py-2 px-2 text-right font-mono">{fmtK(p.market_value)}</td>
-                  <td className={`py-2 px-2 text-right font-mono font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
-                  <td className={`py-2 px-2 text-right font-mono ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.quantity, 0)}</td>
+                  <td className="py-1 px-2 qr-num text-slate-400">${fmt(entry)}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300">${fmt(current)}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300">{fmtK(p.market_value)}</td>
+                  <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
+                  <td className={`py-1 px-2 qr-num ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
                 </tr>
               );
             })}
@@ -352,42 +342,9 @@ const PositionTable = ({ positions, title, hex }) => {
   );
 };
 
-const PortfolioTab = ({ data, globalMode }) => {
+const PortfolioTab = ({ data }) => {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
-  const [orderSymbol, setOrderSymbol] = useState('');
-  const [orderQty, setOrderQty] = useState(1);
-  const [orderType, setOrderType] = useState('MKT');
-  const [orderLoading, setOrderLoading] = useState(false);
-  const [orderMsg, setOrderMsg] = useState(null);
-
-  const placeOrder = async (action) => {
-    if (!orderSymbol) { setOrderMsg({ type: 'error', text: 'Enter a symbol' }); return; }
-    const qty = parseInt(orderQty) || 1;
-    // Direct IBKR order — confirm before sending (real broker route, real money).
-    if (!window.confirm(`Send ${action} ${qty} ${orderSymbol.toUpperCase()} (${orderType}) to IBKR?`)) return;
-    setOrderLoading(true);
-    setOrderMsg(null);
-    try {
-      const res = await fetch('/api/ib/place-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: orderSymbol.toUpperCase(), action, quantity: qty, order_type: orderType })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setOrderMsg({ type: 'success', text: data.message || `${action} order placed` });
-        setOrderSymbol('');
-        setOrderQty(1);
-      } else {
-        setOrderMsg({ type: 'error', text: data.detail || 'Order failed' });
-      }
-    } catch (e) {
-      setOrderMsg({ type: 'error', text: e.message || 'Network error' });
-    } finally {
-      setOrderLoading(false);
-    }
-  };
 
   const positions = useMemo(() =>
     (data.positions || []).filter(p => {
@@ -416,102 +373,33 @@ const PortfolioTab = ({ data, globalMode }) => {
   const totalPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-bold text-white">Portfolio</h2>
-          <p className="text-[10px] text-slate-500">Live positions & P&L by asset class</p>
-        </div>
-        <Pill c={totalPnL >= 0 ? 'emerald' : 'rose'}>{totalPnL >= 0 ? '+' : ''}{fmtK(totalPnL)}</Pill>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <KPI l="Total Value" v={fmtK(totalValue)} />
-        <KPI l="Positions" v={positions.length} />
-        <KPI l="Asset Classes" v={activeClasses.length} />
-        <KPI l="Unrealized P&L" v={fmtK(totalPnL)} pos={totalPnL >= 0} />
-      </div>
-
-      {/* Quick IBKR Order + Manual Ticket */}
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-3 items-start">
-        <div className="qr-surface p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="qr-label">Quick Order (IBKR)</span>
-            {orderMsg && (
-              <span className={`text-[10px] ${orderMsg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>{orderMsg.text}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
+    <ExecScaffold
+      mode="sim"
+      book="sim"
+      stats={<>
+        <ExecStat l="Total Value" v={fmtK(totalValue)} />
+        <ExecStat l="Positions" v={positions.length} />
+        <ExecStat l="Asset Classes" v={activeClasses.length} tone="text-slate-400" />
+        <ExecStat l="Unrealized P&L" v={`${totalPnL >= 0 ? '+' : ''}${fmtK(totalPnL)}`} tone={pnlCl(totalPnL)} />
+      </>}
+    >
+      {/* Asset-class filter — same tab strip anatomy as the Live book */}
+      <div className="qr-surface overflow-hidden">
+        <ExecTabs
+          tabs={[
+            { id: 'ALL', label: `All (${positions.length})` },
+            ...activeClasses.map(cls => ({ id: cls, label: `${CLASS_META[cls]?.label || cls} (${byAssetClass[cls].length})` })),
+          ]}
+          active={activeFilter}
+          onChange={setActiveFilter}
+          right={
             <input
-              type="text"
-              value={orderSymbol}
-              onChange={e => setOrderSymbol(e.target.value.toUpperCase())}
-              placeholder="Symbol"
-              className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-24 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Filter by ticker..."
+              className="px-2 py-1 bg-slate-900/50 border border-white/10 rounded text-[11px] text-white w-40 placeholder-slate-600 focus:outline-none focus:border-white/20"
             />
-            <input
-              type="number"
-              value={orderQty}
-              onChange={e => setOrderQty(Math.max(1, parseInt(e.target.value) || 1))}
-              min="1"
-              className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-16 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
-            />
-            <select
-              value={orderType}
-              onChange={e => setOrderType(e.target.value)}
-              className="px-2 py-1.5 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500/50"
-            >
-              <option value="MKT">MKT</option>
-              <option value="LMT">LMT</option>
-              <option value="STP">STP</option>
-            </select>
-            <button
-              onClick={() => placeOrder('BUY')}
-              disabled={orderLoading}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
-            >
-              {orderLoading ? '…' : 'BUY'}
-            </button>
-            <button
-              onClick={() => placeOrder('SELL')}
-              disabled={orderLoading}
-              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white text-[10px] font-black uppercase transition-all"
-            >
-              {orderLoading ? '…' : 'SELL'}
-            </button>
-          </div>
-        </div>
-        <ManualTicket book="live" globalMode={globalMode} />
-      </div>
-
-      {/* Asset Class Filter */}
-      <div className="flex gap-1 p-1 rounded-lg bg-slate-900/50 border border-white/[0.06] overflow-x-auto">
-        <button
-          onClick={() => setActiveFilter('ALL')}
-          className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap ${activeFilter === 'ALL' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
-        >
-          All ({positions.length})
-        </button>
-        {activeClasses.map(cls => (
-          <button
-            key={cls}
-            onClick={() => setActiveFilter(cls)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap ${activeFilter === cls ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
-          >
-            <span className="w-1.5 h-1.5 rounded-sm flex-none" style={{ background: CLASS_META[cls]?.hex || '#64748b' }} />
-            {CLASS_META[cls]?.label || cls} ({byAssetClass[cls].length})
-          </button>
-        ))}
-      </div>
-
-      {/* Search */}
-      <div className="flex items-center gap-2">
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Filter by ticker..."
-          className="px-3 py-2 bg-slate-800/80 border border-white/10 rounded-lg text-xs text-white w-48 placeholder-slate-600 focus:outline-none focus:border-blue-500/50"
+          }
         />
       </div>
 
@@ -522,7 +410,6 @@ const PortfolioTab = ({ data, globalMode }) => {
             key={cls}
             positions={byAssetClass[cls]}
             title={CLASS_META[cls]?.label || cls}
-            hex={CLASS_META[cls]?.hex || '#64748b'}
           />
         ))
       ) : (
@@ -530,7 +417,6 @@ const PortfolioTab = ({ data, globalMode }) => {
           <PositionTable
             positions={byAssetClass[activeFilter]}
             title={CLASS_META[activeFilter]?.label || activeFilter}
-            hex={CLASS_META[activeFilter]?.hex || '#64748b'}
           />
         )
       )}
@@ -540,7 +426,7 @@ const PortfolioTab = ({ data, globalMode }) => {
           No positions found
         </div>
       )}
-    </div>
+    </ExecScaffold>
   );
 };
 
@@ -724,7 +610,6 @@ export default function App() {
 
   const [data, setData] = useState({ strategies: [], positions: [], paperStrategies: [], dailyPnl: [], trades: [], summary: {}, mode: 'SIMULATION' });
   const [loading, setLoading] = useState(true);
-  const [executionMode, setExecutionMode] = useState('SIMULATION');
   const [ibkrConnected, setIbkrConnected] = useState(false);
   const [latencyMs, setLatencyMs] = useState(null);
   const [healthData, setHealthData] = useState(null);
@@ -767,7 +652,6 @@ export default function App() {
     switch (event.type) {
       case 'kill_switch':
         pushToast(`Kill switch fired — ${d.halted || 0} strategies halted`, 'error', 10000);
-        setExecutionMode('PAPER_TRADING');
         break;
       case 'mode_change':
         pushToast(`${d.name || d.strategy_id} → ${(d.to || '').replace('_TRADING', '')}`, d.is_promotion ? 'warning' : 'info');
@@ -777,7 +661,6 @@ export default function App() {
         break;
       case 'global_mode_change':
         pushToast(`Global mode → ${(d.mode || '').replace('_TRADING', '').replace('SIMULATION', 'SIM')}`, 'info');
-        setExecutionMode(d.mode);
         break;
       case 'fill':
         pushToast(`Fill: ${d.side} ${d.quantity} ${d.ticker} @ ${d.price}`, d.side === 'BUY' ? 'success' : 'warning');
@@ -814,6 +697,21 @@ export default function App() {
     }
   }, [currentTab, currentMode, navigate]);
 
+  // lazyRetry guard reset: once the app has been alive for 30s the shell is
+  // healthy, so clear the one-shot reload guards — a later deploy then gets
+  // one fresh reload attempt instead of the static error box. NOT cleared at
+  // module load: that would loop reloads while chunks are still 404.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        Object.keys(sessionStorage)
+          .filter(k => k.startsWith('lazy-retry:'))
+          .forEach(k => sessionStorage.removeItem(k));
+      } catch { /* storage unavailable */ }
+    }, 30000);
+    return () => clearTimeout(t);
+  }, []);
+
   const openStrategyDetail = (id) => {
     if (!id) return;
     setSelectedStrategyId(id);
@@ -839,7 +737,7 @@ export default function App() {
   //   Command    -> platform overview & quick navigation
   //   Research   -> find trade ideas (markets, signals, agentic research)
   //   Strategies -> manage strategy lifecycle (lab, pipeline, performance)
-  //   Execution  -> track positions & trades (live, paper, ops)
+  //   Execution  -> track positions & trades (sim, paper, paper uat, live)
   //   Settings   -> system configuration
   // =================================================================
   const navItems = useMemo(() => [
@@ -853,7 +751,7 @@ export default function App() {
   // Sub-tab configs — each main tab has a clear intent:
   //   Research  -> find trade ideas (markets, signals, agents)
   //   Strategies -> manage lifecycle (lab, pipeline, performance)
-  //   Execution -> track positions & trades (live, paper, ops)
+  //   Execution -> track positions & trades (sim, paper, paper uat, live)
   // Sub-tab hotkeys: q/w/e/r for left-hand easy access
   const subTabConfig = useMemo(() => ({
     research: [
@@ -861,17 +759,18 @@ export default function App() {
       { id: 'signals',          label: 'Signals',     short: 'Sig',  IconComponent: Icon.Strategies,  key: 'w' },
       { id: 'analytics',        label: 'Analytics',   short: 'Ana',  IconComponent: Icon.Performance, key: 'e' },
       { id: 'research',         label: 'Screener',    short: 'Scr',  IconComponent: Icon.Research,    key: 'r' },
+      { id: 'news',             label: 'News',        short: 'News', IconComponent: Icon.Markets,     key: 't' },
     ],
     strategies: [
       { id: 'lab',              label: 'Lab',         short: 'Lab',  IconComponent: Icon.Lab,         key: 'q' },
       { id: 'strategies',       label: 'Pipeline',    short: 'Pipe', IconComponent: Icon.Strategies,  key: 'w' },
       { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance, key: 'e' },
-      { id: 'golden',          label: 'Golden',      short: 'Gld',  IconComponent: Icon.Golden,      key: 'r' },
     ],
     execution: [
-      { id: 'portfolio',        label: 'Live',        short: 'Live', IconComponent: Icon.Portfolio,   key: 'q' },
-      { id: 'paper_strategies', label: 'Paper',       short: 'Ppr',  IconComponent: Icon.Portfolio,   key: 'w' },
-      { id: 'live_ops',         label: 'Ops',         short: 'Ops',  IconComponent: Icon.Command,     key: 'e' },
+      { id: 'portfolio',        label: 'Sim',       short: 'Sim', IconComponent: Icon.Portfolio,   key: 'q' },
+      { id: 'paper_strategies', label: 'Paper',     short: 'Ppr', IconComponent: Icon.Portfolio,   key: 'w' },
+      { id: 'paper_uat',        label: 'Paper UAT', short: 'UAT', IconComponent: Icon.Command,     key: 'e' },
+      { id: 'live_ops',         label: 'Live',      short: 'Live', IconComponent: Icon.Command,    key: 'r' },
     ],
   }), []);
 
@@ -916,13 +815,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [navItems, currentTab, subTabConfig]);
 
-  // Mode + IBKR status (paused while the browser tab is hidden)
+  // IBKR primary-session status (paused while the browser tab is hidden).
+  // The old /api/execution/global-mode poll is gone — there is no global mode;
+  // every book (sim/paper/uat/live) carries its own execution state.
   usePoll(async () => {
-    const modeData = await api.get('/api/execution/global-mode');
-    if (modeData) {
-      setExecutionMode(modeData.execution_mode || 'SIMULATION');
-      setIbkrConnected(modeData.ibkr_connected || false);
-    }
+    const st = await api.get('/api/ib/tws/status');
+    if (st) setIbkrConnected(!!st.is_connected);
   }, 30000);
 
   // System health
@@ -951,7 +849,6 @@ export default function App() {
       monthlyReturns: performance?.monthly_returns || [],
       trades: [],
       summary: performance?.summary || {},
-      mode: executionMode,
     });
     setLoading(false);
   }, 60000);
@@ -1016,7 +913,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <GlobalExecutionToggle mode={executionMode} onModeChange={(m) => setExecutionMode(m)} />
             <div className="hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded">
               <span className={`qr-dot ${ibkrConnected ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
               <span className="text-[9px] text-slate-500 uppercase tracking-wider">IBKR</span>
@@ -1054,10 +950,7 @@ export default function App() {
           summary={data.summary}
           dailyPnl={data.dailyPnl}
           latencyMs={latencyMs}
-          mode={executionMode}
           healthOk={healthData?.status === 'healthy'}
-          onModeChange={(m) => setExecutionMode(m)}
-          onHalt={() => setExecutionMode('PAPER_TRADING')}
           wsConnected={wsConnected}
         />
       </header>
@@ -1093,28 +986,29 @@ export default function App() {
         {/* Research tab — find trade ideas */}
         {currentTab === 'research' && (
           <>
-            {activeSubTab === 'macro'            && <MacroTab navigateToTab={navigateToTab} setSubTab={setSubTab} />}
+            {activeSubTab === 'macro'            && <MacroTab />}
             {activeSubTab === 'signals'          && <SignalsTab onOpenStrategy={openStrategyDetail} />}
             {activeSubTab === 'analytics'        && <AnalyticsTab />}
             {activeSubTab === 'research'         && <ResearchTab key="research-tab" onOpenStrategy={openStrategyDetail} />}
+            {activeSubTab === 'news'             && <NewsTab />}
           </>
         )}
 
         {/* Strategies tab — manage lifecycle */}
         {currentTab === 'strategies' && (
           <>
-            {activeSubTab === 'lab'              && <StrategyLab />}
+            {activeSubTab === 'lab'              && <StrategyLab onOpen={openStrategyDetail} />}
             {activeSubTab === 'strategies'       && <StrategiesWorkspace sub="pipeline" onOpen={openStrategyDetail} />}
             {activeSubTab === 'performance'      && <StrategiesWorkspace sub="performance" onOpen={openStrategyDetail} />}
-            {activeSubTab === 'golden'           && <GoldenStrategies onSelectStrategy={openStrategyDetail} />}
           </>
         )}
 
         {/* Execution tab — track positions & trades */}
         {currentTab === 'execution' && (
           <>
-            {activeSubTab === 'portfolio'        && <PortfolioTab data={data} globalMode={executionMode} />}
-            {activeSubTab === 'paper_strategies' && <PaperStrategiesPage globalMode={executionMode} />}
+            {activeSubTab === 'portfolio'        && <PortfolioTab data={data} />}
+            {activeSubTab === 'paper_strategies' && <PaperStrategiesPage />}
+            {activeSubTab === 'paper_uat'        && <PaperUatPanel />}
             {activeSubTab === 'live_ops'         && <LiveOpsPanel onSelectStrategy={openStrategyDetail} />}
           </>
         )}

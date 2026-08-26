@@ -76,10 +76,10 @@ def run_sentiment_pipeline():
             except:
                 logger.warning(f"Swarm debate parse failed for {ent.name}")
 
-            # E. Archive in Silver
+            # E. Archive in Silver (Serper consensus rows are English; no source URL)
             db.execute(text("""
-                INSERT INTO silver.historical_news (date, category, entity_name, headline)
-                VALUES (:date, :cat, :name, :head)
+                INSERT INTO silver.historical_news (date, category, entity_name, headline, lang, url)
+                VALUES (:date, :cat, :name, :head, 'en', NULL)
                 ON CONFLICT DO NOTHING
             """), {'date': datetime.datetime.utcnow(), 'cat': ent.category, 'name': ent.name, 'head': f"Consensus summary: {ent.name}"})
             

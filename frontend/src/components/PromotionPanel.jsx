@@ -137,7 +137,7 @@ export const PromotionPanel = ({ strategyId, currentMode, onPromoted }) => {
           </div>
         )}
 
-        {check && !check.blocked && check.gates.length > 0 && (
+        {check && !check.blocked && check.gates?.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
             {check.gates.map(g => (
               <div
@@ -171,7 +171,7 @@ export const PromotionPanel = ({ strategyId, currentMode, onPromoted }) => {
           </div>
         )}
 
-        {check && !check.blocked && check.gates.length === 0 && (
+        {check && !check.blocked && (!check.gates || check.gates.length === 0) && (
           <div className="text-[10px] text-slate-500">No gates required for this transition (demotion / lateral)</div>
         )}
 

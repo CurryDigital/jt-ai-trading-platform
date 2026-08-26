@@ -12,14 +12,11 @@
     <meta http-equiv="Expires" content="0" />
     <title>JTCML Trading</title>
     <script>
-      // Clear any stale PWA/service-worker cache from previous builds so new deployments take effect immediately
+      // Clear any stale PWA/service-worker cache from previous builds so new deployments take effect on the next visit.
+      // We do NOT reload here: a reload during a React Router navigation can reset state and strand the user on the default route.
       if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
         navigator.serviceWorker.getRegistrations().then(function(regs) {
-          if (regs.length) {
-            Promise.all(regs.map(function(r) { return r.unregister(); })).then(function() {
-              window.location.reload();
-            });
-          }
+          regs.forEach(function(r) { r.unregister(); });
         });
       }
     </script>

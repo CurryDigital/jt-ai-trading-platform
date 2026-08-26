@@ -197,7 +197,7 @@ function MiniMacroCard({ m }) {
   );
 }
 
-function ETFMacroCard({ strategies, onOpenGolden }) {
+function ETFMacroCard({ strategies }) {
   const etf = (strategies || []).filter(s => s.asset_class === 'ETF');
   const top = etf.slice(0, 3);
   const meta = ETF_META;
@@ -207,7 +207,7 @@ function ETFMacroCard({ strategies, onOpenGolden }) {
         <span className="font-mono text-lg font-black tracking-wide" style={{ color: meta.hex }}>ETF</span>
         <div className="flex-1">
           <div className="text-[13px] font-bold text-white">ETF Strategies</div>
-          <div className="text-[9px] text-slate-500">Golden strategy book</div>
+          <div className="text-[9px] text-slate-500">ETF strategy book</div>
         </div>
         <span className="font-mono text-[20px] font-bold text-white">{etf.length}</span>
       </div>
@@ -225,18 +225,12 @@ function ETFMacroCard({ strategies, onOpenGolden }) {
             {etf.length > 3 && <div className="text-[9px] text-slate-500">+{etf.length - 3} more</div>}
           </div>
         )}
-        <button
-          onClick={onOpenGolden}
-          className="mt-3 w-full px-3 py-1.5 rounded text-[10px] font-bold bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 transition-colors"
-        >
-          View Golden
-        </button>
       </div>
     </div>
   );
 }
 
-export const MacroTab = ({ navigateToTab, setSubTab }) => {
+export const MacroTab = () => {
   const [regions, setRegions] = useState([]);
   const [global, setGlobal] = useState([]);
   const [news, setNews] = useState({});
@@ -256,11 +250,6 @@ export const MacroTab = ({ navigateToTab, setSubTab }) => {
     setEtfStrategies(book?.strategies || []);
     setLoading(false);
   }, 900000); // 15 min — matches macro DE refresh cadence
-
-  const openGolden = () => {
-    setSubTab('strategies', 'golden');
-    navigateToTab('strategies');
-  };
 
   return (
     <div className="space-y-3">
@@ -285,7 +274,7 @@ export const MacroTab = ({ navigateToTab, setSubTab }) => {
             {(global.length ? global : [{ key: 'CRYPTO' }, { key: 'FX' }, { key: 'METAL' }]).map(m => (
               <MiniMacroCard key={m.key} m={m} />
             ))}
-            <ETFMacroCard strategies={etfStrategies} onOpenGolden={openGolden} />
+            <ETFMacroCard strategies={etfStrategies} />
           </div>
         </>
       )}

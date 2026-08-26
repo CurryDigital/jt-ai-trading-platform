@@ -8,15 +8,17 @@ describe('mapApiToBook', () => {
   it('normalizes execution_mode variants onto the mode ladder', () => {
     const rows = [
       { id: 'a', execution_mode: 'LIVE' },
-      { id: 'b', execution_mode: 'PAPER_TRADING' },
-      { id: 'c', execution_mode: 'sim' === 'never' ? 'x' : 'SIMULATION' },
-      { id: 'd', execution_mode: null, status: 'approved' },
+      { id: 'b', execution_mode: 'PAPER_TRADING', is_paper_monitoring: true },
+      { id: 'c', execution_mode: 'PAPER_TRADING', is_paper_monitoring: false }, // stale registry row; not actively monitored
+      { id: 'd', execution_mode: 'SIMULATION' },
+      { id: 'e', execution_mode: null, status: 'approved' },
     ];
     const book = mapApiToBook(rows);
     expect(book[0].mode).toBe('LIVE_TRADING');
     expect(book[1].mode).toBe('PAPER_TRADING');
-    expect(book[2].mode).toBe('SIMULATION');
-    expect(book[3].mode).toBe('LIVE_TRADING'); // approved status implies deployed
+    expect(book[2].mode).toBe('SIMULATION'); // unmonitored PAPER row defaults to simulation
+    expect(book[3].mode).toBe('SIMULATION');
+    expect(book[4].mode).toBe('SIMULATION'); // approved alone does not imply deployed; no execution_mode
   });
 
   it('converts fractional win_rate and max_drawdown to percents', () => {

@@ -184,6 +184,10 @@ FROM gold.economic_calendar ... ;   -- importance IN ('High','Med','Low')
 ### 3.5 `consumption.market_news` 🟡
 **Used by:** `/api/news`, plus the one-line headline on each Crypto/FX/Metals macro box.
 
+### 3.5a `silver.historical_news` (existing table) 🟢
+**Used by:** `/api/news/by-asset` (Research > News subtab, added 2026-08-11), `/api/news/digest`.
+Columns: `date`, `id`, `category` ('US'|'HK'|'CRYPTO'|'FX'|'METAL'; junk 'market'/'person' excluded server-side), `entity_name`, `headline`, `source` (GDELT-prefixed), `lang` (VARCHAR(16), ISO 639-1; added 2026-08-12 t_69e09f53 — from GDELT `language` metadata at ingest, Unicode-script heuristic backfill; migration `agents/etl/migrations/2026-08-12_historical_news_lang.sql`). `/api/news/digest` accepts `?langs=en,zh` (filters in SQL before clustering/scoring) and emits `lang` per story plus a top-level `langs` echo. `/api/news/by-asset` reads the table directly with a per-category `ROW_NUMBER()` window. Response: `{ data: {CAT: [...]}, labels, last_updated, as_of }`.
+
 ```sql
 CREATE OR REPLACE VIEW consumption.market_news AS
 SELECT
@@ -406,3 +410,38 @@ Expectations: `regime_7d×5` = 5 scopes (US/HK/CRYPTO/FX/METAL), `nav_days` ≥ 
 | account_nav_daily | once at session close |
 | execution_* , ib_gateway_state, risk_limits | live (IBKR sync) |
 | attention_queue | event-driven (on emit) |
+
+---
+
+## 10. News story clusters (kanban t_d492325f, 2026-08-12)
+
+- `silver.historical_news` + `url TEXT` column (backfilled from
+  `silver.news_items`: 55,060/56,310 rows). GDELT ingest
+  (`backfill_historical_news.py`) now writes `url` on every insert and
+  fills it on conflict; Serper consensus rows insert `url=NULL`.
+- `consumption.news_clusters` — PK `(window_hours, cluster_id)`; columns:
+  `canonical_headline, story_count, outlet_count, first_seen_utc,
+  last_seen_utc, asset_class, driver_tags[], tickers[], llm_direction,
+  llm_confidence, llm_rationale, impact_score, members JSONB
+  [{headline, outlet, published_at, url, lang}], computed_at`.
+- Rebuilt every 2h by qr_etl cron `qr_etl.news_clusters_refresh`
+  (script `news_clusters_refresh.sh` ->
+  `agents/etl/consumption/market/build_news_clusters.py`, fastembed
+  paraphrase-multilingual-MiniLM-L12-v2, cosine >= 0.82, 48h window,
+  per asset_class; rebuild = DELETE window + INSERT, `computed_at` marks
+  the batch).
+- Served by `GET /api/news/clusters` (backend/app/routes/macro.py).
+  `/api/news/digest` unchanged (UI fallback + watch strip).
+
+## 11. News cluster impact components (kanban t_1f96bc9b, 2026-08-12)
+
+- `consumption.news_clusters` + `impact_components JSONB` — per-cluster
+  point breakdown `{attention, coverage, recency, keyword_impact,
+  llm_impact}`; `impact_score` is now the exact sum of the 5 rounded
+  components (max 100): coverage 25 (members/6 capped), attention 25
+  (distinct member hours in trailing 24h /6 capped — same real member
+  `published_at` timestamps the 24h attention micro-chart buckets),
+  recency 20 (1 - age_h/72), keyword_impact 15 (hits/6 capped),
+  llm_impact 15 (llm_confidence x 15, 0 when no LLM outlook join).
+- Served verbatim by `GET /api/news/clusters` (null on rows predating
+  the rebuild; UI tooltip degrades to derived values when absent).

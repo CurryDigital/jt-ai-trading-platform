@@ -35,6 +35,7 @@ PUBLIC_PATHS = frozenset({
     "/api/auth/login",
     "/api/auth/refresh",
     "/api/system/health",
+    "/api/system/freshness",
     "/docs",
     "/openapi.json",
     "/ws/events",

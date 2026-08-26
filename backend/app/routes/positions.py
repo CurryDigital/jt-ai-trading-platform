@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 
 from app.dependencies import get_db, logger
 from app.db.session import Inventory
@@ -122,13 +123,18 @@ def get_portfolio_dashboard(db: Session = Depends(get_db)):
 
 @router.get("/paper-strategies")
 def get_paper_strategies(db: Session = Depends(get_db)):
-    """Get all paper trading strategies filtered by current execution mode."""
+    """Get all paper trading strategies filtered by current execution mode.
+
+    Falls back to active positions from any mode if the platform execution mode
+    does not match any recorded positions, so the Deployed tab shows real positions
+    instead of an empty state.
+    """
     mode_result = db.execute(text(
         "SELECT value FROM gold.platform_settings WHERE key = 'global_execution_mode'"
     )).fetchone()
     current_mode = mode_result.value if mode_result else "SIMULATION"
 
-    # Try primary table first
+    # Primary: positions that match the current platform execution mode.
     try:
         result = db.execute(text("""
             SELECT ps.id, ps.strategy_id, sd.name as strategy_name, ps.ticker, ps.capital,
@@ -137,35 +143,29 @@ def get_paper_strategies(db: Session = Depends(get_db)):
                    ps.created_at, ps.execution_mode
             FROM consumption.portfolio_positions_current ps
             LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
-            WHERE ps.execution_mode = :mode ORDER BY ps.created_at DESC
+            WHERE ps.execution_mode = :mode AND ps.status = 'ACTIVE' AND ps.quantity > 0
+            ORDER BY ps.created_at DESC
         """), {"mode": current_mode}).fetchall()
     except Exception:
-        # Rollback aborted transaction before fallback
         db.rollback()
-        # Fallback: synthesize from portfolio_positions_current + strategy_registry
+        result = []
+
+    # Fallback: if no positions match the current mode, show active positions
+    # from any mode. This prevents the Deployed tab from being empty when the
+    # platform mode and stored positions are out of sync.
+    if not result:
         try:
             result = db.execute(text("""
-                SELECT
-                    ppc.id,
-                    ppc.strategy_id,
-                    sr.strategy_name,
-                    ppc.ticker,
-                    10000 as capital,
-                    COALESCE(ppc.market_value, 0) as invested_capital,
-                    10000 - COALESCE(ppc.market_value, 0) as available_capital,
-                    ppc.status,
-                    ppc.entry_price,
-                    ppc.current_price,
-                    ppc.unrealized_pnl,
-                    ppc.realized_pnl,
-                    0 as trades_count,
-                    ppc.entry_date as created_at,
-                    :mode as execution_mode
-                FROM consumption.portfolio_positions_current ppc
-                LEFT JOIN gold.strategy_registry sr ON ppc.strategy_id = sr.strategy_id
-                WHERE ppc.status = 'ACTIVE' AND ppc.quantity > 0
-                ORDER BY ppc.market_value DESC
-            """), {"mode": current_mode}).fetchall()
+                SELECT ps.id, ps.strategy_id, sd.name as strategy_name, ps.ticker, ps.capital,
+                       ps.invested_capital, ps.available_capital, ps.status, ps.entry_price,
+                       ps.current_price, ps.unrealized_pnl, ps.realized_pnl, ps.trades_count,
+                       ps.created_at, ps.execution_mode
+                FROM consumption.portfolio_positions_current ps
+                LEFT JOIN gold.strategy_registry sd ON ps.strategy_id = sd.strategy_id
+                WHERE ps.status = 'ACTIVE' AND ps.quantity > 0
+                ORDER BY ps.created_at DESC
+            """)).fetchall()
+            current_mode = result[0].execution_mode if result else current_mode
         except Exception:
             db.rollback()
             result = []
@@ -182,7 +182,7 @@ def get_paper_strategies(db: Session = Depends(get_db)):
         "realized_pnl": float(r.realized_pnl) if r.realized_pnl else 0,
         "trades_count": r.trades_count or 0,
         "created_at": r.created_at.isoformat() if r.created_at else None,
-        "execution_mode": r.execution_mode,
+        "execution_mode": r.execution_mode or current_mode,
     } for r in result]
 
     return {"strategies": strategies, "count": len(strategies),
@@ -233,9 +233,52 @@ def get_paper_strategy_daily_pnl(strategy_id: str, days: int = 7, db: Session = 
                                               "total_pnl": round(total_r + total_u, 2), "days_with_activity": len(daily_data)}}
 
 
-# =============================================================================
-# Inventory (Manual Portfolio)
-# =============================================================================
+@router.get("/strategies/positions")
+def get_strategies_positions(db: Session = Depends(get_db)):
+    """Alias of /api/portfolio/positions for the Golden Strategies UI."""
+    return get_portfolio_positions(db=db)
+
+
+@router.get("/strategies/signals")
+def get_strategies_signals(db: Session = Depends(get_db)):
+    """Active BUY/SELL signals per strategy from gold.strategy_signals.
+
+    Returns the strongest active signal per strategy. This endpoint lets the
+    Golden Strategies UI render a signal tag without depending on the generic
+    /api/signals/feed route.
+    """
+    try:
+        rows = db.execute(text("""
+            SELECT DISTINCT ON (strategy_id)
+                   strategy_id,
+                   strategy_name,
+                   signal,
+                   confidence,
+                   regime,
+                   computed_at
+            FROM gold.strategy_signals
+            WHERE active = TRUE
+            ORDER BY strategy_id, confidence DESC NULLS LAST
+        """)).fetchall()
+        signals = []
+        for r in rows:
+            signals.append({
+                "strategy_id": r.strategy_id,
+                "strategy_name": r.strategy_name,
+                "signal": "BUY" if r.signal == 1 else "SELL" if r.signal == -1 else "HOLD",
+                "confidence": float(r.confidence) if r.confidence is not None else None,
+                "regime": r.regime,
+                "computed_at": r.computed_at.isoformat() if r.computed_at else None,
+            })
+        return {"signals": signals, "count": len(signals)}
+    except Exception as e:
+        logger.error(f"Strategies signals error: {e}")
+        return {"signals": [], "count": 0}
+
+
+# @router.get("/agents/paper/strategy-book-extended") is implemented in app/routes/agents.py
+# under the same /api prefix; keep this file scoped to positions only.
+
 
 class InventoryAdd(BaseModel):
     ticker: str
@@ -305,6 +348,135 @@ def evaluate_inventory(db: Session = Depends(get_db)):
 # =============================================================================
 # Close Position
 # =============================================================================
+
+# =============================================================================
+# Live Positions (Execution Live tab)
+# =============================================================================
+
+_LIVE_STALE_SECONDS = 24 * 3600  # snapshot older than this is flagged stale
+
+
+def _net_ledger_positions(db):
+    """Net open positions from the live ledger (gold.trade_executions,
+    execution_mode='LIVE_TRADING') using weighted-average-cost netting."""
+    try:
+        rows = db.execute(text("""
+            SELECT id, ticker, side, quantity, price, executed_at
+            FROM gold.trade_executions
+            WHERE execution_mode = 'LIVE_TRADING'
+            ORDER BY executed_at ASC, id ASC
+        """)).fetchall()
+    except Exception:
+        db.rollback()
+        return []
+
+    books = {}  # ticker -> {net, avg, last_id, last_ts}
+    for r in rows:
+        qty = float(r.quantity or 0)
+        px = float(r.price or 0)
+        signed = qty if (r.side or "").upper() == "BUY" else -qty
+        b = books.setdefault(r.ticker, {"net": 0.0, "avg": 0.0, "last_id": 0, "last_ts": None})
+        net = b["net"]
+        if net == 0 or (signed > 0) == (net > 0):  # same direction -> blend
+            new_abs = abs(net) + abs(signed)
+            b["avg"] = (b["avg"] * abs(net) + px * abs(signed)) / new_abs if new_abs else 0.0
+            b["net"] = net + signed
+        elif abs(signed) < abs(net):               # partial reduce -> keep avg
+            b["net"] = net + signed
+        elif abs(signed) == abs(net):              # flat
+            b["net"], b["avg"] = 0.0, 0.0
+        else:                                      # flip -> reset avg to fill price
+            b["net"], b["avg"] = net + signed, px
+        b["last_id"] = r.id
+        b["last_ts"] = r.executed_at
+
+    out = []
+    for ticker, b in books.items():
+        if b["net"] == 0:
+            continue
+        price_row = db.execute(text("""
+            SELECT close FROM silver.unified_prices WHERE ticker = :ticker ORDER BY date DESC LIMIT 1
+        """), {"ticker": ticker}).fetchone()
+        current_price = float(price_row.close) if price_row else b["avg"]
+        out.append({
+            "id": b["last_id"],
+            "ticker": ticker,
+            "side": "LONG" if b["net"] > 0 else "SHORT",
+            "quantity": abs(b["net"]),
+            "avg_entry": round(b["avg"], 4),
+            "current_price": current_price,
+            "unrealized_pnl": round((current_price - b["avg"]) * b["net"], 2),
+            "as_of": b["last_ts"].isoformat() if b["last_ts"] else None,
+            "source": "ledger",
+        })
+    return out
+
+
+@router.get("/positions/live")
+def get_live_positions(db: Session = Depends(get_db)):
+    """Net live positions for the Execution Live tab per-row Close buttons.
+
+    Primary source: gold.ibkr_positions_live — the broker snapshot synced from
+    the connected IBKR session by sync_ibkr_to_gold (TRUNCATE + full reload).
+    Fallback: net open positions from the live ledger (gold.trade_executions,
+    execution_mode='LIVE_TRADING') for tickers not present in the snapshot.
+    """
+    positions = []
+    snapshot_ts = None
+
+    try:
+        rows = db.execute(text("""
+            SELECT id, ticker, side, quantity, avg_cost, market_price,
+                   unrealized_pnl, fetched_at
+            FROM gold.ibkr_positions_live
+            WHERE quantity <> 0
+            ORDER BY ABS(market_value) DESC NULLS LAST
+        """)).fetchall()
+    except Exception:
+        db.rollback()
+        rows = []
+
+    seen = set()
+    for r in rows:
+        seen.add(r.ticker)
+        if snapshot_ts is None or (r.fetched_at and r.fetched_at > snapshot_ts):
+            snapshot_ts = r.fetched_at
+        positions.append({
+            "id": r.id,
+            "ticker": r.ticker,
+            "side": r.side or ("LONG" if float(r.quantity or 0) > 0 else "SHORT"),
+            "quantity": abs(float(r.quantity or 0)),
+            "avg_entry": float(r.avg_cost or 0),
+            "current_price": float(r.market_price or 0),
+            "unrealized_pnl": float(r.unrealized_pnl or 0),
+            "as_of": r.fetched_at.isoformat() if r.fetched_at else None,
+            "source": "ibkr_snapshot",
+        })
+
+    # Ledger fallback for tickers missing from the broker snapshot
+    for p in _net_ledger_positions(db):
+        if p["ticker"] not in seen:
+            positions.append(p)
+
+    # Overall as_of = newest timestamp across both sources
+    stamps = [p["as_of"] for p in positions if p["as_of"]]
+    as_of = max(stamps) if stamps else None
+    stale = True
+    if as_of:
+        try:
+            age = (datetime.utcnow() - datetime.fromisoformat(as_of)).total_seconds()
+            stale = age > _LIVE_STALE_SECONDS
+        except Exception:
+            stale = True
+
+    return {
+        "positions": positions,
+        "count": len(positions),
+        "as_of": as_of,
+        "stale": stale,
+        "source": "ibkr_snapshot" if seen else ("ledger" if positions else "none"),
+    }
+
 
 @router.post("/positions/{position_id}/close")
 def close_position(position_id: int, db: Session = Depends(get_db)):

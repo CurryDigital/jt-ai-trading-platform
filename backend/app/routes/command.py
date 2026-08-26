@@ -351,10 +351,12 @@ def get_command_overview(db: Session = Depends(get_db)):
         "created_at": r.created_at.isoformat() if r.created_at else None,
     } for r in attention_rows if str(r.item_id) not in acks]
 
-    # Strategy-perspective risks: computed from the real paper ledger
-    # (gold.paper_trades, closed non-rehearsal trades — same source as
-    # /api/strategies/researcher). Surfaces paper strategies whose track record
-    # is deteriorating: PF below breakeven, negative cumulative P&L, low WR.
+    # Strategy-perspective risks: computed from the canonical simulated paper
+    # ledger (gold.paper_trades_synthetic gated on strategy_paper_monitoring
+    # .is_active — the declared strategy paper-trading book, t_8a128994 /
+    # OPERATOR_NOTES.md; gold.paper_trades is orphaned and frozen 2026-08-05).
+    # Surfaces monitored paper strategies whose track record is deteriorating:
+    # PF below breakeven, negative cumulative P&L, low WR.
     strategy_risks = []
     risk_rows = safe_query(db, """
         SELECT r.strategy_id, r.name,
@@ -364,8 +366,11 @@ def get_command_overview(db: Session = Depends(get_db)):
                SUM(t.pnl) FILTER (WHERE t.status = 'closed' AND t.pnl > 0) AS gp,
                SUM(t.pnl) FILTER (WHERE t.status = 'closed' AND t.pnl < 0) AS gl
         FROM gold.strategy_registry r
-        JOIN gold.paper_trades t ON t.strategy_id = r.strategy_id AND t.rehearsal = false
+        JOIN gold.paper_trades_synthetic t ON t.strategy_id = r.strategy_id
+        JOIN gold.strategy_paper_monitoring m
+          ON m.strategy_id = r.strategy_id AND m.is_active
         WHERE r.status NOT IN ('DEPRECATED', 'retired')
+          AND (t.ticker IS NULL OR t.ticker != 'CASH')
         GROUP BY r.strategy_id, r.name
     """, label="command_strategy_risks")
     for r in risk_rows:
@@ -430,9 +435,12 @@ def get_command_overview(db: Session = Depends(get_db)):
 
     # Current-calendar-month realized P&L per execution mode, from the canonical
     # ledgers (realized closed trades only — no estimates, no synthetic rows):
-    #   SIM   -> gold.paper_trades_synthetic (closed, exit_date this month)
-    #   PAPER -> gold.paper_trades (closed, rehearsal=false, updated_at this month)
+    #   SIM   -> gold.paper_trades_synthetic x registry SIMULATION (closed, exit_date this month)
+    #   PAPER -> gold.paper_trades_synthetic x registry PAPER (closed, exit_date this month)
     #   LIVE  -> gold.trade_executions (LIVE modes, executed_at this month)
+    # (t_274e2d7e: PAPER repointed off orphaned gold.paper_trades — frozen
+    # 2026-08-05 — onto the canonical ledger, mode-scoped via the registry so
+    # SIM and PAPER stay distinct books.)
     # Each mode is null when it has no closed trades this month so the UI can
     # render '—' instead of a misleading $0.
     def _month_bucket(row):
@@ -442,15 +450,20 @@ def get_command_overview(db: Session = Depends(get_db)):
 
     monthly_pnl = {
         "sim": _month_bucket(safe_query_one(db, """
-            SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
-            FROM gold.paper_trades_synthetic
-            WHERE status = 'closed' AND exit_date >= date_trunc('month', now())::date
+            SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
+            FROM gold.paper_trades_synthetic t
+            JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
+            WHERE t.status = 'closed' AND r.execution_mode = 'SIMULATION'
+              AND t.exit_date >= date_trunc('month', now())::date
+              AND (t.ticker IS NULL OR t.ticker != 'CASH')
         """, label="command_monthly_pnl_sim")),
         "paper": _month_bucket(safe_query_one(db, """
-            SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
-            FROM gold.paper_trades
-            WHERE status = 'closed' AND rehearsal = false
-              AND updated_at >= date_trunc('month', now())
+            SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
+            FROM gold.paper_trades_synthetic t
+            JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
+            WHERE t.status = 'closed' AND r.execution_mode = 'PAPER'
+              AND t.exit_date >= date_trunc('month', now())::date
+              AND (t.ticker IS NULL OR t.ticker != 'CASH')
         """, label="command_monthly_pnl_paper")),
         "live": _month_bucket(safe_query_one(db, """
             SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
@@ -462,15 +475,18 @@ def get_command_overview(db: Session = Depends(get_db)):
     }
 
     # Paper book attribution for the current month: per-strategy realized P&L
-    # (same ledger as strategy_risks). Powers the Command panel that shows
-    # leaders/laggards while nothing is live-deployed.
+    # (same canonical ledger + registry PAPER scope as monthly_pnl.paper).
+    # Powers the Command panel that shows leaders/laggards while nothing is
+    # live-deployed.
     book_rows = safe_query(db, """
         SELECT t.strategy_id, r.name,
                COUNT(*) AS closed, SUM(t.pnl) AS pnl
-        FROM gold.paper_trades t
-        LEFT JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
-        WHERE t.status = 'closed' AND t.rehearsal = false
-          AND t.updated_at >= date_trunc('month', now())
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
+        WHERE t.status = 'closed'
+          AND t.exit_date >= date_trunc('month', now())::date
+          AND (t.ticker IS NULL OR t.ticker != 'CASH')
         GROUP BY t.strategy_id, r.name
     """, label="command_paper_book_month")
     book = [{
@@ -669,9 +685,17 @@ def get_account_equity_curve(days: int = 30, book: str = "live", db: Session = D
 # ---------------------------------------------------------------------------
 # Command redesign (2026-08-20): P&L-by-Mode hero + Order Book.
 # Per-mode realized ledgers (canonical mapping, qr_etl-owned):
-#   SIM   -> gold.paper_trades_synthetic (closed, exit_date)
-#   PAPER -> gold.paper_trades (closed, rehearsal=false, updated_at)
+#   SIM   -> gold.paper_trades_synthetic x registry SIMULATION (closed, exit_date)
+#   PAPER -> gold.paper_trades_synthetic x registry PAPER (closed, exit_date)
 #   LIVE  -> gold.trade_executions (LIVE modes, executed_at)
+# t_274e2d7e: PAPER repointed off orphaned gold.paper_trades (frozen
+# 2026-08-05) onto the canonical gated synthetic ledger (t_8a128994,
+# OPERATOR_NOTES.md). Both simulated modes share that one ledger and are kept
+# distinct by joining gold.strategy_registry.execution_mode. Current-state
+# queries (open_strats / open_count) additionally gate on
+# gold.strategy_paper_monitoring.is_active — the declared rule for current
+# paper-book state; realized-history aggregates stay ungated (a closed trade's
+# P&L stands even if the strategy was later deactivated).
 # Everything is read-only; a mode with no data returns nulls (never a
 # misleading $0) so the UI can render '—'.
 # ---------------------------------------------------------------------------
@@ -683,74 +707,98 @@ def _mode_ledger_queries(mode):
         return {
             "closed": """
                 SELECT COUNT(*) AS closed,
-                       COUNT(*) FILTER (WHERE pnl > 0) AS wins,
-                       SUM(pnl) AS cum_pnl
-                FROM gold.paper_trades_synthetic
-                WHERE status = 'closed' AND (ticker IS NULL OR ticker != 'CASH')
+                       COUNT(*) FILTER (WHERE t.pnl > 0) AS wins,
+                       SUM(t.pnl) AS cum_pnl
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
+                WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
             """,
             "today": """
-                SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
-                FROM gold.paper_trades_synthetic
-                WHERE status = 'closed' AND exit_date = CURRENT_DATE
-                  AND (ticker IS NULL OR ticker != 'CASH')
+                SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
+                WHERE t.status = 'closed' AND t.exit_date = CURRENT_DATE
+                  AND (t.ticker IS NULL OR t.ticker != 'CASH')
             """,
             "daily": """
-                SELECT exit_date AS d, SUM(pnl) AS pnl
-                FROM gold.paper_trades_synthetic
-                WHERE status = 'closed' AND exit_date IS NOT NULL
-                  AND exit_date >= CURRENT_DATE - 29
-                  AND (ticker IS NULL OR ticker != 'CASH')
-                GROUP BY exit_date ORDER BY exit_date
+                SELECT t.exit_date AS d, SUM(t.pnl) AS pnl
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
+                WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
+                  AND t.exit_date >= CURRENT_DATE - 29
+                  AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                GROUP BY t.exit_date ORDER BY t.exit_date
             """,
             "open_strats": """
                 SELECT t.strategy_id, r.name, COUNT(*) AS n
                 FROM gold.paper_trades_synthetic t
-                LEFT JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
+                JOIN gold.strategy_paper_monitoring m
+                  ON m.strategy_id = t.strategy_id AND m.is_active
                 WHERE t.status = 'open' AND (t.ticker IS NULL OR t.ticker != 'CASH')
                 GROUP BY t.strategy_id, r.name ORDER BY n DESC
             """,
             "open_count": """
-                SELECT COUNT(*) AS n FROM gold.paper_trades_synthetic
-                WHERE status = 'open' AND (ticker IS NULL OR ticker != 'CASH')
+                SELECT COUNT(*) AS n
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
+                JOIN gold.strategy_paper_monitoring m
+                  ON m.strategy_id = t.strategy_id AND m.is_active
+                WHERE t.status = 'open' AND (t.ticker IS NULL OR t.ticker != 'CASH')
             """,
         }
     if mode == "paper":
         return {
             "closed": """
                 SELECT COUNT(*) AS closed,
-                       COUNT(*) FILTER (WHERE pnl > 0) AS wins,
-                       SUM(pnl) AS cum_pnl
-                FROM gold.paper_trades
-                WHERE status = 'closed' AND rehearsal = false
-                  AND (ticker IS NULL OR ticker != 'CASH')
+                       COUNT(*) FILTER (WHERE t.pnl > 0) AS wins,
+                       SUM(t.pnl) AS cum_pnl
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
+                WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
             """,
             "today": """
-                SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
-                FROM gold.paper_trades
-                WHERE status = 'closed' AND rehearsal = false
-                  AND updated_at::date = CURRENT_DATE
-                  AND (ticker IS NULL OR ticker != 'CASH')
+                SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
+                WHERE t.status = 'closed' AND t.exit_date = CURRENT_DATE
+                  AND (t.ticker IS NULL OR t.ticker != 'CASH')
             """,
             "daily": """
-                SELECT updated_at::date AS d, SUM(pnl) AS pnl
-                FROM gold.paper_trades
-                WHERE status = 'closed' AND rehearsal = false
-                  AND updated_at >= CURRENT_DATE - 29
-                  AND (ticker IS NULL OR ticker != 'CASH')
-                GROUP BY updated_at::date ORDER BY 1
+                SELECT t.exit_date AS d, SUM(t.pnl) AS pnl
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
+                WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
+                  AND t.exit_date >= CURRENT_DATE - 29
+                  AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                GROUP BY t.exit_date ORDER BY t.exit_date
             """,
             "open_strats": """
                 SELECT t.strategy_id, r.name, COUNT(*) AS n
-                FROM gold.paper_trades t
-                LEFT JOIN gold.strategy_registry r ON r.strategy_id = t.strategy_id
-                WHERE t.status = 'open' AND t.rehearsal = false
-                  AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
+                JOIN gold.strategy_paper_monitoring m
+                  ON m.strategy_id = t.strategy_id AND m.is_active
+                WHERE t.status = 'open' AND (t.ticker IS NULL OR t.ticker != 'CASH')
                 GROUP BY t.strategy_id, r.name ORDER BY n DESC
             """,
             "open_count": """
-                SELECT COUNT(*) AS n FROM gold.paper_trades
-                WHERE status = 'open' AND rehearsal = false
-                  AND (ticker IS NULL OR ticker != 'CASH')
+                SELECT COUNT(*) AS n
+                FROM gold.paper_trades_synthetic t
+                JOIN gold.strategy_registry r
+                  ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
+                JOIN gold.strategy_paper_monitoring m
+                  ON m.strategy_id = t.strategy_id AND m.is_active
+                WHERE t.status = 'open' AND (t.ticker IS NULL OR t.ticker != 'CASH')
             """,
         }
     # live

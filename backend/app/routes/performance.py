@@ -9,8 +9,10 @@ from app.db.safe_query import safe_query, safe_query_one
 router = APIRouter(prefix="/api", tags=["performance"])
 
 _EMPTY_PERF = {
-    "strategies": [], "monthly_returns": [],
-    "summary": {"total_return": 0, "sharpe": 0, "max_drawdown": 0, "win_rate": 0},
+    "strategies": [], "monthly_returns": [], "strategies_source": "error",
+    # Honest nulls — never render placeholder zeros as measured values.
+    "summary": {"total_return": None, "sharpe": None, "max_drawdown": None,
+                "win_rate": None, "total_trades": None},
 }
 
 
@@ -22,31 +24,43 @@ _EMPTY_PERF = {
 def get_strategy_performance(db: Session = Depends(get_db)):
     """Strategy performance with backtest vs actual win rates + current signal."""
     try:
-        # Try primary attribution view first
+        # Try primary attribution view first.
+        # t_f25d9ea5: portfolio_type is stored lowercase ('paper') in the table;
+        # the old `= 'PAPER'` predicate matched zero rows and silently forced
+        # the registry fallback forever. Match case-insensitively.
+        # Junk-row hygiene (root-cause cleanup tracked by qr_etl): exclude
+        # test/manual artifacts (TEST_*, dummy_test_always_buy, manual_close)
+        # and rows with zero measured trades — their 0.000 metrics are ETL
+        # placeholders, not measured-neutral values, and rendering them as
+        # performance rows would be misleading zeros.
         attribution = safe_query(db, """
             SELECT strategy_id, strategy_name, allocated_capital_pct as allocation,
                    contribution_pct as contribution, return_pct as returns, num_trades,
                    win_rate, sharpe_ratio
             FROM consumption.Performance_Strategy_Attribution
-            WHERE portfolio_type = 'PAPER' ORDER BY return_pct DESC
+            WHERE LOWER(portfolio_type) = 'paper'
+              AND num_trades > 0
+              AND strategy_id NOT ILIKE 'test%'
+              AND strategy_id NOT IN ('manual_close', 'dummy_test_always_buy')
+              AND (strategy_name IS NULL OR strategy_name NOT ILIKE 'test%')
+            ORDER BY return_pct DESC
         """, label="perf_attribution")
+        attribution_source = "attribution"
 
         # Fallback: build attribution from strategy_registry + portfolio_positions_current
         if not attribution:
             attribution = safe_query(db, """
-                SELECT
-                    sr.strategy_id,
-                    sr.strategy_name,
-                    0 as allocated_capital_pct,
-                    0 as contribution_pct,
-                    0 as return_pct,
-                    0 as num_trades,
-                    sr.win_rate,
-                    0 as sharpe_ratio
+                SELECT sr.strategy_id,
+                       sr.name AS strategy_name,
+                       NULL as allocation, NULL as contribution, NULL as returns,
+                       0 as num_trades,
+                       sr.win_rate_oos AS win_rate,
+                       NULL as sharpe_ratio
                 FROM gold.strategy_registry sr
-                WHERE sr.status IN ('ACTIVE', 'TESTING')
-                ORDER BY sr.win_rate DESC
+                WHERE sr.status = 'paper'
+                ORDER BY sr.win_rate_oos DESC
             """, label="perf_attribution_fallback")
+            attribution_source = "registry_fallback"
 
         backtests = safe_query(db, """
             SELECT strategy_id, AVG(win_rate) as backtest_win_rate,
@@ -82,9 +96,15 @@ def get_strategy_performance(db: Session = Depends(get_db)):
 
             strategies.append({
                 "strategy_id": a.strategy_id, "strategy_name": a.strategy_name,
-                "allocation": float(a.allocation or 0), "contribution": float(a.contribution or 0),
-                "returns": float(a.returns or 0), "num_trades": a.num_trades or 0,
-                "sharpe_ratio": float(a.sharpe_ratio or 0),
+                # Honest nulls: absent source values stay None — never coerced
+                # to placeholder 0.0 (contribution_pct is NULL for every row
+                # in the attribution table today).
+                "allocation": float(a.allocation) if a.allocation is not None else None,
+                "contribution": float(a.contribution) if a.contribution is not None else None,
+                "returns": float(a.returns) if a.returns is not None else None,
+                "num_trades": a.num_trades or 0,
+                "win_rate": float(a.win_rate) if a.win_rate is not None else None,
+                "sharpe_ratio": float(a.sharpe_ratio) if a.sharpe_ratio is not None else None,
                 "live_win_rate": live_win_rate, "live_trades": live.total_positions if live else 0,
                 "backtest_win_rate": round((bt.backtest_win_rate or 0) * 100, 1) if bt and bt.backtest_win_rate else None,
                 "backtest_return": round(bt.backtest_return or 0, 2) if bt else None,
@@ -99,25 +119,41 @@ def get_strategy_performance(db: Session = Depends(get_db)):
 
         monthly = safe_query(db, """
             SELECT year, month, return_pct FROM consumption.Performance_Monthly_Returns
-            WHERE portfolio_type = 'PAPER' ORDER BY year DESC, month DESC LIMIT 12
+            WHERE LOWER(portfolio_type) = 'paper' ORDER BY year DESC, month DESC LIMIT 12
         """, label="perf_monthly")
 
-        # Summary from portfolio_positions_current
+        # Summary — honest nulls for anything not measured at portfolio level.
+        # win_rate / total_trades: trade-weighted aggregates over the real
+        # per-strategy measurements in the attribution table (win_rate is a
+        # fraction 0-1; the weighted mean over num_trades>0 rows is the exact
+        # aggregate fraction of winning trades). NOTE: portfolio_type is stored
+        # lowercase in the table, so match case-insensitively.
+        # sharpe / max_drawdown: no portfolio-level source exists
+        # (performance_monthly_returns has no paper rows) -> null, not 0.
+        # total_return: previously SUM(realized_pnl) over ACTIVE positions only,
+        # which measures realized P&L of the open book (all zeros) while ignoring
+        # unrealized P&L and closed ledgers — not a total return -> null.
         summary = safe_query_one(db, """
             SELECT
-                COALESCE(SUM(realized_pnl), 0) as total_pnl,
-                COALESCE(SUM(unrealized_pnl), 0) as unrealized_pnl
-            FROM consumption.portfolio_positions_current WHERE status = 'ACTIVE' AND quantity > 0
+                SUM(num_trades) AS total_trades,
+                SUM(win_rate * num_trades)
+                    / NULLIF(SUM(num_trades) FILTER (WHERE win_rate IS NOT NULL), 0) AS win_rate
+            FROM consumption.Performance_Strategy_Attribution
+            WHERE LOWER(portfolio_type) = 'paper' AND num_trades > 0
         """, label="perf_summary")
 
         return {
             "strategies": strategies,
+            # Provenance: which path served strategies[] — the live
+            # attribution table or the registry fallback. t_f25d9ea5.
+            "strategies_source": attribution_source,
             "monthly_returns": [{"year": r.year, "month": r.month, "return": float(r.return_pct or 0)} for r in monthly],
             "summary": {
-                "total_return": float(summary.total_pnl or 0) if summary else 0,
-                "sharpe": 0,
-                "max_drawdown": 0,
-                "win_rate": 0,
+                "total_return": None,
+                "sharpe": None,
+                "max_drawdown": None,
+                "win_rate": float(summary.win_rate) if summary and summary.win_rate is not None else None,
+                "total_trades": int(summary.total_trades) if summary and summary.total_trades is not None else None,
             },
         }
     except Exception as e:

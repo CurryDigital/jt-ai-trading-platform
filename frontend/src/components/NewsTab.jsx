@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api, usePoll, fmtAge, fmtK } from '../utils';
+import { TIER_HEAD_CL, TIER_SCORE_CL, tierBorderFor, tierCutoffsFor } from './newsTiers';
 
 // Research > News — story-CLUSTER feed (refactor 2026-08-12).
 // Display unit = one row per cluster, NOT per headline. Primary source:
@@ -92,29 +93,16 @@ const EventGroupChip = ({ eg }) =>
 // Absolute thresholds (65/40) collapsed when scores compressed into the 40s,
 // so tiers are now assigned by rank within the currently filtered feed
 // window: top 10% HIGH, next 30% MEDIUM, remainder LOW — with a floor of
-// 3 and a cap of 6 HIGH rows so the "top 3 at a glance" property survives
-// any score distribution. The absolute score stays visible and unchanged;
-// only the visual tier is relative.
+// 3 and a cap of 4 HIGH rows so the large-cluster feed keeps only the true
+// head visually loud. The absolute score stays visible and unchanged;
+// only the visual tier is relative. Tier cutoffs NEVER split a tie run: if
+// the target boundary lands inside equal impact scores, the whole run moves
+// to whichever side leaves the tier count closer to target.
 //   HIGH:   15px/500 headline, full opacity, 3px left border by direction
-//           (bearish=coral, bullish=teal, neutral=gray). Full meta + tickers.
+//           (bearish=coral, bullish=teal, neutral/mixed=gray). Full meta + tickers.
 //   MEDIUM: 13px/400 text-primary, 3px gray left border. Tickers on hover.
 //   LOW:    13px/400 text-secondary, no border, collapsed meta.
 // Single-sided borders are never rounded (rounded-none is explicit).
-const TIER_BORDER = {
-  HIGH: { bullish: 'border-teal-400', bearish: 'border-rose-400', neutral: 'border-slate-500' },
-  MEDIUM: { bullish: 'border-slate-600', bearish: 'border-slate-600', neutral: 'border-slate-600' },
-  LOW: null,
-};
-const TIER_SCORE_CL = { HIGH: 'text-white', MEDIUM: 'text-slate-400', LOW: 'text-slate-600' };
-const TIER_HEAD_CL = {
-  HIGH: 'text-[15px] font-medium text-white',
-  MEDIUM: 'text-[13px] font-normal text-slate-200',
-  LOW: 'text-[13px] font-normal text-slate-500',
-};
-const dirKeyOf = (d) => {
-  const v = (d || '').toLowerCase();
-  return v.startsWith('bull') ? 'bullish' : v.startsWith('bear') ? 'bearish' : 'neutral';
-};
 
 // --- Reference frames for every numeric display (2026-08-12) --------------
 // Rule: no bare number without a scale, unit, or tooltip.
@@ -341,8 +329,13 @@ const TickerChip = ({ t, delta }) => {
 // what the feed can show. Mean tone is derived per cluster from
 // llm_direction (bullish=+1, bearish=-1, else 0) — no numeric tone field
 // exists on news_clusters; missing direction counts as neutral.
-const DRIVERS = ['Oil & Energy', 'Fed & Rates', 'Inflation & CPI', 'China & HK', 'Earnings', 'FX & Currency'];
+// Asset columns are the platform's stable asset taxonomy. Driver rows are
+// derived from the tags actually present in the served feed (see DriverMatrix)
+// — hardcoding them stranded live tags such as Geopolitics / AI & Tech /
+// Crypto Policy while rendering rows no current cluster carried.
 const MATRIX_ASSETS = ['US', 'HK', 'CRYPTO', 'FX', 'METAL'];
+const MAX_MATRIX_ROWS = 8;                    // includes the grouped Other row
+const OTHER_DRIVER = 'Other';
 
 const toneOf = (c) => {
   const d = (c.llm_direction || '').toLowerCase();
@@ -487,15 +480,19 @@ const AttentionTimeline = ({ feed, catalysts, mode, onMode, active, onSelect, li
               title={`${b.label} · ${b.n} clusters, ${b.scored} scored · ${b.stories} stories · mean tone ${fmtTone(b.mean)} over scored only${b.n ? ' · click to filter feed' : ' · no clusters this bucket (measured)'}`}
             >
               <span className="flex gap-px h-2 items-center">
-                {bCats.map((e, i) => (
-                  <span
-                    key={i}
-                    className={`text-[8px] leading-none ${e.ts >= now ? 'text-white' : 'text-slate-500'}`}
-                    title={`${e.event} · ${dayLabel(e.ts)}${e.ts >= now ? ` · in ${Math.ceil((e.ts - now) / DAY)}d` : ' · past'}${e.importance ? ` · ${e.importance}` : ''}${e.region ? ` · ${e.region}` : ''}`}
-                  >
-                    ◆{e.ts >= now && <span className="text-[7px] text-slate-400">{Math.ceil((e.ts - now) / DAY)}d</span>}
-                  </span>
-                ))}
+                {bCats.length > 0 && (() => {
+                  const nextTs = Math.min(...bCats.map((e) => e.ts));
+                  const dayCount = Math.max(Math.ceil((nextTs - now) / DAY), 0);
+                  return (
+                    <span
+                      className={`text-[8px] leading-none ${nextTs >= now ? 'text-white' : 'text-slate-500'}`}
+                      title={bCats.map((e) => `${e.event} · ${dayLabel(e.ts)}${e.ts >= now ? ` · in ${Math.max(Math.ceil((e.ts - now) / DAY), 0)}d` : ' · past'}${e.importance ? ` · ${e.importance}` : ''}${e.region ? ` · ${e.region}` : ''}`).join('\n')}
+                    >
+                      ◆{nextTs >= now && <span className="text-[7px] text-slate-400">{dayCount}d</span>}
+                      {bCats.length > 1 && <span className="text-[7px] text-slate-400"> ×{bCats.length}</span>}
+                    </span>
+                  );
+                })()}
               </span>
               <span
                 className="w-full rounded-none"
@@ -518,14 +515,39 @@ const AttentionTimeline = ({ feed, catalysts, mode, onMode, active, onSelect, li
   );
 };
 
-// Panel B — driver × asset-class matrix. Three cell states: MEASURED (tone
-// fill from scored clusters), MEASURED NEUTRAL (solid slate, scored but
-// balanced), UNSCORED (hatched, no fill — >50% of the cell's clusters lack
-// llm_direction, or the cell is empty). Mean tone is computed over SCORED
-// clusters only; tooltips state coverage explicitly. Click = filter feed.
+// Panel B — driver × asset-class matrix. Counts are always rendered: the
+// hatch is an unscored-data overlay, never a replacement for the measured
+// cluster count. Tone fill is computed over SCORED clusters only; a cell with
+// some scores but <=50% coverage keeps that fill under the hatch so partial
+// evidence is visible without reading as fully measured.
+const driverRowsFor = (feed) => {
+  const counts = new Map();
+  for (const c of feed) {
+    for (const tag of new Set(c.driver_tags || [])) {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const namedLimit = sorted.length > MAX_MATRIX_ROWS ? MAX_MATRIX_ROWS - 1 : MAX_MATRIX_ROWS;
+  const named = sorted.slice(0, namedLimit);
+  const otherTags = sorted.slice(namedLimit).map(([tag]) => tag);
+  const rows = named.map(([tag, n]) => ({ tag, n, tags: [tag], tagSet: new Set([tag]) }));
+  if (otherTags.length) {
+    const tagSet = new Set(otherTags);
+    rows.push({
+      tag: OTHER_DRIVER,
+      n: feed.filter((c) => (c.driver_tags || []).some((t) => tagSet.has(t))).length,
+      tags: otherTags,
+      tagSet,
+    });
+  }
+  return rows;
+};
+
 const DriverMatrix = ({ feed, labels, active, onSelect, live }) => {
-  const cell = (driver, asset) => {
-    const rows = feed.filter((c) => (c.driver_tags || []).includes(driver) && c.asset_class === asset);
+  const driverRows = driverRowsFor(feed);
+  const cell = (row, asset) => {
+    const rows = feed.filter((c) => c.asset_class === asset && (c.driver_tags || []).some((t) => row.tagSet.has(t)));
     const scored = rows.filter(hasDirection);
     const mean = scored.length ? scored.reduce((s, c) => s + toneOf(c), 0) / scored.length : 0;
     const unscored = rows.length === 0 || scored.length / rows.length <= 0.5;
@@ -534,6 +556,25 @@ const DriverMatrix = ({ feed, labels, active, onSelect, live }) => {
   const isActive = (d, a) => active?.type === 'cell' && active.driver === d && active.asset === a;
   const scoredTotal = feed.filter(hasDirection).length;
   const covPct = feed.length ? Math.round((100 * scoredTotal) / feed.length) : 0;
+
+  // At very low direction coverage the full 5-column grid is all hatch and
+  // carries no actionable shape. Keep the panel honest but compact until the
+  // coverage layer (qr_research t_94cad40c) expands the scored cohort.
+  if (covPct <= 40) {
+    return (
+      <div
+        className="qr-surface px-3 py-0.5 min-h-[20px] flex items-center gap-1.5 overflow-hidden whitespace-nowrap"
+        title={`${scoredTotal} of ${feed.length} clusters carry LLM direction; grid auto-expands above 40% coverage`}
+      >
+        <span className="qr-label shrink-0">Driver × asset</span>
+        <ProvBadge state="PENDING" tip="driver grid suppressed while direction coverage is <=40%; coverage expansion is qr_research t_94cad40c" />
+        <span className="text-[9px] font-mono text-slate-500 truncate">
+          driver breakdown pending direction coverage ({covPct}%) · t_94cad40c
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="qr-surface px-3 py-2">
       <div className="qr-label mb-1 flex items-center gap-1.5 flex-wrap">
@@ -553,24 +594,31 @@ const DriverMatrix = ({ feed, labels, active, onSelect, live }) => {
             <span key={a} className="flex-1 text-center text-[7px] font-mono text-slate-500 truncate">{labels?.[a] || a}</span>
           ))}
         </div>
-        {DRIVERS.map((d) => (
-          <div key={d} className="flex gap-px items-center">
-            <span className="w-[86px] shrink-0 text-[7px] font-mono text-slate-400 truncate">{d}</span>
+        {driverRows.map((row) => (
+          <div key={row.tag} className="flex gap-px items-center">
+            <span
+              className="w-[86px] shrink-0 text-[7px] font-mono text-slate-400 truncate"
+              title={row.tag === OTHER_DRIVER ? `Grouped driver tags: ${row.tags.join(', ')}` : `${row.n} clusters carry ${row.tag}`}
+            >
+              {row.tag}
+            </span>
             {MATRIX_ASSETS.map((a) => {
-              const { n, k, mean, unscored } = cell(d, a);
+              const { n, k, mean, unscored } = cell(row, a);
+              const fill = k ? toneStyle(mean, k) : { backgroundColor: 'rgba(100,116,139,0.10)' };
+              const style = unscored ? { ...fill, backgroundImage: HATCH.backgroundImage } : fill;
               return (
                 <button
                   key={a}
-                  onClick={() => onSelect(isActive(d, a) ? null : { type: 'cell', driver: d, asset: a, label: `${d} × ${labels?.[a] || a}`, n })}
-                  className={`flex-1 h-[13px] rounded-none text-[7px] font-mono ${n && !unscored ? 'text-white/80' : 'text-slate-600'} ${isActive(d, a) ? 'outline outline-1 outline-white/40' : ''}`}
-                  style={unscored ? HATCH : toneStyle(mean, k)}
+                  onClick={() => onSelect(isActive(row.tag, a) ? null : { type: 'cell', driver: row.tag, drivers: row.tags, asset: a, label: `${row.tag} × ${labels?.[a] || a}`, n })}
+                  className={`flex-1 h-[13px] rounded-none text-[7px] font-mono ${n === 0 ? 'text-slate-600' : unscored ? 'text-slate-300' : 'text-white/80'} ${isActive(row.tag, a) ? 'outline outline-1 outline-white/40' : ''}`}
+                  style={style}
                   title={n === 0
-                    ? `${d} × ${labels?.[a] || a} — no clusters (unscored, not neutral)`
+                    ? `${row.tag} × ${labels?.[a] || a} — 0 clusters (unscored, not neutral)`
                     : unscored
-                    ? `${d} × ${labels?.[a] || a} — ${n} clusters, ${k} scored — UNSCORED (>50% lack LLM direction); tone not measured`
-                    : `${d} × ${labels?.[a] || a} — ${n} clusters, ${k} scored, mean tone ${fmtTone(mean)} over scored only · click to filter feed`}
+                    ? `${row.tag} × ${labels?.[a] || a} — ${n} clusters, ${k} scored — UNSCORED (>50% lack LLM direction); count is measured${k ? `, mean tone ${fmtTone(mean)} over scored subset` : ''} · click to filter feed`
+                    : `${row.tag} × ${labels?.[a] || a} — ${n} clusters, ${k} scored, mean tone ${fmtTone(mean)} over scored only · click to filter feed`}
                 >
-                  {unscored ? (n ? '—' : '') : n || ''}
+                  {n}
                 </button>
               );
             })}
@@ -779,7 +827,7 @@ const ClusterExpansion = ({ c }) => {
 };
 
 const ClusterRow = ({ c, labels, expanded, onToggle, hits = [], deltas = {}, tier = 'LOW', rankTip }) => {
-  const border = TIER_BORDER[tier]?.[dirKeyOf(c.llm_direction)] || null;
+  const border = tierBorderFor(tier, c.llm_direction);
   const tickers = (c.tickers || []).slice(0, 4);
   const seenTs = c.last_seen_utc || c.first_seen_utc;
   const held = hits.some((h) => h.held);
@@ -876,8 +924,9 @@ export const NewsTab = () => {
   // (usePoll alone only re-fires on its interval / visibility change).
   const fetchNews = async () => {
     const langs = readableOnly ? '&langs=en,zh' : '';
-    // 168h window: the attention timeline needs 7 days of clusters; the feed
-    // is impact-sorted and stale-pilled, so the wider window is safe.
+    // The serving table is the latest rolling 48h batch; hours=168 is retained
+    // for the visible-feed scoring contract, not because the table carries 7d.
+    // The header labels the actual source window explicitly.
     const [cl, dg, out, pos, wl, cal, regs, sp] = await Promise.all([
       api.get(`/api/news/clusters?hours=168&limit=400${langs}`),
       api.get(`/api/news/digest?per_group=120&key_limit=8${langs}`),
@@ -984,6 +1033,17 @@ export const NewsTab = () => {
 
   const outlooks = outlookData?.outlooks || {};
   const runDate = outlookData?.run_date || null;
+  const outlookRunTs = parseUtc(runDate);
+  const outlookRefTs = parseUtc(outlookData?.generated_at || asOf);
+  const outlookAgeDays = outlookRunTs != null && outlookRefTs != null
+    ? Math.max(0, Math.floor((outlookRefTs - outlookRunTs) / 86400000))
+    : null;
+  const horizonCounts = Object.values(outlooks).reduce((m, o) => {
+    if (o?.horizon) m[o.horizon] = (m[o.horizon] || 0) + 1;
+    return m;
+  }, {});
+  const baselineHorizon = Object.entries(horizonCounts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || null;
 
   // Filter chain: language+dedup (feed) → panel filter (time bucket or
   // driver×asset cell) → My book only. Panels consume `feed` directly so
@@ -994,26 +1054,27 @@ export const NewsTab = () => {
       const t = parseUtc(c.first_seen_utc);
       return t != null && t >= panelFilter.start && t < panelFilter.end;
     }
-    return (c.driver_tags || []).includes(panelFilter.driver) && c.asset_class === panelFilter.asset;
+    const wanted = new Set(panelFilter.drivers || [panelFilter.driver]);
+    return (c.driver_tags || []).some((t) => wanted.has(t)) && c.asset_class === panelFilter.asset;
   };
   const hitsFor = (c) => bookHits(c, book, watchlist);
   const view = feed.filter(passesPanel).filter((c) => !myBookOnly || hitsFor(c).length > 0);
   const hiddenCount = (clusters || []).length - view.length;
 
   // Distribution-relative tiers over the CURRENTLY FILTERED window (view is
-  // impact-sorted): top 10% HIGH with floor 3 / cap 6, next 30% MEDIUM,
-  // remainder LOW. Absolute score display is unchanged — only visual tiering
-  // is relative. Rank tooltip: "53 — 4th of 136, top 3%".
+  // impact-sorted): top 10% HIGH with floor 3 / cap 4, next 30% MEDIUM,
+  // remainder LOW. Cutoffs are tie-run safe: equal impact scores move as one
+  // block to whichever side is closer to the target. Absolute score display is
+  // unchanged — only visual tiering is relative.
   const ordinal = (i) => (i % 100 >= 11 && i % 100 <= 13 ? `${i}th` : `${i}${['th', 'st', 'nd', 'rd'][Math.min(i % 10, 4)] || 'th'}`);
   const tierInfo = (() => {
     const n = view.length;
-    const hi = Math.min(n, Math.max(3, Math.min(6, Math.round(n * 0.10))));
-    const med = Math.round(n * 0.30);
+    const { hi, medEnd } = tierCutoffsFor(view);
     const m = {};
     view.forEach((c, i) => {
       const key = c.cluster_id || normH(c.canonical_headline);
       m[key] = {
-        tier: i < hi ? 'HIGH' : i < hi + med ? 'MEDIUM' : 'LOW',
+        tier: i < hi ? 'HIGH' : i < medEnd ? 'MEDIUM' : 'LOW',
         rankTip: `${c.impact_score ?? '—'} — ${ordinal(i + 1)} of ${n}, top ${Math.max(1, Math.round(((i + 1) / n) * 100))}%`,
       };
     });
@@ -1173,7 +1234,7 @@ export const NewsTab = () => {
               </div>
             ) : inWindow24 === 0 ? (
               <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 7d feed</span>
+                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 48h feed</span>
                 <ProvBadge state="PENDING" tip="news_clusters build job stalled — qr_etl t_ffff7242" />
                 <span className="text-[9px] font-mono text-slate-500">
                   no clusters in the last 24h — newest is {newestClusterH != null ? `${Math.round(newestClusterH)}h` : '—'} old (feed stale, qr_etl t_ffff7242). Not a measured zero.
@@ -1181,7 +1242,7 @@ export const NewsTab = () => {
               </div>
             ) : heldUnscored ? (
               <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 7d feed</span>
+                <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 48h feed</span>
                 <ProvBadge state="PENDING" tip="llm_direction via news_clusters stamp (qr_etl t_9a746bb9) + /api/news/outlook join (t_3bfe7f78) — held-name coverage gap" />
                 <span className="text-[9px] font-mono text-slate-500">
                   unavailable — {exposure.unscored} held cluster{exposure.unscored === 1 ? '' : 's'} in the feed but 0 carry LLM direction · direction-layer coverage gap (news_outlook stamp/join). Not a measured 0/0.
@@ -1189,7 +1250,7 @@ export const NewsTab = () => {
               </div>
             ) : (
             <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 7d feed</span>
+              <span className="text-[8px] font-mono text-slate-500 uppercase">Exposure impact · 48h feed</span>
               <ProvBadge state="LIVE" tip="consumption.portfolio_positions_current via /api/portfolio/positions × news_clusters tickers via /api/news/clusters · counted over exactly the rows rendered below (INVARIANT: strip counts == distinct held tickers on rows)" />
               <span
                 className="text-[9px] font-mono"
@@ -1207,14 +1268,14 @@ export const NewsTab = () => {
                 <span className="text-slate-500"> held bullish</span>
               </span>
               <span className="text-[8px] font-mono text-slate-600">
-                · {Object.keys(book).length} held{watchlist.size > 0 ? ` · ${watchlist.size} watched` : ''}
+                · {Object.keys(book).length} held position{Object.keys(book).length === 1 ? '' : 's'}{watchlist.size > 0 ? ` · ${watchlist.size} watched` : ''}
               </span>
               {exposure.unscored > 0 && (
                 <span
                   className="text-[8px] font-mono text-slate-600"
                   title={`${exposure.unscored} held cluster${exposure.unscored === 1 ? '' : 's'} in the feed carry no LLM direction yet — counts are over the ${exposure.scored} scored held cluster${exposure.scored === 1 ? '' : 's'} only`}
                 >
-                  · direction on {exposure.scored} of {exposure.scored + exposure.unscored} held
+                  · direction on {exposure.scored} of {exposure.scored + exposure.unscored} held cluster{exposure.scored + exposure.unscored === 1 ? '' : 's'}
                 </span>
               )}
             </div>
@@ -1223,17 +1284,32 @@ export const NewsTab = () => {
 
           {Object.keys(outlooks).length > 0 && (
             <div className="qr-surface px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-[8px] font-mono text-slate-500 uppercase">LLM outlook{runDate ? ` · ${runDate}` : ''}</span>
-              <ProvBadge state="LIVE" tip="consumption.news_outlook via /api/news/outlook (qr_research cron news-outlook-daily)" />
-              {Object.entries(outlooks).map(([cat, o]) => (
-                <span key={cat} className="text-[9px] font-mono inline-flex items-center gap-x-1.5" title={o.headline || undefined}>
-                  <span className="text-slate-400">{labels[cat] || cat}</span>
-                  <span className={dirCl(o.bias)}>{o.bias || '—'}</span>
-                  <ConfPips conf={o.confidence} />
-                  <ToneBar value={digest?.categories?.[cat]?.analytics?.tone_balance} />
-                  {o.horizon && <span className="text-slate-500">· {o.horizon}</span>}
-                </span>
-              ))}
+              <span className="text-[8px] font-mono text-slate-500 uppercase">
+                LLM outlook{runDate ? ` · ${runDate}` : ''}{outlookAgeDays > 0 ? ` · ${outlookAgeDays}d old` : ''}
+              </span>
+              <ProvBadge
+                state={outlookAgeDays > 0 ? 'PENDING' : 'LIVE'}
+                tip={`consumption.news_outlook via /api/news/outlook (qr_research news coverage scoring)${outlookAgeDays > 0 ? ` · run date is ${outlookAgeDays} day${outlookAgeDays === 1 ? '' : 's'} older than the reference timestamp` : ''}`}
+              />
+              {Object.entries(outlooks).map(([cat, o]) => {
+                const horizonOutlier = o.horizon && baselineHorizon && o.horizon !== baselineHorizon;
+                return (
+                  <span key={cat} className="text-[9px] font-mono inline-flex items-center gap-x-1.5" title={o.headline || undefined}>
+                    <span className="text-slate-400">{labels[cat] || cat}</span>
+                    <span className={dirCl(o.bias)}>{o.bias || '—'}</span>
+                    <ConfPips conf={o.confidence} />
+                    <ToneBar value={digest?.categories?.[cat]?.analytics?.tone_balance} />
+                    {o.horizon && (
+                      <span
+                        className={horizonOutlier ? 'rounded border border-white/20 bg-white/[0.05] px-1 py-px text-slate-200' : 'text-slate-500'}
+                        title={horizonOutlier ? `category-specific horizon: ${o.horizon}; baseline across categories is ${baselineHorizon}` : `horizon ${o.horizon}`}
+                      >
+                        · {o.horizon}{horizonOutlier ? ' · category-specific' : ''}
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
             </div>
           )}
 
@@ -1272,7 +1348,7 @@ export const NewsTab = () => {
                 )}
               </div>
               <div className="text-[9px] font-mono text-slate-500">
-                {view.length} clusters{myBookOnly ? ' · my book' : ''} · sorted by impact
+                {view.length} clusters shown · latest 48h batch · cap 400{myBookOnly ? ' · my book' : ''} · sorted by impact
                 {hiddenCount > 0 && <span> · {hiddenCount} hidden (language/dup/book)</span>}
               </div>
             </div>

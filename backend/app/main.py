@@ -3898,11 +3898,15 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
 
 @app.post("/api/execution/halt")
 def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
-    """Emergency kill switch — demote ALL live strategies to PAPER and set
-    global mode to PAPER_TRADING.  Keeps PAPER/SIM strategies running so the
-    quant can still observe signals, but no real-money orders fire.
+    """Emergency kill switch — demote ALL live strategies to PAPER per-strategy.
+    Keeps PAPER/SIM strategies running so the quant can still observe signals,
+    but no real-money orders fire.
 
     Requires confirmation_phrase = "HALT LIVE" in the payload.
+
+    Note (2026-08-25): no longer flips gold.platform_settings.global_execution_mode —
+    the global mode concept was removed from the UI; each strategy's own
+    execution_mode is the truth (4-book lifecycle).
     """
     phrase = (payload or {}).get("confirmation_phrase", "")
     if phrase != "HALT LIVE":
@@ -3918,23 +3922,12 @@ def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
     """)).fetchall()
 
     affected_ids = [r.strategy_id for r in affected]
-
-    # 2. Set global mode to PAPER
-    db.execute(text("""
-        INSERT INTO gold.platform_settings (key, value, updated_at)
-        VALUES ('global_execution_mode', 'PAPER_TRADING', NOW())
-        ON CONFLICT (key) DO UPDATE SET
-            value = 'PAPER_TRADING',
-            updated_at = NOW()
-    """))
     db.commit()
 
-    # 3. Audit
+    # 2. Audit
     _audit(db, "kill_switch.fire", None, {
         "affected_strategies": affected_ids,
         "count": len(affected_ids),
-        "previous_global_mode": "LIVE_TRADING",
-        "new_global_mode": "PAPER_TRADING",
     })
 
     logger.warning(f"KILL SWITCH activated — {len(affected_ids)} strategies demoted to PAPER")
@@ -3942,279 +3935,20 @@ def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
     event_bus.publish_sync("kill_switch", {
         "halted": len(affected_ids),
         "strategy_ids": affected_ids,
-        "global_mode": "PAPER_TRADING",
     })
 
     return {
         "success": True,
         "halted": len(affected_ids),
         "strategy_ids": affected_ids,
-        "global_mode": "PAPER_TRADING",
         "message": f"Kill switch activated. {len(affected_ids)} LIVE strategies demoted to PAPER_TRADING.",
     }
 
 
-@app.post("/api/ib/place-order")
-def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
-    """
-    Place an order through IBKR TWS API.
-    Works in PAPER_TRADING or LIVE_TRADING mode.
-    """
-    # Get current execution mode
-    mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings
-        WHERE key = 'global_execution_mode'
-    """)).fetchone()
-
-    current_mode = mode_result.value if mode_result else 'SIMULATION'
-
-    symbol = payload.get("symbol", "AAPL")
-    action = payload.get("action", "BUY")
-    quantity = payload.get("quantity", 1)
-    order_type = payload.get("order_type", "MKT")
-
-    if current_mode == "SIMULATION":
-        # Get current simulation balance
-        sim_capital = db.execute(text("""
-            SELECT value FROM gold.platform_settings
-            WHERE key = 'simulation_capital'
-        """)).fetchone()
-        sim_amount = float(sim_capital.value) if sim_capital else 100000
-
-        # Get current allocated capital
-        sim_stats = db.execute(text("""
-            SELECT COALESCE(SUM(capital), 0) as total_allocated
-            FROM consumption.portfolio_positions_current
-            WHERE status = 'ACTIVE'
-        """)).fetchone()
-        sim_used = float(sim_stats.total_allocated) if sim_stats else 0
-        sim_available = sim_amount - sim_used
-
-        return {
-            "success": True,
-            "simulated": True,
-            "message": f"SIMULATION: {action} {quantity} shares of {symbol} would be placed",
-            "order_id": f"SIM_{int(time.time())}",
-            "mode": current_mode,
-            "simulation_balance": {
-                "total": sim_amount,
-                "used": sim_used,
-                "available": sim_available
-            }
-        }
-
-    # Place real order through IBKR
-    try:
-        order_result = ib_quant_service.place_order(
-            symbol=symbol,
-            action=action,
-            quantity=int(quantity),
-            order_type=order_type,
-            account=None
-        )
-
-        if order_result and order_result.get("success"):
-            return {
-                "success": True,
-                "order_id": order_result.get("order_id"),
-                "status": order_result.get("status", "Submitted"),
-                "mode": current_mode,
-                "symbol": symbol,
-                "action": action,
-                "quantity": quantity,
-                "message": f"{current_mode} order submitted: {action} {quantity} {symbol}"
-            }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Order failed: {order_result.get('error', 'Unknown error')}"
-            )
-
-    except Exception as e:
-        logger.error(f"Error placing IBKR order: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/positions/sync-to-ibkr")
-def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
-    """
-    Sync existing paper positions to IBKR by placing real orders.
-    This is used when switching from SIMULATION to PAPER_TRADING mode
-    to actually submit the orders to IBKR.
-
-    Expects: { "max_positions": 10 } (optional, defaults to 5)
-    """
-    max_positions = payload.get("max_positions", 5)
-
-    # Get current execution mode
-    mode_result = db.execute(text("""
-        SELECT value FROM gold.platform_settings
-        WHERE key = 'global_execution_mode'
-    """)).fetchone()
-
-    current_mode = mode_result.value if mode_result else 'SIMULATION'
-
-    if current_mode == "SIMULATION":
-        return {
-            "success": False,
-            "error": "Cannot sync in SIMULATION mode. Switch to PAPER_TRADING first."
-        }
-
-    # Check IBKR connection
-    try:
-        tws_status = ib_quant_service.get_status()
-        if not tws_status.get("is_connected"):
-            return {
-                "success": False,
-                "error": "IBKR not connected. Check TWS Gateway."
-            }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Failed to check IBKR status: {str(e)}"
-        }
-
-    # Get positions that need IBKR orders
-    result = db.execute(text("""
-        SELECT id, strategy_id, ticker, capital, entry_price, execution_mode
-        FROM consumption.portfolio_positions_current
-        WHERE status = 'ACTIVE'
-        AND invested_capital > 0
-        AND (ibkr_order_id IS NULL OR ibkr_order_id = '')
-        AND execution_mode = 'PAPER_TRADING'
-        ORDER BY id
-        LIMIT :limit
-    """), {"limit": max_positions})
-
-    positions = []
-    for row in result:
-        positions.append({
-            'id': row.id,
-            'strategy_id': row.strategy_id,
-            'ticker': row.ticker,
-            'capital': float(row.capital),
-            'entry_price': float(row.entry_price) if row.entry_price else None
-        })
-
-    submitted = []
-    failed = []
-
-    for pos in positions:
-        # Clean up ticker format
-        ticker = pos['ticker']
-        # Remove quotes, brackets, and extra whitespace
-        ticker = ticker.replace('[', '').replace(']', '').replace('"', '').replace("'", '').strip()
-
-        # Skip FX pairs for now (need special handling)
-        if '/' in ticker:
-            failed.append({
-                "ticker": ticker,
-                "error": "FX pairs require special handling"
-            })
-            continue
-
-        # Clean up HK ticker format - convert "0006.HK" to "6.HK" or keep as is
-        if ticker.endswith('.HK'):
-            # Keep the HK suffix but clean up leading zeros if needed
-            parts = ticker.split('.')
-            if len(parts) == 2 and parts[0].isdigit():
-                # Keep original format - IBKR should handle it
-                pass
-
-        # Calculate quantity
-        if pos['entry_price'] and pos['entry_price'] > 0:
-            quantity = int(pos['capital'] / pos['entry_price'])
-        else:
-            # Fetch current price
-            try:
-                import yfinance as yf
-                t = yf.Ticker(ticker)
-                info = t.info
-                current_price = info.get('regularMarketPrice', 100)
-                quantity = int(pos['capital'] / current_price)
-            except:
-                quantity = 10
-
-        if quantity < 1:
-            quantity = 1
-
-        try:
-            order_result = ib_quant_service.place_order(
-                symbol=ticker,
-                action="BUY",
-                quantity=quantity,
-                order_type="MKT",
-                account=None
-            )
-
-            if order_result and order_result.get('success'):
-                order_id = order_result.get('order_id', 'UNKNOWN')
-                fill_price = order_result.get('fill_price')  # IBKR golden source price
-
-                # Use IBKR fill price if available, otherwise fall back to estimated price
-                entry_price = fill_price if fill_price else (pos['entry_price'] or 0)
-
-                # Update database with IBKR golden source price
-                db.execute(text("""
-                    UPDATE consumption.portfolio_positions_current
-                    SET ibkr_order_id = :order_id,
-                        entry_price = :entry_price,
-                        current_price = :entry_price,
-                        invested_capital = :capital,
-                        last_order_status = 'BUY_FILLED_IBKR',
-                        updated_at = NOW()
-                    WHERE id = :id
-                """), {
-                    "order_id": str(order_id),
-                    "id": pos['id'],
-                    "entry_price": entry_price,
-                    "capital": pos['capital']
-                })
-
-                db.execute(text("""
-                    INSERT INTO gold.trade_executions
-                    (strategy_id, ticker, execution_mode, order_type, side, quantity, price, status, ibkr_order_id, executed_at)
-                    VALUES (:strategy_id, :ticker, :mode, 'MARKET', 'BUY', :qty, :price, 'FILLED_IBKR', :order_id, NOW())
-                """), {
-                    "strategy_id": pos['strategy_id'],
-                    "ticker": ticker,
-                    "mode": current_mode,
-                    "qty": quantity,
-                    "price": entry_price,
-                    "order_id": str(order_id)
-                })
-
-                submitted.append({
-                    "ticker": ticker,
-                    "quantity": quantity,
-                    "order_id": order_id,
-                    "fill_price": entry_price,  # Include the golden source price
-                    "capital": pos['capital']
-                })
-            else:
-                error = order_result.get('error', 'Unknown error') if order_result else 'No result'
-                failed.append({
-                    "ticker": ticker,
-                    "error": error
-                })
-
-        except Exception as e:
-            failed.append({
-                "ticker": ticker,
-                "error": str(e)
-            })
-
-    db.commit()
-
-    return {
-        "success": True,
-        "mode": current_mode,
-        "total_pending": len(positions),
-        "submitted": len(submitted),
-        "failed": len(failed),
-        "orders": submitted,
-        "errors": failed
-    }
+# NOTE (2026-08-25): /api/ib/place-order and /api/positions/sync-to-ibkr are
+# served exclusively by app/routes/ibkr.py (registered via include_router before
+# these duplicates). The shadowed copies that lived here were removed as part of
+# the per-book routing change (book=sim|paper|paper_uat|live + order_ref tagging).
 
 
 @app.post("/api/simulation/reset")
@@ -5129,16 +4863,25 @@ def compare_strategies(ids: str, days: int = 90, db: Session = Depends(get_db)):
 # NOTE: this route must be declared BEFORE the catch-all
 # `/api/strategies/{strategy_id:path}` so that `/evaluation` is matched first.
 @app.get("/api/strategies/{strategy_id}/evaluation")
-def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int = 50, db: Session = Depends(get_db)):
+def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int = 50,
+                            book: str = "auto", db: Session = Depends(get_db)):
     """One-shot evaluation payload powering the Strategy Detail page.
 
     Aggregates: header metadata, backtest metrics, live metrics, monthly returns,
     equity curve (cumulative live PnL), recent trades, recent signals, and a
     backtest-vs-live divergence verdict. Resilient to missing consumption views.
 
+    Also returns `metrics_by_mode` — per-book headline stats (win rate / P&L /
+    trade count) for SIM (OOS backtest), PAPER (gold.paper_trades_synthetic),
+    PAPER_UAT (gold.paper_uat_fills) and LIVE (gold.trade_executions) — so the
+    detail page can render the 4-mode toggle strip without extra round-trips.
+    Fields are NULL when a book has no data — never a fake zero.
+
     Query parameters:
       days: rolling window for the equity curve (default 90).
       trade_limit: max trade events to return for the ledger (default 50, capped at 1000).
+      book: which ledger the live block (live metrics / equity curve / recent
+            trades) reads — auto (current deployment mode), paper, or live.
     """
     # ---- Header / metadata -------------------------------------------------
     strategy = safe_query_one(db, """
@@ -5233,8 +4976,17 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
     # Prefer gold.trade_executions for LIVE_TRADING only. For PAPER/SIMULATION
     # strategies the canonical live ledger is gold.paper_trades_synthetic, which
     # is maintained by the position-aware rebalancer and enforces one open
-    # position per ticker.
-    use_trade_executions = registry_to_api_mode(strategy.execution_mode) == 'LIVE_TRADING'
+    # position per ticker. The `book` query param overrides the source so the
+    # detail page's mode toggle can read a specific ledger regardless of the
+    # strategy's current deployment mode.
+    api_mode = registry_to_api_mode(strategy.execution_mode)
+    book_req = (book or "auto").lower()
+    if book_req == "paper":
+        use_trade_executions = False
+    elif book_req == "live":
+        use_trade_executions = True
+    else:
+        use_trade_executions = api_mode == 'LIVE_TRADING'
 
     # ---- Live metrics -------------------------------------------------------
     # CASH is a cash-bucket placeholder, not a tradeable ticker; exclude it from
@@ -5289,6 +5041,108 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
             "avg_holding_days": (round(float(live.avg_hold_days), 1)
                                  if getattr(live, "avg_hold_days", None) is not None else None),
         }
+
+    # ---- Per-mode headline metrics (4-mode toggle strip) --------------------
+    # One aggregate per book so the detail page can show 4 win rates + 4 P&L
+    # figures that stay on screen while the lower panels switch with the
+    # toggle. Empty books return NULL fields — the UI renders an honest
+    # no-data state, never a fake zero.
+    def _shape_book_metrics(row):
+        if not row or not row.total_trades or row.total_trades <= 0:
+            return {"total_trades": 0, "win_rate": None, "profit_factor": None,
+                    "total_pnl": None, "last_trade_at": None}
+        wr = (row.winners or 0) / row.total_trades
+        pf = float(row.gross_win) / float(row.gross_loss) if row.gross_loss and row.gross_loss > 0 else None
+        return {
+            "total_trades": int(row.total_trades),
+            "win_rate": round(wr, 4),
+            "profit_factor": round(pf, 3) if pf is not None else None,
+            "total_pnl": float(row.total_pnl or 0),
+            "last_trade_at": row.last_trade_at.isoformat() if row.last_trade_at else None,
+        }
+
+    if use_trade_executions:
+        paper_book_row = safe_query_one(db, """
+            SELECT COUNT(*)                                        AS total_trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)        AS winners,
+                   SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)      AS gross_win,
+                   SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)     AS gross_loss,
+                   COALESCE(SUM(pnl), 0)                           AS total_pnl,
+                   MAX(exit_date)                                  AS last_trade_at
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid AND status = 'closed' AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+        """, {"sid": strategy_id}, label="eval_paper_book_summary")
+        paper_book_metrics = _shape_book_metrics(paper_book_row)
+        live_book_metrics = dict(live_metrics)
+        if live_book_metrics.get("total_trades", 0) == 0:
+            live_book_metrics["total_pnl"] = None
+    else:
+        live_book_row = safe_query_one(db, """
+            SELECT COUNT(*)                                        AS total_trades,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)        AS winners,
+                   SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END)      AS gross_win,
+                   SUM(CASE WHEN pnl < 0 THEN -pnl ELSE 0 END)     AS gross_loss,
+                   COALESCE(SUM(pnl), 0)                           AS total_pnl,
+                   MAX(executed_at)                                AS last_trade_at
+            FROM gold.trade_executions
+            WHERE strategy_id = :sid AND pnl IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+        """, {"sid": strategy_id}, label="eval_live_book_summary")
+        live_book_metrics = _shape_book_metrics(live_book_row)
+        paper_book_metrics = dict(live_metrics)
+        if paper_book_metrics.get("total_trades", 0) == 0:
+            paper_book_metrics["total_pnl"] = None
+
+    # PAPER_UAT: broker-rehearsal fills synced from the IBKR UAT session.
+    # gold.paper_uat_fills has no per-fill pnl column (fills, not round-trips),
+    # so only the fill count / last-fill timestamp are knowable here; WR / PF /
+    # P&L stay NULL until a per-strategy UAT round-trip ledger exists.
+    uat_book_row = safe_query_one(db, """
+        SELECT COUNT(*)            AS total_fills,
+               MAX(fill_time)      AS last_fill_at
+        FROM gold.paper_uat_fills
+        WHERE strategy_id = :sid
+    """, {"sid": strategy_id}, label="eval_uat_book_summary")
+    uat_book_metrics = {
+        "total_fills": int(uat_book_row.total_fills) if uat_book_row and uat_book_row.total_fills else 0,
+        "total_trades": None,
+        "win_rate": None,
+        "profit_factor": None,
+        "total_pnl": None,
+        "last_trade_at": (uat_book_row.last_fill_at.isoformat()
+                          if uat_book_row and uat_book_row.last_fill_at else None),
+    }
+
+    metrics_by_mode = {
+        # SIM = OOS backtest baseline. Backtests store per-trade pnl_pct, not
+        # dollars, so total_pnl is NULL and total_return (OOS %) is the honest
+        # performance figure.
+        "sim": {**backtest_metrics, "total_pnl": None},
+        "paper": paper_book_metrics,
+        "paper_uat": uat_book_metrics,
+        "live": live_book_metrics,
+    }
+
+    # Per-strategy UAT fills for the PAPER_UAT detail view (empty until the
+    # UAT book accrues broker-rehearsal fills attributed to this strategy).
+    uat_fill_rows = safe_query(db, """
+        SELECT fill_time, symbol, side, qty, price, currency, exec_id, order_ref
+        FROM gold.paper_uat_fills
+        WHERE strategy_id = :sid
+        ORDER BY fill_time DESC
+        LIMIT 500
+    """, {"sid": strategy_id}, label="eval_uat_fills")
+    uat_fills = [{
+        "ts": f.fill_time.isoformat() if f.fill_time else None,
+        "ticker": f.symbol,
+        "side": f.side,
+        "quantity": float(f.qty) if f.qty is not None else None,
+        "price": float(f.price) if f.price is not None else None,
+        "currency": f.currency,
+        "exec_id": f.exec_id,
+        "order_ref": f.order_ref,
+    } for f in uat_fill_rows]
 
     # ---- Equity curve (cumulative live pnl per day, last `days` days) ------
     # Exclude CASH-bucket placeholder trades so the curve reflects security P&L only.
@@ -5538,6 +5392,11 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
             "backtest": backtest_metrics,
             "live": live_metrics,
         },
+        "metrics_by_mode": metrics_by_mode,
+        "uat_fills": uat_fills,
+        # Which ledger the live block (metrics.live / equity_curve /
+        # recent_trades) was read from — echoes the `book` override.
+        "book": "live" if use_trade_executions else "paper",
         "divergence": {
             "win_rate_delta_pp": wr_delta_pp,
             "profit_factor_delta": pf_delta,
@@ -5854,7 +5713,7 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
 # --- STRATEGY SCREENER APIs ---
 
 # ---------------------------------------------------------------------------
-# Promotion gates — SIM → PAPER → LIVE
+# Promotion gates — SIM → PAPER → PAPER_UAT → LIVE
 # ---------------------------------------------------------------------------
 
 PROMOTION_GATES = {
@@ -5866,6 +5725,14 @@ PROMOTION_GATES = {
         "min_backtest_sharpe":   1.00,
         "max_drawdown_pct":      -25.0,    # not worse than -25%
     },
+    # PAPER → PAPER_UAT: stage move into broker rehearsal (IBKR UAT session,
+    # paper money). Strategy is already paper-qualified; allowed but logged.
+    "PAPER_TRADING->PAPER_UAT": {},
+    # PAPER_UAT → LIVE: intentionally ABSENT — transition is blocked until
+    # qr_research/QA define the gate criteria (proposal: ≥10 clean UAT fills,
+    # zero rejects, median |slippage| vs signal within tolerance, ≥5 UAT
+    # sessions). Phase 4 kanban t_b64f7302 tracks the mirror that supplies
+    # those metrics. override_gates=true can force it (audited).
     # PAPER → LIVE: gates must pass against live (paper) data + recency
     "PAPER_TRADING->LIVE_TRADING": {
         "min_live_trades":          30,
@@ -5876,13 +5743,20 @@ PROMOTION_GATES = {
     },
     # LIVE → PAPER (demote, always allowed but logged)
     "LIVE_TRADING->PAPER_TRADING": {},
+    # PAPER_UAT → PAPER (demote out of broker rehearsal)
+    "PAPER_UAT->PAPER_TRADING": {},
+    # PAPER_UAT → SIM (full demote)
+    "PAPER_UAT->SIMULATION": {},
     # PAPER → SIM (demote)
     "PAPER_TRADING->SIMULATION":   {},
     # LIVE → SIM (full halt)
     "LIVE_TRADING->SIMULATION":    {},
 }
 
-VALID_MODES = {"SIMULATION", "PAPER_TRADING", "LIVE_TRADING"}
+VALID_MODES = {"SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"}
+
+# Ladder rank: promotion = moving to a strictly higher rung.
+MODE_RANK = {"SIMULATION": 0, "PAPER_TRADING": 1, "PAPER_UAT": 2, "LIVE_TRADING": 3}
 
 
 def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
@@ -6060,8 +5934,7 @@ def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)
     transition = f"{current_mode}->{target}"
     metrics = _gather_promotion_metrics(db, strategy_id)
     eval_result = _evaluate_gates(transition, metrics, current_mode)
-    is_promotion = (current_mode == "SIMULATION" and target in ("PAPER_TRADING", "LIVE_TRADING")) \
-                or (current_mode == "PAPER_TRADING" and target == "LIVE_TRADING")
+    is_promotion = MODE_RANK.get(target, -1) > MODE_RANK.get(current_mode, -1)
     requires_phrase = (target == "LIVE_TRADING" and is_promotion)
 
     return {
@@ -6101,8 +5974,7 @@ def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
                 "message": f"Strategy already in {target}"}
 
     transition = f"{current_mode}->{target}"
-    is_promotion = (current_mode == "SIMULATION" and target in ("PAPER_TRADING", "LIVE_TRADING")) \
-                or (current_mode == "PAPER_TRADING" and target == "LIVE_TRADING")
+    is_promotion = MODE_RANK.get(target, -1) > MODE_RANK.get(current_mode, -1)
 
     # LIVE requires a typed confirmation phrase regardless of override
     if target == "LIVE_TRADING" and is_promotion and confirm != "PROMOTE TO LIVE":
@@ -6180,35 +6052,9 @@ DEMOTE_RULES = {
 
 
 
-@app.post("/api/strategies/{strategy_id:path}/mode")
-def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
-    """Set execution mode: SIMULATION, PAPER_TRADING, or LIVE_TRADING"""
-    mode = payload.get("execution_mode", "SIMULATION")
-
-    if mode not in ["SIMULATION", "PAPER_TRADING", "LIVE_TRADING"]:
-        raise HTTPException(status_code=400, detail="Invalid mode. Use SIMULATION, PAPER_TRADING, or LIVE_TRADING")
-
-    registry_mode = api_to_registry_mode(mode)
-    result = db.execute(text("""
-        UPDATE gold.strategy_registry
-        SET execution_mode = :mode,
-            updated_at = NOW()
-        WHERE strategy_id = :strategy_id
-        RETURNING strategy_id, name, execution_mode
-    """), {"strategy_id": strategy_id, "mode": registry_mode}).fetchone()
-
-    if not result:
-        raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
-
-    db.commit()
-
-    return {
-        "success": True,
-        "strategy_id": result.strategy_id,
-        "strategy_name": result.name,
-        "execution_mode": registry_to_api_mode(result.execution_mode),
-        "message": f"Execution mode set to {mode}"
-    }
+# NOTE (2026-08-25): /api/strategies/{id}/mode is served by app/routes/strategies.py
+# (router registered first; this copy was shadowed dead code). Removed during the
+# PAPER_UAT 4-book change; the router version accepts PAPER_UAT.
 
 
 @app.post("/api/strategies/execute-order")
