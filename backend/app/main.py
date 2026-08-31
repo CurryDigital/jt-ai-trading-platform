@@ -3948,7 +3948,7 @@ def halt_all_live(payload: dict = None, db: Session = Depends(get_db)):
 # NOTE (2026-08-25): /api/ib/place-order and /api/positions/sync-to-ibkr are
 # served exclusively by app/routes/ibkr.py (registered via include_router before
 # these duplicates). The shadowed copies that lived here were removed as part of
-# the per-book routing change (book=sim|paper|paper_uat|live + order_ref tagging).
+# the per-book routing change (book=sim|paper|uat|live + order_ref tagging).
 
 
 @app.post("/api/simulation/reset")
@@ -4873,7 +4873,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
 
     Also returns `metrics_by_mode` — per-book headline stats (win rate / P&L /
     trade count) for SIM (OOS backtest), PAPER (gold.paper_trades_synthetic),
-    PAPER_UAT (gold.paper_uat_fills) and LIVE (gold.trade_executions) — so the
+    UAT (gold.paper_uat_fills) and LIVE (gold.trade_executions) — so the
     detail page can render the 4-mode toggle strip without extra round-trips.
     Fields are NULL when a book has no data — never a fake zero.
 
@@ -5094,7 +5094,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         if paper_book_metrics.get("total_trades", 0) == 0:
             paper_book_metrics["total_pnl"] = None
 
-    # PAPER_UAT: broker-rehearsal fills synced from the IBKR UAT session.
+    # UAT: broker-rehearsal fills synced from the IBKR UAT session.
     # gold.paper_uat_fills has no per-fill pnl column (fills, not round-trips),
     # so only the fill count / last-fill timestamp are knowable here; WR / PF /
     # P&L stay NULL until a per-strategy UAT round-trip ledger exists.
@@ -5120,11 +5120,11 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         # performance figure.
         "sim": {**backtest_metrics, "total_pnl": None},
         "paper": paper_book_metrics,
-        "paper_uat": uat_book_metrics,
+        "uat": uat_book_metrics,
         "live": live_book_metrics,
     }
 
-    # Per-strategy UAT fills for the PAPER_UAT detail view (empty until the
+    # Per-strategy UAT fills for the UAT detail view (empty until the
     # UAT book accrues broker-rehearsal fills attributed to this strategy).
     uat_fill_rows = safe_query(db, """
         SELECT fill_time, symbol, side, qty, price, currency, exec_id, order_ref
@@ -5713,7 +5713,7 @@ def get_strategy_by_id(strategy_id: str, db: Session = Depends(get_db)):
 # --- STRATEGY SCREENER APIs ---
 
 # ---------------------------------------------------------------------------
-# Promotion gates — SIM → PAPER → PAPER_UAT → LIVE
+# Promotion gates — SIM → PAPER → UAT → LIVE
 # ---------------------------------------------------------------------------
 
 PROMOTION_GATES = {
@@ -5725,10 +5725,10 @@ PROMOTION_GATES = {
         "min_backtest_sharpe":   1.00,
         "max_drawdown_pct":      -25.0,    # not worse than -25%
     },
-    # PAPER → PAPER_UAT: stage move into broker rehearsal (IBKR UAT session,
+    # PAPER → UAT: stage move into broker rehearsal (IBKR UAT session,
     # paper money). Strategy is already paper-qualified; allowed but logged.
-    "PAPER_TRADING->PAPER_UAT": {},
-    # PAPER_UAT → LIVE: intentionally ABSENT — transition is blocked until
+    "PAPER_TRADING->UAT": {},
+    # UAT → LIVE: intentionally ABSENT — transition is blocked until
     # qr_research/QA define the gate criteria (proposal: ≥10 clean UAT fills,
     # zero rejects, median |slippage| vs signal within tolerance, ≥5 UAT
     # sessions). Phase 4 kanban t_b64f7302 tracks the mirror that supplies
@@ -5743,20 +5743,20 @@ PROMOTION_GATES = {
     },
     # LIVE → PAPER (demote, always allowed but logged)
     "LIVE_TRADING->PAPER_TRADING": {},
-    # PAPER_UAT → PAPER (demote out of broker rehearsal)
-    "PAPER_UAT->PAPER_TRADING": {},
-    # PAPER_UAT → SIM (full demote)
-    "PAPER_UAT->SIMULATION": {},
+    # UAT → PAPER (demote out of broker rehearsal)
+    "UAT->PAPER_TRADING": {},
+    # UAT → SIM (full demote)
+    "UAT->SIMULATION": {},
     # PAPER → SIM (demote)
     "PAPER_TRADING->SIMULATION":   {},
     # LIVE → SIM (full halt)
     "LIVE_TRADING->SIMULATION":    {},
 }
 
-VALID_MODES = {"SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"}
+VALID_MODES = {"SIMULATION", "PAPER_TRADING", "UAT", "LIVE_TRADING"}
 
 # Ladder rank: promotion = moving to a strictly higher rung.
-MODE_RANK = {"SIMULATION": 0, "PAPER_TRADING": 1, "PAPER_UAT": 2, "LIVE_TRADING": 3}
+MODE_RANK = {"SIMULATION": 0, "PAPER_TRADING": 1, "UAT": 2, "LIVE_TRADING": 3}
 
 
 def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
@@ -5915,6 +5915,8 @@ def _audit(db: Session, event_type: str, strategy_id: str, payload: dict):
 def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     """Evaluate promotion gates for a target mode without making changes."""
     target = (payload or {}).get("target_mode")
+    if target == "PAPER_UAT":  # legacy pre-rename API vocabulary
+        target = "UAT"
     if target not in VALID_MODES:
         raise HTTPException(status_code=400, detail=f"target_mode must be one of {sorted(VALID_MODES)}")
 
@@ -5955,6 +5957,8 @@ def promote_check(strategy_id: str, payload: dict, db: Session = Depends(get_db)
 def promote(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     """Run gate checks then promote/demote a strategy. LIVE requires confirmation phrase."""
     target = (payload or {}).get("target_mode")
+    if target == "PAPER_UAT":  # legacy pre-rename API vocabulary
+        target = "UAT"
     if target not in VALID_MODES:
         raise HTTPException(status_code=400, detail=f"target_mode must be one of {sorted(VALID_MODES)}")
 
@@ -6054,7 +6058,7 @@ DEMOTE_RULES = {
 
 # NOTE (2026-08-25): /api/strategies/{id}/mode is served by app/routes/strategies.py
 # (router registered first; this copy was shadowed dead code). Removed during the
-# PAPER_UAT 4-book change; the router version accepts PAPER_UAT.
+# PAPER_UAT 4-book change; the router version accepts UAT (legacy PAPER_UAT aliased).
 
 
 @app.post("/api/strategies/execute-order")

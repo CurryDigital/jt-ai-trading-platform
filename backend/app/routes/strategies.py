@@ -748,7 +748,9 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
         "SELECT value FROM gold.platform_settings WHERE key = 'global_execution_mode'"
     )).fetchone()
     current_mode = requested_mode or (mode_result.value if mode_result else "SIMULATION")
-    if current_mode not in ("SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"):
+    if current_mode == "PAPER_UAT":  # legacy pre-rename API vocabulary
+        current_mode = "UAT"
+    if current_mode not in ("SIMULATION", "PAPER_TRADING", "UAT", "LIVE_TRADING"):
         current_mode = "SIMULATION"
 
     strategy = db.execute(text(
@@ -771,12 +773,12 @@ def deploy_strategy_with_pool(payload: dict, db: Session = Depends(get_db)):
     # For PAPER/SIMULATION registry strategies the paper ledger
     # (gold.paper_trades_synthetic, written by the ETL rebalancer and synced
     # into consumption.portfolio_positions_current) is the source of truth.
-    # For PAPER_UAT strategies positions live at the IBKR UAT session (broker
+    # For UAT strategies positions live at the IBKR UAT session (broker
     # rehearsal) — also never written here.
     # Do NOT write placeholder capital rows here — only persist the requested
     # execution mode to the registry so the rebalancer picks the strategy up.
     registry_api_mode = registry_to_api_mode(getattr(strategy, "execution_mode", None))
-    if registry_api_mode in ("PAPER_TRADING", "SIMULATION", "PAPER_UAT") or current_mode == "PAPER_UAT":
+    if registry_api_mode in ("PAPER_TRADING", "SIMULATION", "UAT") or current_mode == "UAT":
         registry_mode = api_to_registry_mode(current_mode)
         db.execute(text("""
             UPDATE gold.strategy_registry
@@ -1007,7 +1009,7 @@ def get_strategy_detail(strategy_id: str, db: Session = Depends(get_db)):
 @router.post("/strategies/{strategy_id:path}/mode")
 def set_execution_mode(strategy_id: str, payload: dict, db: Session = Depends(get_db)):
     mode = payload.get("execution_mode", "SIMULATION")
-    if mode not in ["SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"]:
+    if mode not in ["SIMULATION", "PAPER_TRADING", "UAT", "LIVE_TRADING"]:
         raise HTTPException(status_code=400, detail="Invalid mode")
 
     registry_mode = api_to_registry_mode(mode)
@@ -1032,8 +1034,8 @@ def get_execution_mode(strategy_id: str, db: Session = Depends(get_db)):
     return {
         "strategy_id": result.strategy_id, "strategy_name": result.name,
         "execution_mode": api_mode, "venue": "IBKR",
-        "available_modes": ["SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"],
-        "risk_level": {"SIMULATION": "ZERO", "PAPER_TRADING": "LOW", "PAPER_UAT": "LOW", "LIVE_TRADING": "HIGH"}.get(api_mode, "UNKNOWN"),
+        "available_modes": ["SIMULATION", "PAPER_TRADING", "UAT", "LIVE_TRADING"],
+        "risk_level": {"SIMULATION": "ZERO", "PAPER_TRADING": "LOW", "UAT": "LOW", "LIVE_TRADING": "HIGH"}.get(api_mode, "UNKNOWN"),
     }
 
 

@@ -5,7 +5,7 @@ const MARKETS = ['US', 'HK'];
 
 // Manual order ticket.
 //  - sim / paper     -> POST /api/execution/manual-order (virtual books, DB ledger only)
-//  - paper_uat       -> POST /api/ib/place-order {book:'paper_uat'} — REAL order on the
+//  - uat             -> POST /api/ib/place-order {book:'uat'} — REAL order on the
 //                       dedicated IBKR paper session (paper money, hard 503 when down,
 //                       never falls back to primary/live). Nothing is written to the
 //                       blotter client-side; fills appear from ib.fills() (source: ibkr).
@@ -19,9 +19,9 @@ export const ManualTicket = ({ book, prefill, onFilled }) => {
 
   const up = (k) => (e) => setF(s => ({ ...s, [k]: e.target.value }));
 
-  const BOOK_LABEL = { sim: 'SIM', paper: 'PAPER', paper_uat: 'UAT', live: 'LIVE' };
+  const BOOK_LABEL = { sim: 'SIM', paper: 'PAPER', uat: 'UAT', paper_uat: 'UAT', live: 'LIVE' };
   const bookLabel = BOOK_LABEL[book] || (book || '').toUpperCase();
-  const isReal = book === 'paper_uat' || book === 'live';
+  const isReal = book === 'uat' || book === 'paper_uat' || book === 'live';
   const realMoney = book === 'live';
 
   const valid = f.ticker.trim() && Number(f.qty) > 0 && (isReal || Number(f.entry) > 0);
@@ -37,7 +37,7 @@ export const ManualTicket = ({ book, prefill, onFilled }) => {
         `${action} ${f.qty} ${symbol} @ MKT\n` +
         (realMoney
           ? `Routes to the primary session. This cannot be undone once filled.`
-          : `Routes to the dedicated UAT session (book=paper_uat) — never falls back to live.`)
+          : `Routes to the dedicated UAT session (book=uat) — never falls back to live.`)
       );
       if (!ok) return;
     }

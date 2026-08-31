@@ -44,18 +44,18 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
 
     response = {
         "execution_mode": current_mode,
-        "available_modes": ["SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"],
-        "risk_level": {"SIMULATION": "ZERO", "PAPER_TRADING": "LOW", "PAPER_UAT": "LOW", "LIVE_TRADING": "HIGH"}.get(current_mode, "UNKNOWN"),
+        "available_modes": ["SIMULATION", "PAPER_TRADING", "UAT", "LIVE_TRADING"],
+        "risk_level": {"SIMULATION": "ZERO", "PAPER_TRADING": "LOW", "UAT": "LOW", "LIVE_TRADING": "HIGH"}.get(current_mode, "UNKNOWN"),
         "simulation_capital": sim_amount, "simulation_used": sim_used,
         "simulation_available": sim_amount - sim_used, "simulation_positions": sim_positions,
     }
 
     # IBKR balance for broker-backed modes.
-    # PAPER_UAT reads the dedicated UAT paper session; PAPER_TRADING /
+    # UAT reads the dedicated UAT paper session; PAPER_TRADING /
     # LIVE_TRADING read the primary session (existing behaviour).
-    if current_mode in ["PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"]:
+    if current_mode in ["PAPER_TRADING", "UAT", "LIVE_TRADING"]:
         try:
-            if current_mode == "PAPER_UAT":
+            if current_mode == "UAT":
                 from app.services.ib_service import ib_uat_service as _svc
                 session_name = "uat"
             else:
@@ -122,7 +122,7 @@ def set_global_execution_mode(payload: dict, db: Session = Depends(get_db)):
     mode = payload.get("execution_mode", "SIMULATION")
     sim_capital = payload.get("simulation_capital")
 
-    if mode not in ["SIMULATION", "PAPER_TRADING", "PAPER_UAT", "LIVE_TRADING"]:
+    if mode not in ["SIMULATION", "PAPER_TRADING", "UAT", "LIVE_TRADING"]:
         raise HTTPException(status_code=400, detail="Invalid mode")
 
     db.execute(text("""
@@ -188,6 +188,11 @@ def reset_simulation(db: Session = Depends(get_db)):
 @router.get("/trades")
 def get_execution_trades(book: str = "live", limit: int = 50, db: Session = Depends(get_db)):
     """Recent fills for the Live/Paper trade log — algo executions + manual orders."""
+    # Legacy alias: pre-rename clients and existing gold.manual_orders rows use
+    # 'paper_uat'; canonical book value is now 'uat'.
+    if book == "paper_uat":
+        book = "uat"
+    book_variants = ("uat", "paper_uat") if book == "uat" else (book,)
     # Alias as "ts" (not "t") — SQLAlchemy 2.0's Row conflicts with a column literally named "t".
     rows = safe_query(db, """
         SELECT executed_at AS ts, side, ticker, quantity AS qty, price, 'algo' AS source
@@ -195,8 +200,8 @@ def get_execution_trades(book: str = "live", limit: int = 50, db: Session = Depe
     """, {"limit": limit}, label="execution_trades_algo")
     manual_rows = safe_query(db, """
         SELECT created_at AS ts, side, ticker, qty, entry_price AS price, 'manual' AS source
-        FROM gold.manual_orders WHERE book = :book ORDER BY created_at DESC LIMIT :limit
-    """, {"book": book, "limit": limit}, label="execution_trades_manual")
+        FROM gold.manual_orders WHERE book = ANY(:books) ORDER BY created_at DESC LIMIT :limit
+    """, {"books": list(book_variants), "limit": limit}, label="execution_trades_manual")
     combined = list(rows) + list(manual_rows)
     combined.sort(key=lambda r: r.ts, reverse=True)
     data = [{

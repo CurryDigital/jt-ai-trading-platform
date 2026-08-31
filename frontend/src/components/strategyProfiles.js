@@ -29,7 +29,7 @@ function assetClassFor(row) {
 function normalizeMode(row) {
   const em = (row.execution_mode || row.mode || '').toUpperCase();
   if (em === 'LIVE_TRADING' || em === 'LIVE') return 'LIVE_TRADING';
-  if (em === 'PAPER_UAT') return 'PAPER_UAT';
+  if (em === 'UAT' || em === 'PAPER_UAT') return 'UAT';
   if (em === 'PAPER_TRADING' || em === 'PAPER') {
     // Registry execution_mode can be stale (rows left at PAPER after Stop).
     // The API's is_paper_monitoring flag (ETL-owned gold.strategy_paper_monitoring)
@@ -52,7 +52,7 @@ export function stageFor(row) {
   if (researchStatus === 'rejected' || researchStatus === 'retired') return 'experimental';
   if (st === 'live' || mode === 'LIVE_TRADING') return 'deployed';
   // Broker rehearsal (IBKR UAT session, paper money) sits between golden and deployed.
-  if (mode === 'PAPER_UAT') return 'uat';
+  if (mode === 'UAT' || mode === 'PAPER_UAT') return 'uat';
   // A row marked paper but not actively monitored is staged/approved, not live.
   if (st === 'paper' && mode === 'PAPER_TRADING') return 'golden';
   const p = (row.priority || '').toUpperCase();

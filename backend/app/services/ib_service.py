@@ -588,7 +588,7 @@ def get_ib_threaded_service():
     return _ib_threaded_service_instance
 
 # =============================================================================
-# PAPER_UAT session — IBKR paper-account session for the Execution UAT tab.
+# UAT session — IBKR paper-account session for the Execution UAT tab.
 # Real gateway connection, real order firing, paper money.
 # Separate TWS/Gateway port + client id from the primary session so the two
 # API client sessions never collide on the gateway.
@@ -615,14 +615,14 @@ def get_ib_uat_service():
     """Get or create the UAT threaded service singleton (lazy initialization).
 
     Raises RuntimeError if the resolved config points at a live-trading port —
-    PAPER_UAT orders must NEVER reach the live account.
+    UAT orders must NEVER reach the live account.
     """
     global _ib_uat_service_instance
     if _ib_uat_service_instance is None:
         host, port, client_id = get_ib_uat_config()
         if port in LIVE_TRADING_PORTS:
             raise RuntimeError(
-                f"PAPER_UAT session misconfigured: port {port} is a LIVE trading port. "
+                f"UAT session misconfigured: port {port} is a LIVE trading port. "
                 "Set IBKR_UAT_PORT to the paper gateway port (e.g. 14002/4002)."
             )
         _ib_uat_service_instance = IBKRThreadedService(host=host, port=port, client_id=client_id)
@@ -793,7 +793,7 @@ ib_quant_service = IBKRQuantService()
 
 
 # =============================================================================
-# PAPER_UAT service wrapper — routes Execution UAT orders to the dedicated
+# UAT service wrapper — routes Execution UAT orders to the dedicated
 # paper session (get_ib_uat_service), never the primary/live session.
 # =============================================================================
 class IBKRUatService:
@@ -905,7 +905,7 @@ class IBKRUatService:
         stamped onto order.orderRef for fill→strategy attribution."""
         svc = get_ib_uat_service()
         if not svc.is_connected:
-            logger.error("Cannot place PAPER_UAT order: UAT session not connected")
+            logger.error("Cannot place UAT order: UAT session not connected")
             return {"success": False,
                     "error": "Not connected to IBKR UAT paper session",
                     "session": "uat"}

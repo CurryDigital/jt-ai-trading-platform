@@ -27,17 +27,19 @@ def get_db():
 
 
 # Registry execution_mode values are constrained to SIMULATION / PAPER / PAPER_UAT / LIVE
-# (PAPER_UAT requires the widened CHECK constraint — qr_etl kanban t_b64f7302;
-# until it lands, registry writes of PAPER_UAT will fail with a CheckViolation).
-# The UI/API use SIMULATION / PAPER_TRADING / PAPER_UAT / LIVE_TRADING.
-# Keep mapping in one place.
+# (qr_etl owns the CHECK constraint; the registry keeps the PAPER_UAT spelling).
+# The UI/API vocabulary is SIMULATION / PAPER_TRADING / UAT / LIVE_TRADING —
+# the book was renamed "Paper UAT" -> "UAT" (2026-08-31); the legacy API value
+# PAPER_UAT is still accepted as an alias. Keep mapping in one place.
 REGISTRY_API_MODE_MAP = {
     "SIMULATION": "SIMULATION",
     "PAPER": "PAPER_TRADING",
-    "PAPER_UAT": "PAPER_UAT",
+    "PAPER_UAT": "UAT",
     "LIVE": "LIVE_TRADING",
 }
 API_REGISTRY_MODE_MAP = {v: k for k, v in REGISTRY_API_MODE_MAP.items()}
+# Legacy alias: pre-rename clients may still send PAPER_UAT as an API mode.
+API_REGISTRY_MODE_MAP["PAPER_UAT"] = "PAPER_UAT"
 
 
 def api_to_registry_mode(mode: str | None) -> str:
@@ -45,6 +47,8 @@ def api_to_registry_mode(mode: str | None) -> str:
     if not mode:
         return "SIMULATION"
     m = mode.upper().replace("_TRADING", "")
+    if m == "UAT":
+        return "PAPER_UAT"
     if m in ("SIMULATION", "PAPER", "PAPER_UAT", "LIVE"):
         return API_REGISTRY_MODE_MAP.get(mode.upper(), m)
     return "SIMULATION"

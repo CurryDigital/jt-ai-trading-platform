@@ -153,7 +153,7 @@ const fmtDollar = (v) => {
 
 // 4-mode view toggle ------------------------------------------------------
 // SIM = OOS backtest baseline · PAPER = gold.paper_trades_synthetic ·
-// PAPER UAT = IBKR broker rehearsal (gold.paper_uat_fills) ·
+// UAT = IBKR broker rehearsal (gold.paper_uat_fills) ·
 // LIVE = gold.trade_executions.
 // Palette rule: modes are neutral slate/white — colour carries meaning only
 // in signed values (pnlCl). Books with no data are hatched and show '—',
@@ -163,7 +163,7 @@ const HATCH = 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0 6px, t
 const MODE_TABS = [
   { id: 'sim',       label: 'SIM',       source: 'OOS backtest · gold.strategy_backtest_runs' },
   { id: 'paper',     label: 'PAPER',     source: 'gold.paper_trades_synthetic' },
-  { id: 'paper_uat', label: 'PAPER UAT', source: 'IBKR broker rehearsal · gold.paper_uat_fills' },
+  { id: 'uat',       label: 'UAT',       source: 'IBKR broker rehearsal · gold.paper_uat_fills' },
   { id: 'live',      label: 'LIVE',      source: 'gold.trade_executions' },
 ];
 
@@ -171,7 +171,7 @@ const MODE_TABS = [
 // SIMULATION strategies trade in the same synthetic paper ledger as PAPER.
 const deployedTileFor = (execMode) => {
   const em = (execMode || '').toUpperCase();
-  if (em.includes('UAT')) return 'paper_uat';
+  if (em.includes('UAT')) return 'uat';
   if (em === 'LIVE_TRADING') return 'live';
   return 'paper';
 };
@@ -180,13 +180,14 @@ const deployedTileFor = (execMode) => {
 // the strategy climbs the promotion ladder — earlier-stage ledgers stay
 // relevant context, later stages render dimmed ("stage not reached").
 // UAT is a rehearsal BRANCH, not a mandatory gate: LIVE activates
-// sim+paper+live, not paper_uat. SIMULATION trades in the synthetic paper
+// sim+paper+live, not uat. SIMULATION trades in the synthetic paper
 // ledger, so it activates sim+paper. A tile ALSO activates whenever its book
 // actually has rows — covers non-standard paths (e.g. live via UAT) honestly.
 const STAGE_SET = {
   SIMULATION:    ['sim', 'paper'],
   PAPER_TRADING: ['sim', 'paper'],
-  PAPER_UAT:     ['sim', 'paper', 'paper_uat'],
+  UAT:           ['sim', 'paper', 'uat'],
+  PAPER_UAT:     ['sim', 'paper', 'uat'],  // legacy pre-rename API value
   LIVE_TRADING:  ['sim', 'paper', 'live'],
 };
 
@@ -239,7 +240,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     ? {
         ...d,
         metrics: d.metrics || { backtest: {}, live: {} },
-        metrics_by_mode: d.metrics_by_mode || { sim: {}, paper: {}, paper_uat: {}, live: {} },
+        metrics_by_mode: d.metrics_by_mode || { sim: {}, paper: {}, uat: {}, live: {} },
         divergence: d.divergence || { verdict: 'no_backtest_baseline', win_rate_delta_pp: null, profit_factor_delta: null },
         equity_curve: d.equity_curve || [],
         monthly_returns: d.monthly_returns || [],
@@ -297,7 +298,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
   }, 30000);
 
   // The payload backing the currently selected ledger tile (paper/live only;
-  // sim and paper_uat read from the main payload's own fields).
+  // sim and uat read from the main payload's own fields).
   const activeBookPayload = (mode === 'paper' || mode === 'live')
     ? (data && data.book === mode ? data : altBooks[mode] || null)
     : null;
@@ -430,7 +431,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     const mbm = data.metrics_by_mode || {};
     const simM = mbm.sim || {};
     const paperM = mbm.paper || {};
-    const uatM = mbm.paper_uat || {};
+    const uatM = mbm.uat || mbm.paper_uat || {};
     const liveM = mbm.live || {};
     const verdict = VERDICT_STYLE[data.divergence.verdict] || VERDICT_STYLE.no_backtest_baseline;
     const execMode = (data.execution_mode || '').toUpperCase();
@@ -473,7 +474,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           ? `${paperM.total_trades} closed round-trips${paperM.last_trade_at ? ` · last ${fmtAge(paperM.last_trade_at)}` : ''}`
           : 'no closed trades yet',
       },
-      paper_uat: {
+      uat: {
         hasData: (uatM.total_fills || 0) > 0,
         wrText: null, // fills are not round-trips — WR/P&L need a UAT round-trip ledger
         pnlText: null,
@@ -923,11 +924,11 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           </>
         )}
 
-        {/* ========================== PAPER UAT VIEW ======================== */}
-        {sel === 'paper_uat' && (
+        {/* ============================ UAT VIEW ============================ */}
+        {sel === 'uat' && (
           <div className="qr-surface overflow-hidden">
             <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
-              <span className="qr-label" title="gold.paper_uat_fills · IBKR UAT session broker rehearsal">Paper UAT · broker rehearsal fills</span>
+              <span className="qr-label" title="gold.paper_uat_fills · IBKR UAT session broker rehearsal">UAT · broker rehearsal fills</span>
               <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.uat_fills || []).length} fills</span>
             </div>
             {(data.uat_fills || []).length === 0 ? (

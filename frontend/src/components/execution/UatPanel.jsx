@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { ExecScaffold, ExecStat, ExecTabs, CloseButton } from './ExecScaffold';
 import { api, usePoll, fmt, fmtSigned, pnlCl } from '../../utils';
 
-// Paper UAT — IBKR paper account book: real gateway, real order firing, paper money.
-// Backend landed in qr_etl t_8d32721e (verified t_1fbd9d7c): PAPER_UAT mode +
-// dedicated UAT session (separate client id, never falls back to primary/live).
+// UAT — IBKR paper account book: real gateway, real order firing, paper money.
+// Backend landed in qr_etl t_8d32721e (verified t_1fbd9d7c): UAT mode (registry
+// value PAPER_UAT) + dedicated UAT session (separate client id, never falls
+// back to primary/live). Renamed "Paper UAT" -> "UAT" 2026-08-31.
 // Unified anatomy (2026-08-26): same tabbed surface as the Live book —
 // Positions / Working / Fills / Session. The old always-open "UAT Blotter"
 // card is now the Fills tab; the session card is the Session tab.
@@ -84,7 +85,7 @@ const SessionRow = ({ name, title, note, sess, liveConnected, connectPath, onCon
   );
 };
 
-export const PaperUatPanel = () => {
+export const UatPanel = () => {
   const [tab, setTab] = useState('positions');
   const [gw, setGw] = useState(null);
   const [uat, setUat] = useState(null);
@@ -104,7 +105,7 @@ export const PaperUatPanel = () => {
       api.get('/api/execution/gateway'),
       api.get('/api/ib/tws/uat/status'),
       api.get('/api/ib/tws/uat/account'),
-      api.get('/api/execution/trades?book=paper_uat&limit=50'),
+      api.get('/api/execution/trades?book=uat&limit=50'),
       api.get('/api/ib/tws/uat/positions'),
       api.get('/api/ib/tws/uat/open-orders'),
       api.get('/api/ib/tws/uat/fills'),
@@ -231,7 +232,7 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
   return (
     <ExecScaffold
       mode="uat"
-      book="paper_uat"
+      book="uat"
       stats={<>
         <ExecStat
           l="UAT Session"
@@ -434,7 +435,7 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
             <SessionRow
               name="uat"
               title="UAT Paper Session"
-              note="IBKR paper account · real order routing, paper money · this book always fires here (book=paper_uat) · never falls back to the primary/live session"
+              note="IBKR paper account · real order routing, paper money · this book always fires here (book=uat) · never falls back to the primary/live session"
               sess={uatSess ? { ...uatSess, host: uat?.host ?? uatSess.host, port: uat?.port ?? uatSess.port } : (uat ? { host: uat.host, port: uat.port, live: { client_id: uat.client_id } } : null)}
               liveConnected={uatLive}
               connectPath="/api/ib/tws/uat/connect"
@@ -452,4 +453,4 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
   );
 };
 
-export default PaperUatPanel;
+export default UatPanel;

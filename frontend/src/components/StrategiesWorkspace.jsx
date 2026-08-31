@@ -12,13 +12,13 @@ import { HORIZON, mapApiToBook, pctOrRatio } from './strategyProfiles';
 //   POST /api/strategies/{id}/promote/check  → gates preview
 //   POST /api/strategies/{id}/promote        → apply (LIVE needs typed phrase)
 
-const MODE_LABEL = { SIMULATION: 'Simulation', PAPER_TRADING: 'Paper', PAPER_UAT: 'Paper UAT', LIVE_TRADING: 'Live' };
-const NEXT_MODE = { SIMULATION: 'PAPER_TRADING', PAPER_TRADING: 'PAPER_UAT', PAPER_UAT: 'LIVE_TRADING' };
-const PREV_MODE = { LIVE_TRADING: 'PAPER_UAT', PAPER_UAT: 'PAPER_TRADING', PAPER_TRADING: 'SIMULATION' };
+const MODE_LABEL = { SIMULATION: 'Simulation', PAPER_TRADING: 'Paper', UAT: 'UAT', LIVE_TRADING: 'Live' };
+const NEXT_MODE = { SIMULATION: 'PAPER_TRADING', PAPER_TRADING: 'UAT', UAT: 'LIVE_TRADING' };
+const PREV_MODE = { LIVE_TRADING: 'UAT', UAT: 'PAPER_TRADING', PAPER_TRADING: 'SIMULATION' };
 const PERF_MODES = [
   { k: 'sim', l: 'Sim', desc: 'Backtest / OOS' },
   { k: 'paper', l: 'Paper', desc: 'Paper-trading' },
-  { k: 'uat', l: 'Paper UAT', desc: 'Broker rehearsal' },
+  { k: 'uat', l: 'UAT', desc: 'Broker rehearsal' },
   { k: 'live', l: 'Live', desc: 'Live capital' },
 ];
 const STAGE_CHIP = { deployed: 'emerald', uat: 'slate', golden: 'amber', near_golden: 'blue', experimental: 'slate' };
@@ -304,11 +304,11 @@ function PromoteModal({ strategy, targetMode, onClose, onDone }) {
 
           {check && !check.error && (
             <>
-              {targetMode === 'PAPER_UAT' && (
+              {targetMode === 'UAT' && (
                 <div style={{ padding: '8px 10px', borderRadius: 'var(--radius-md)', fontSize: 10, color: 'var(--text-secondary)', background: 'rgba(100,116,139,0.12)', border: '1px solid rgba(100,116,139,0.3)' }}>
                   Broker rehearsal: orders route to the IBKR UAT paper session (real routing, paper money).
-                  The registry write needs the widened CHECK constraint — pending qr_etl (kanban t_b64f7302);
-                  until it lands the mode change fails and the strategy stays in its current book.
+                  Signal→order firing for UAT strategies is wired by qr_etl (kanban t_2027d985);
+                  until it lands, UAT strategies show signals but orders route via the UAT ticket only.
                 </div>
               )}
               {gates.length > 0 ? (
@@ -375,8 +375,8 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
   const prev = PREV_MODE[s.mode];
   // UAT → Live is engine-blocked until qr_research defines the gate criteria
   // (kanban t_b64f7302) — show the rung but keep it disabled, no fake affordance.
-  const nextBlocked = s.mode === 'PAPER_UAT' && next === 'LIVE_TRADING';
-  const NEXT_CTA = { PAPER_TRADING: 'Promote to Paper →', PAPER_UAT: 'Promote to Paper UAT →', LIVE_TRADING: 'Deploy Live →' };
+  const nextBlocked = s.mode === 'UAT' && next === 'LIVE_TRADING';
+  const NEXT_CTA = { PAPER_TRADING: 'Promote to Paper →', UAT: 'Promote to UAT →', LIVE_TRADING: 'Deploy Live →' };
   const barsLabel = viewMode === 'paper' ? 'Paper returns · % of assigned capital (solid realized · outline open book)'
     : viewMode === 'live' ? 'Live returns'
     : viewMode === 'uat' ? 'Broker rehearsal — fills-based metrics pending qr_etl mirror'
@@ -409,7 +409,7 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
 
       <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>{barsLabel}</span>
-        <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → Paper UAT' : undefined} />
+        <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → UAT' : undefined} />
       </div>
 
       {showLadder && (
@@ -448,8 +448,8 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
   // paper/uat/live deployments, UAT shows rehearsal + live, Live shows live capital only.
   const MODE_FILTER = {
     sim: () => true,
-    paper: (s) => s.mode === 'PAPER_TRADING' || s.mode === 'PAPER_UAT' || s.mode === 'LIVE_TRADING',
-    uat: (s) => s.mode === 'PAPER_UAT' || s.mode === 'LIVE_TRADING',
+    paper: (s) => s.mode === 'PAPER_TRADING' || s.mode === 'UAT' || s.mode === 'LIVE_TRADING',
+    uat: (s) => s.mode === 'UAT' || s.mode === 'LIVE_TRADING',
     live: (s) => s.mode === 'LIVE_TRADING',
   };
 
@@ -481,7 +481,7 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
   const avgPaperWR = paperWRs.length ? paperWRs.reduce((a, s) => a + s.paperWR, 0) / paperWRs.length : null;
   const liveN = src.filter((s) => s.mode === 'LIVE_TRADING').length;
   const paperN = src.filter((s) => s.mode === 'PAPER_TRADING').length;
-  const uatN = src.filter((s) => s.mode === 'PAPER_UAT').length;
+  const uatN = src.filter((s) => s.mode === 'UAT').length;
   const best = sorted.find((s) => s[effectiveSort] != null);
 
   return (
@@ -557,7 +557,7 @@ const LADDER = [
     empty: 'No strategies in simulation — create one in the Lab' },
   { mode: 'PAPER_TRADING', label: 'Paper', color: 'amber', desc: 'DB paper ledger · live signals',
     empty: 'Nothing on paper — promote a simulated strategy when its gates pass' },
-  { mode: 'PAPER_UAT', label: 'Paper UAT', color: 'slate', desc: 'IBKR UAT session · real routing, paper money',
+  { mode: 'UAT', label: 'UAT', color: 'slate', desc: 'IBKR UAT session · real routing, paper money',
     empty: 'Nothing in rehearsal — promote a paper strategy to rehearse at the broker' },
   { mode: 'LIVE_TRADING', label: 'Live', color: 'emerald', desc: 'Real capital via IBKR',
     empty: 'Nothing live — UAT → Live gates pending qr_research' },
@@ -574,7 +574,7 @@ export function StrategyPipelineBoard({ book, error, hzn, setHzn, onOpen, onActi
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>Deployment Pipeline</h2>
-          <p style={{ margin: '2px 0 0', fontSize: 10, color: 'var(--text-muted)' }}>Simulation → Paper → Paper UAT → Live · promotions run the backend gate engine and are audited · live deployment requires typed confirmation</p>
+          <p style={{ margin: '2px 0 0', fontSize: 10, color: 'var(--text-muted)' }}>Simulation → Paper → UAT → Live · promotions run the backend gate engine and are audited · live deployment requires typed confirmation</p>
         </div>
         <HorizonSeg hzn={hzn} setHzn={setHzn} counts={counts} />
       </div>
@@ -592,7 +592,7 @@ export function StrategyPipelineBoard({ book, error, hzn, setHzn, onOpen, onActi
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{items.length}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 60, padding: 6, borderRadius: 'var(--radius-lg)', background: 'rgba(255,255,255,0.012)', border: '1px solid var(--border-glass)' }}>
-                {items.map((s) => <StrategyCard key={s.id} s={s} onOpen={onOpen} onAction={onAction} showLadder viewMode={st.mode === 'PAPER_TRADING' ? 'paper' : st.mode === 'PAPER_UAT' ? 'uat' : st.mode === 'LIVE_TRADING' ? 'live' : 'sim'} />)}
+                {items.map((s) => <StrategyCard key={s.id} s={s} onOpen={onOpen} onAction={onAction} showLadder viewMode={st.mode === 'PAPER_TRADING' ? 'paper' : st.mode === 'UAT' ? 'uat' : st.mode === 'LIVE_TRADING' ? 'live' : 'sim'} />)}
                 {items.length === 0 && (
                   <div style={{ padding: '14px 6px', textAlign: 'center', fontSize: 9, color: 'var(--text-faint)' }}>
                     {st.empty}

@@ -43,7 +43,7 @@ async def api_ib_tws_connect():
 
 
 # =============================================================================
-# PAPER_UAT session endpoints — dedicated IBKR paper-account session
+# UAT session endpoints — dedicated IBKR paper-account session
 # =============================================================================
 
 @router.get("/ib/tws/uat/status")
@@ -95,7 +95,7 @@ def api_ib_tws_uat_close_position(payload: dict, db: Session = Depends(get_db)):
     Qty is resolved from the LIVE gateway portfolio — the client only names the
     symbol, so a stale UI can never over-close. Fires a real opposite-side MKT
     order on the UAT session ONLY (never falls back to primary/live) and books
-    the fill into the paper_uat blotter (gold.manual_orders — the designated
+    the fill into the uat blotter (gold.manual_orders — the designated
     platform write table).
     """
     symbol = (payload.get("symbol") or "").strip().upper()
@@ -144,14 +144,14 @@ def api_ib_tws_uat_close_position(payload: dict, db: Session = Depends(get_db)):
     market = "HK" if (pos.get("currency") == "HKD"
                       or (pos.get("exchange") or "").upper().startswith("SEHK")) else "US"
 
-    # Book the close into the paper_uat blotter — ONLY on an actual fill, so the
+    # Book the close into the uat blotter — ONLY on an actual fill, so the
     # trade log never records an order that hasn't executed yet.
     if filled:
         try:
             safe_query_one(db, """
                 INSERT INTO gold.manual_orders
                     (order_id, book, ticker, market, asset_class, side, qty, entry_price, limit_price, note, created_by)
-                VALUES (:order_id, 'paper_uat', :ticker, :market, 'STOCK', :side, :qty, :entry, NULL, :note, 'workspace')
+                VALUES (:order_id, 'uat', :ticker, :market, 'STOCK', :side, :qty, :entry, NULL, :note, 'workspace')
                 RETURNING order_id
             """, {
                 "order_id": f"m{int(time.time() * 1000)}",
@@ -284,11 +284,13 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     """Place an order through IBKR TWS API.
 
     Per-book routing (preferred): pass `book` in the payload —
-      paper_uat -> dedicated UAT paper session (hard-fails 503 when
+      uat       -> dedicated UAT paper session (hard-fails 503 when
                    disconnected, NEVER falls back to the live account)
       live      -> primary session (manual live ticket, confirm-gated client-side)
       paper/sim -> virtual response only (paper strategies are fired by the
                    qr_etl rebalancer into the DB ledger, never via IBKR here)
+
+    Legacy alias: `paper_uat` is accepted and normalized to `uat`.
 
     `strategy_id` (or explicit `order_ref`) tags the broker order with
     orderRef="strat:<strategy_id>" so fills are attributable to the strategy.
@@ -306,11 +308,14 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     quantity = payload.get("quantity", 1)
     order_type = payload.get("order_type", "MKT")
     book = (payload.get("book") or "").strip().lower() or None
+    # Legacy alias: pre-rename vocabulary spelled the UAT book "paper_uat".
+    if book == "paper_uat":
+        book = "uat"
     strategy_id = payload.get("strategy_id")
     order_ref = payload.get("order_ref") or (f"strat:{strategy_id}" if strategy_id else None)
-    if book not in (None, "sim", "paper", "paper_uat", "live"):
+    if book not in (None, "sim", "paper", "uat", "live"):
         raise HTTPException(status_code=422,
-                            detail=f"Invalid book '{book}' — expected sim|paper|paper_uat|live")
+                            detail=f"Invalid book '{book}' — expected sim|paper|uat|live")
 
     # Virtual books never touch a broker session.
     if book in ("sim", "paper") or (book is None and current_mode == "SIMULATION"):
@@ -333,11 +338,11 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
         }
 
     # Session routing:
-    #   paper_uat (book or legacy global mode) -> dedicated UAT paper session.
+    #   uat (book or legacy global mode) -> dedicated UAT paper session.
     #                    NEVER falls back to the primary session, so a UAT
     #                    order can never reach the live account.
-    #   live / other legacy modes             -> primary session.
-    if book == "paper_uat" or (book is None and current_mode == "PAPER_UAT"):
+    #   live / other legacy modes        -> primary session.
+    if book == "uat" or (book is None and current_mode in ("PAPER_UAT", "UAT")):
         service = ib_uat_service
         session_name = "uat"
     else:
@@ -354,7 +359,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
                 "success": True, "order_id": order_result.get("order_id"),
                 "status": order_result.get("status", "Submitted"), "mode": current_mode,
                 "session": session_name,
-                "book": book or ("paper_uat" if current_mode == "PAPER_UAT" else "live"),
+                "book": book or ("uat" if current_mode in ("PAPER_UAT", "UAT") else "live"),
                 "order_ref": order_ref, "strategy_id": strategy_id,
                 "symbol": symbol, "action": action, "quantity": quantity,
                 "message": f"{current_mode} order submitted via {session_name} session: {action} {quantity} {symbol}",

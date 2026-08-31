@@ -97,7 +97,7 @@ const MODE_STYLE = {
   PAPER_TRADING:  { label: 'PAPER', color: '#fcd34d', bg: 'rgba(245,158,11,0.15)', ring: 'rgba(245,158,11,0.35)' },
   // UAT = broker rehearsal (paper money). Neutral slate per palette rule —
   // no severity/sign/link meaning to carry.
-  PAPER_UAT:      { label: 'UAT', color: '#cbd5e1', bg: 'rgba(100,116,139,0.22)', ring: 'rgba(100,116,139,0.4)' },
+  UAT:            { label: 'UAT', color: '#cbd5e1', bg: 'rgba(100,116,139,0.22)', ring: 'rgba(100,116,139,0.4)' },
   SIMULATION:     { label: 'SIM', color: '#93c5fd', bg: 'rgba(59,130,246,0.15)', ring: 'rgba(59,130,246,0.35)' },
   PAPER:          { label: 'PAPER', color: '#fcd34d', bg: 'rgba(245,158,11,0.15)', ring: 'rgba(245,158,11,0.35)' },
   SIM:            { label: 'SIM', color: '#93c5fd', bg: 'rgba(59,130,246,0.15)', ring: 'rgba(59,130,246,0.35)' },

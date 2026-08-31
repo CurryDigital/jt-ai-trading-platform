@@ -47,7 +47,7 @@ const StrategyPerformance = lazyRetry(() => import('./components/StrategyPerform
 const StrategyCompare = lazyRetry(() => import('./components/StrategyCompare').then(m => ({ default: m.StrategyCompare })), 'StrategyCompare');
 const LiveOpsPanel = lazyRetry(() => import('./components/LiveOpsPanel').then(m => ({ default: m.LiveOpsPanel })), 'LiveOpsPanel');
 const PaperStrategiesPage = lazyRetry(() => import('./components/PaperStrategiesPage'), 'PaperStrategiesPage');
-const PaperUatPanel = lazyRetry(() => import('./components/execution/PaperUatPanel').then(m => ({ default: m.PaperUatPanel })), 'PaperUatPanel');
+const UatPanel = lazyRetry(() => import('./components/execution/UatPanel').then(m => ({ default: m.UatPanel })), 'UatPanel');
 const SignalsTab = lazyRetry(() => import('./components/SignalsTab').then(m => ({ default: m.SignalsTab })), 'SignalsTab');
 const MacroTab = lazyRetry(() => import('./components/MacroTab').then(m => ({ default: m.MacroTab })), 'MacroTab');
 const AnalyticsTab = lazyRetry(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })), 'AnalyticsTab');
@@ -769,7 +769,7 @@ export default function App() {
     execution: [
       { id: 'portfolio',        label: 'Sim',       short: 'Sim', IconComponent: Icon.Portfolio,   key: 'q' },
       { id: 'paper_strategies', label: 'Paper',     short: 'Ppr', IconComponent: Icon.Portfolio,   key: 'w' },
-      { id: 'paper_uat',        label: 'Paper UAT', short: 'UAT', IconComponent: Icon.Command,     key: 'e' },
+      { id: 'uat',              label: 'UAT', short: 'UAT', IconComponent: Icon.Command,     key: 'e' },
       { id: 'live_ops',         label: 'Live',      short: 'Live', IconComponent: Icon.Command,    key: 'r' },
     ],
   }), []);
@@ -1008,7 +1008,7 @@ export default function App() {
           <>
             {activeSubTab === 'portfolio'        && <PortfolioTab data={data} />}
             {activeSubTab === 'paper_strategies' && <PaperStrategiesPage />}
-            {activeSubTab === 'paper_uat'        && <PaperUatPanel />}
+            {activeSubTab === 'uat'              && <UatPanel />}
             {activeSubTab === 'live_ops'         && <LiveOpsPanel onSelectStrategy={openStrategyDetail} />}
           </>
         )}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ManualTicket } from '../ManualTicket';
 
-// Shared anatomy for the 4 Execution subtabs (Sim / Paper / Paper UAT / Live):
+// Shared anatomy for the 4 Execution subtabs (Sim / Paper / UAT / Live):
 // one header strip (mode badge + stats) and one grid (content + right rail with
 // the same ManualTicket). Mode semantics per user model 2026-08-24:
 //   sim   = virtual money, synthetic fills, no IBKR, no close
@@ -11,7 +11,7 @@ import { ManualTicket } from '../ManualTicket';
 export const EXEC_MODE_META = {
   sim:   { badge: 'SIM',   title: 'Simulated Book', note: 'virtual money · synthetic fills · no IBKR' },
   paper: { badge: 'PAPER', title: 'Paper Book',     note: 'virtual money · strategy rehearsal · no IBKR' },
-  uat:   { badge: 'UAT',   title: 'Paper UAT',      note: 'IBKR paper account · real order routing · paper money' },
+  uat:   { badge: 'UAT',   title: 'UAT',            note: 'IBKR paper account · real order routing · paper money' },
   live:  { badge: 'LIVE',  title: 'Live Book',      note: 'IBKR live account · real money' },
 };
 
