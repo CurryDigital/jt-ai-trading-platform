@@ -53,6 +53,7 @@ const MacroTab = lazyRetry(() => import('./components/MacroTab').then(m => ({ de
 const AnalyticsTab = lazyRetry(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })), 'AnalyticsTab');
 const NewsTab = lazyRetry(() => import('./components/NewsTab').then(m => ({ default: m.NewsTab })), 'NewsTab');
 const StrategiesWorkspace = lazyRetry(() => import('./components/StrategiesWorkspace').then(m => ({ default: m.StrategiesWorkspace })), 'StrategiesWorkspace');
+const IpoTab = lazyRetry(() => import('./components/IpoTab').then(m => ({ default: m.IpoTab })), 'IpoTab');
 
 const TabFallback = () => (
   <div className="qr-surface px-3 py-8 flex items-center justify-center gap-2 text-[11px] text-slate-500">
@@ -765,6 +766,7 @@ export default function App() {
       { id: 'lab',              label: 'Lab',         short: 'Lab',  IconComponent: Icon.Lab,         key: 'q' },
       { id: 'strategies',       label: 'Pipeline',    short: 'Pipe', IconComponent: Icon.Strategies,  key: 'w' },
       { id: 'performance',      label: 'Performance', short: 'Perf', IconComponent: Icon.Performance, key: 'e' },
+      { id: 'ipo',              label: 'IPO',         short: 'IPO',  IconComponent: Icon.Markets,     key: 'r' },
     ],
     execution: [
       { id: 'portfolio',        label: 'Sim',       short: 'Sim', IconComponent: Icon.Portfolio,   key: 'q' },
@@ -1000,6 +1002,7 @@ export default function App() {
             {activeSubTab === 'lab'              && <StrategyLab onOpen={openStrategyDetail} />}
             {activeSubTab === 'strategies'       && <StrategiesWorkspace sub="pipeline" onOpen={openStrategyDetail} />}
             {activeSubTab === 'performance'      && <StrategiesWorkspace sub="performance" onOpen={openStrategyDetail} />}
+            {activeSubTab === 'ipo'              && <IpoTab onOpen={openStrategyDetail} />}
           </>
         )}
 

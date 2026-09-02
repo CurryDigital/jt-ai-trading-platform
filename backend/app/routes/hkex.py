@@ -8,26 +8,67 @@ from app.dependencies import get_db
 router = APIRouter(prefix="/api/hkex", tags=["hkex"])
 
 
+def _has_column(db: Session, schema: str, table: str, column: str) -> bool:
+    return db.execute(text("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = :s AND table_name = :t AND column_name = :c
+    """), {"s": schema, "t": table, "c": column}).fetchone() is not None
+
+
+def _f(v):
+    return float(v) if v is not None else None
+
+
+def _d(v):
+    return str(v) if v is not None else None
+
+
+# Day-20 close: gold.hk_ipo_performance.return_day20_pct exists but is 0/1429 populated
+# (qr_etl backfill pending). Compute the 20th trading day's close from silver.unified_prices
+# (real data, no synthesis). Once the gold column is backfilled it takes precedence via
+# COALESCE on the pct; day20_price always comes from the lateral so the UI can show the level.
+_DAY20_LATERAL = """
+    LEFT JOIN LATERAL (
+        SELECT sp.close AS close, sp.date AS dt
+        FROM silver.unified_prices sp
+        WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
+        ORDER BY sp.date OFFSET 19 LIMIT 1
+    ) d20 ON TRUE
+"""
+
+
 @router.get("/ipos")
 def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limit: int = 50,
                   db: Session = Depends(get_db)):
-    query = """
-        SELECT c.ticker, c.stock_name, c.listing_date, c.offer_price, c.market_cap_hkd,
-               c.sector, c.sub_sector, c.sponsor,
+    zh_col = "c.stock_name_zh" if _has_column(db, "gold", "hk_ipo_calendar", "stock_name_zh") \
+        else "NULL::varchar AS stock_name_zh"
+    query = f"""
+        SELECT c.ticker, c.stock_name, {zh_col}, c.listing_date, c.offer_price, c.market_cap_hkd,
+               c.sector, c.sub_sector, c.sponsor, c.board,
                d.oversubscription_retail, d.oversubscription_institutional, d.cornerstone_total_pct,
-               p.first_day_return_pct, p.return_day30_pct, p.performance_tier,
-               sp.offer_price_low, sp.offer_price_high, sp.fixed_price, sp.grey_close,
+               d.application_start, d.application_end,
+               p.first_day_open, p.first_day_close, p.first_day_volume,
+               p.first_day_return_pct,
+               COALESCE(p.return_day20_pct,
+                        CASE WHEN d20.close IS NOT NULL AND c.offer_price > 0
+                             THEN (d20.close / c.offer_price - 1) * 100 END) AS return_day20_pct,
+               d20.close AS day20_price, d20.dt AS day20_date,
+               p.return_day30_pct, p.total_return_pct, p.current_price, p.performance_tier,
+               s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
+               s.grey_close, s.grey_session_date,
                CASE WHEN c.listing_date > CURRENT_DATE THEN 'Upcoming'
                     WHEN c.listing_date = CURRENT_DATE THEN 'Listing Today' ELSE 'Listed' END as status
         FROM gold.hk_ipo_calendar c
         LEFT JOIN gold.hk_ipo_details d ON c.ticker = d.ticker
         LEFT JOIN gold.hk_ipo_performance p ON c.ticker = p.ticker
         LEFT JOIN LATERAL (
-            SELECT s.offer_price_low, s.offer_price_high, s.fixed_price, s.grey_close
+            SELECT s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
+                   s.grey_close, s.grey_session_date
             FROM silver.unified_ipo_calendar s
             WHERE s.ticker = c.ticker
             ORDER BY s.listing_date DESC LIMIT 1
-        ) sp ON TRUE
+        ) s ON TRUE
+        {_DAY20_LATERAL}
         WHERE 1=1
     """
     params = {}
@@ -39,20 +80,111 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
 
     result = db.execute(text(query), params).fetchall()
     return {"ipos": [{
-        "ticker": r.ticker, "stock_name": r.stock_name, "listing_date": str(r.listing_date),
-        "offer_price": float(r.offer_price) if r.offer_price else None,
-        "offer_price_low": float(r.offer_price_low) if r.offer_price_low else None,
-        "offer_price_high": float(r.offer_price_high) if r.offer_price_high else None,
-        "fixed_price": bool(r.fixed_price) if r.fixed_price is not None else None,
-        "grey_close": float(r.grey_close) if r.grey_close else None,
-        "market_cap_hkd": float(r.market_cap_hkd) if r.market_cap_hkd else None,
-        "sector": r.sector, "sponsor": r.sponsor,
-        "oversubscription_retail": float(r.oversubscription_retail) if r.oversubscription_retail else None,
-        "oversubscription_institutional": float(r.oversubscription_institutional) if r.oversubscription_institutional else None,
-        "cornerstone_total_pct": float(r.cornerstone_total_pct) if r.cornerstone_total_pct else None,
-        "first_day_return": float(r.first_day_return_pct) if r.first_day_return_pct else None,
-        "return_day30": float(r.return_day30_pct) if r.return_day30_pct else None,
-        "performance_tier": r.performance_tier, "status": r.status,
+        "ticker": r.ticker, "stock_name": r.stock_name, "stock_name_zh": r.stock_name_zh,
+        "listing_date": str(r.listing_date),
+        "offer_price": _f(r.offer_price),
+        "market_cap_hkd": _f(r.market_cap_hkd),
+        "sector": r.sector, "sub_sector": r.sub_sector, "sponsor": r.sponsor, "board": r.board,
+        "oversubscription_retail": _f(r.oversubscription_retail),
+        "oversubscription_institutional": _f(r.oversubscription_institutional),
+        "cornerstone_total_pct": _f(r.cornerstone_total_pct),
+        "application_start": _d(r.application_start), "application_end": _d(r.application_end),
+        "first_day_open": _f(r.first_day_open), "first_day_close": _f(r.first_day_close),
+        "first_day_volume": _f(r.first_day_volume),
+        "first_day_return": _f(r.first_day_return_pct),
+        "return_day20": _f(r.return_day20_pct),
+        "day20_price": _f(r.day20_price), "day20_date": _d(r.day20_date),
+        "return_day30": _f(r.return_day30_pct),
+        "total_return": _f(r.total_return_pct),
+        "current_price": _f(r.current_price),
+        "performance_tier": r.performance_tier,
+        "offer_price_low": _f(r.offer_price_low), "offer_price_high": _f(r.offer_price_high),
+        "lot_size": r.lot_size, "fixed_price": r.fixed_price,
+        "grey_close": _f(r.grey_close), "grey_session_date": _d(r.grey_session_date),
+        "status": r.status,
+    } for r in result], "count": len(result)}
+
+
+@router.get("/ipos/subscription")
+def get_hkex_ipo_subscription(db: Session = Depends(get_db)):
+    """IPOs currently in (or approaching) their public subscription window.
+
+    Coverage note: gold.hk_ipo_details.application_start/end are 0/1546 populated and the
+    calendar carries no upcoming rows as of 2026-09-02 — the feed is incomplete pending
+    qr_etl backfill, so an empty list means 'no tracked windows', not 'no HK IPOs open'.
+    """
+    result = db.execute(text("""
+        SELECT c.ticker, c.stock_name, c.listing_date, c.offer_price, c.sector, c.sponsor,
+               d.application_start, d.application_end,
+               d.oversubscription_retail,
+               s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
+               s.grey_close, s.grey_session_date
+        FROM gold.hk_ipo_calendar c
+        LEFT JOIN gold.hk_ipo_details d ON c.ticker = d.ticker
+        LEFT JOIN LATERAL (
+            SELECT s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
+                   s.grey_close, s.grey_session_date
+            FROM silver.unified_ipo_calendar s
+            WHERE s.ticker = c.ticker
+            ORDER BY s.listing_date DESC LIMIT 1
+        ) s ON TRUE
+        WHERE (d.application_end IS NOT NULL AND d.application_end >= CURRENT_DATE)
+           OR c.listing_date >= CURRENT_DATE
+        ORDER BY COALESCE(d.application_end, c.listing_date) ASC
+        LIMIT 50
+    """)).fetchall()
+    return {"ipos": [{
+        "ticker": r.ticker, "stock_name": r.stock_name,
+        "listing_date": _d(r.listing_date),
+        "offer_price": _f(r.offer_price), "sector": r.sector, "sponsor": r.sponsor,
+        "application_start": _d(r.application_start), "application_end": _d(r.application_end),
+        "oversubscription_retail": _f(r.oversubscription_retail),
+        "offer_price_low": _f(r.offer_price_low), "offer_price_high": _f(r.offer_price_high),
+        "lot_size": r.lot_size, "fixed_price": r.fixed_price,
+        "grey_close": _f(r.grey_close), "grey_session_date": _d(r.grey_session_date),
+    } for r in result], "count": len(result)}
+
+
+@router.get("/ipos/book")
+def get_hkex_ipo_book(db: Session = Depends(get_db)):
+    """Active IPO book: open positions in recent-HK-IPO names or held by IPO strategies.
+
+    Joins the paper book (consumption.portfolio_positions_current, ACTIVE) with the IPO
+    calendar/performance/details. Empty means no open IPO positions — the drift strategy
+    is event-driven and spends most of its time flat.
+    """
+    result = db.execute(text("""
+        SELECT pos.strategy_id, pos.ticker, pos.side, pos.quantity, pos.entry_price,
+               pos.entry_date, pos.current_price AS pos_current_price, pos.market_value,
+               pos.unrealized_pnl, pos.updated_at,
+               c.stock_name, c.listing_date,
+               p.offer_price, p.current_price, p.performance_tier,
+               d.oversubscription_retail,
+               last_px.volume AS last_volume, last_px.dt AS last_price_date
+        FROM consumption.portfolio_positions_current pos
+        JOIN gold.hk_ipo_calendar c ON c.ticker = pos.ticker
+        LEFT JOIN gold.hk_ipo_performance p ON p.ticker = pos.ticker
+        LEFT JOIN gold.hk_ipo_details d ON d.ticker = pos.ticker
+        LEFT JOIN LATERAL (
+            SELECT sp.volume, sp.date AS dt FROM silver.unified_prices sp
+            WHERE sp.ticker = pos.ticker ORDER BY sp.date DESC LIMIT 1
+        ) last_px ON TRUE
+        WHERE UPPER(pos.status) = 'ACTIVE'
+          AND (pos.strategy_id LIKE 'hk_ipo%'
+               OR c.listing_date >= CURRENT_DATE - INTERVAL '18 months')
+        ORDER BY pos.entry_date DESC NULLS LAST
+        LIMIT 100
+    """)).fetchall()
+    return {"positions": [{
+        "strategy_id": r.strategy_id, "ticker": r.ticker, "stock_name": r.stock_name,
+        "side": r.side, "quantity": _f(r.quantity),
+        "entry_price": _f(r.entry_price), "entry_date": _d(r.entry_date),
+        "current_price": _f(r.current_price) or _f(r.pos_current_price),
+        "market_value": _f(r.market_value), "unrealized_pnl": _f(r.unrealized_pnl),
+        "listing_date": _d(r.listing_date), "offer_price": _f(r.offer_price),
+        "oversubscription_retail": _f(r.oversubscription_retail),
+        "last_volume": _f(r.last_volume), "last_price_date": _d(r.last_price_date),
+        "updated_at": _d(r.updated_at),
     } for r in result], "count": len(result)}
 
 
@@ -72,8 +204,8 @@ def get_hkex_ipo_leaderboard(period: str = "first_day", limit: int = 20, db: Ses
     """), {"limit": limit}).fetchall()
     return {"leaderboard": [{"rank": i + 1, "ticker": r.ticker, "stock_name": r.stock_name,
                               "listing_date": str(r.listing_date), "sector": r.sector,
-                              "first_day_return": float(r.first_day_return_pct) if r.first_day_return_pct else None,
-                              "return_day30": float(r.return_day30_pct) if r.return_day30_pct else None,
+                              "first_day_return": _f(r.first_day_return_pct),
+                              "return_day30": _f(r.return_day30_pct),
                               "performance_tier": r.performance_tier}
                              for i, r in enumerate(result)], "count": len(result), "period": period}
 
