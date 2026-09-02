@@ -16,11 +16,19 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
                c.sector, c.sub_sector, c.sponsor,
                d.oversubscription_retail, d.oversubscription_institutional, d.cornerstone_total_pct,
                p.first_day_return_pct, p.return_day30_pct, p.performance_tier,
+               sp.offer_price_low, sp.offer_price_high, sp.fixed_price, sp.grey_close,
                CASE WHEN c.listing_date > CURRENT_DATE THEN 'Upcoming'
                     WHEN c.listing_date = CURRENT_DATE THEN 'Listing Today' ELSE 'Listed' END as status
         FROM gold.hk_ipo_calendar c
         LEFT JOIN gold.hk_ipo_details d ON c.ticker = d.ticker
-        LEFT JOIN gold.hk_ipo_performance p ON c.ticker = p.ticker WHERE 1=1
+        LEFT JOIN gold.hk_ipo_performance p ON c.ticker = p.ticker
+        LEFT JOIN LATERAL (
+            SELECT s.offer_price_low, s.offer_price_high, s.fixed_price, s.grey_close
+            FROM silver.unified_ipo_calendar s
+            WHERE s.ticker = c.ticker
+            ORDER BY s.listing_date DESC LIMIT 1
+        ) sp ON TRUE
+        WHERE 1=1
     """
     params = {}
     if status == "upcoming": query += " AND c.listing_date >= CURRENT_DATE"
@@ -33,8 +41,15 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
     return {"ipos": [{
         "ticker": r.ticker, "stock_name": r.stock_name, "listing_date": str(r.listing_date),
         "offer_price": float(r.offer_price) if r.offer_price else None,
+        "offer_price_low": float(r.offer_price_low) if r.offer_price_low else None,
+        "offer_price_high": float(r.offer_price_high) if r.offer_price_high else None,
+        "fixed_price": bool(r.fixed_price) if r.fixed_price is not None else None,
+        "grey_close": float(r.grey_close) if r.grey_close else None,
         "market_cap_hkd": float(r.market_cap_hkd) if r.market_cap_hkd else None,
         "sector": r.sector, "sponsor": r.sponsor,
+        "oversubscription_retail": float(r.oversubscription_retail) if r.oversubscription_retail else None,
+        "oversubscription_institutional": float(r.oversubscription_institutional) if r.oversubscription_institutional else None,
+        "cornerstone_total_pct": float(r.cornerstone_total_pct) if r.cornerstone_total_pct else None,
         "first_day_return": float(r.first_day_return_pct) if r.first_day_return_pct else None,
         "return_day30": float(r.return_day30_pct) if r.return_day30_pct else None,
         "performance_tier": r.performance_tier, "status": r.status,
