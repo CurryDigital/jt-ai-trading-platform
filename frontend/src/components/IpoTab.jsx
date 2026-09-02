@@ -15,9 +15,10 @@ import { fmtPct, api, usePoll, compact } from '../utils';
 //   GET /api/hkex/ipos/sectors        2y sector aggregates
 //   GET /api/strategies/researcher    strategy book, filtered to HK IPO strategies
 //
-// Chinese names: gold.hk_ipo_calendar.stock_name_zh — column does not exist yet
-// (qr_etl t_437922f4). API self-adapts once it lands; until then zh is null and
-// the UI falls back to the English name (flagged, not hidden).
+// Chinese names: gold.hk_ipo_calendar.stock_name_zh — served self-adapting on
+// /api/hkex/ipos, /ipos/subscription and /ipos/book (t_437922f4, t_077987b2).
+// Rows where the column is still NULL render EN primary + a quiet
+// "EN only · zh pending" sub-line.
 // =================================================================
 
 const CSS = `
@@ -26,10 +27,10 @@ const CSS = `
 .ipo-title{font-size:11px;color:#8b93a3;letter-spacing:.5px;font-weight:600;display:flex;align-items:center;gap:8px;}
 .ipo-tag{font-size:9px;font-weight:700;letter-spacing:.4px;padding:2px 7px;border-radius:4px;}
 .ipo-tag-live{background:#0e3630;color:#2dd4bf;}
-.ipo-tag-pending{background:#332a0e;color:#fbbf24;}
+.ipo-tag-pending{background:#1b2230;color:#8b93a3;}
 .ipo-tag-paper{background:#1b2230;color:#8b93a3;}
-.ipo-tag-exp{background:#241f38;color:#a78bfa;}
-.ipo-tag-watch{background:#0e3630;color:#2dd4bf;}
+.ipo-tag-exp{background:#1b2230;color:#8b93a3;}
+.ipo-tag-watch{background:#1b2230;color:#8b93a3;}
 .ipo-stat{background:#10141c;border:1px solid #161b25;border-radius:8px;padding:12px 14px;}
 .ipo-tbl{width:100%;border-collapse:collapse;}
 .ipo-tbl th{text-align:left;font-size:10px;color:#565e6c;letter-spacing:.3px;font-weight:600;padding:8px 10px;border-bottom:1px solid #161b25;white-space:nowrap;}
@@ -39,25 +40,24 @@ const CSS = `
 .ipo-tbl th.num,.ipo-tbl td.num{text-align:right;font-family:ui-monospace,'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
 .ipo-tbl th.sortable{cursor:pointer;user-select:none;}
 .ipo-tbl th.sortable:hover{color:#8b93a3;}
-.ipo-ticker{color:#2dd4bf;font-family:ui-monospace,'JetBrains Mono',monospace;font-weight:600;}
+.ipo-ticker{color:#e6e8eb;font-family:ui-monospace,'JetBrains Mono',monospace;font-weight:600;}
 .ipo-name{color:#e6e8eb;font-size:12px;}
 .ipo-name-en{color:#565e6c;font-size:10px;}
 .ipo-co{color:#8b93a3;font-size:11px;}
 .ipo-green{color:#34d399;} .ipo-red{color:#f87171;} .ipo-faint{color:#565e6c;}
 .ipo-pill{font-size:9px;font-weight:700;padding:3px 8px;border-radius:4px;letter-spacing:.3px;white-space:nowrap;}
-.ipo-st-book{background:#332a0e;color:#fbbf24;}
-.ipo-st-listing{background:#0e3630;color:#2dd4bf;}
-.ipo-st-hold{background:#152233;color:#60a5fa;}
-.ipo-st-exit{background:#332a0e;color:#fbbf24;}
+.ipo-st-book{background:#1b2230;color:#8b93a3;}
+.ipo-st-listing{background:#1b2230;color:#8b93a3;}
+.ipo-st-hold{background:#1b2230;color:#8b93a3;}
+.ipo-st-exit{background:#1b2230;color:#8b93a3;}
 .ipo-st-urgent{background:#331717;color:#f87171;}
-.ipo-st-open{background:#152233;color:#60a5fa;}
+.ipo-st-open{background:#1b2230;color:#8b93a3;}
 .ipo-btn{font-size:11px;font-weight:600;padding:6px 12px;border-radius:6px;border:1px solid #1d2430;background:transparent;color:#8b93a3;cursor:pointer;}
 .ipo-btn:hover{border-color:#565e6c;color:#e6e8eb;}
 .ipo-btn:disabled{opacity:.4;cursor:not-allowed;}
 .ipo-btn:disabled:hover{border-color:#1d2430;color:#8b93a3;}
-.ipo-btn-primary{background:#2dd4bf;color:#04211c;border-color:#2dd4bf;}
+.ipo-btn-primary{background:#1b2230;color:#8b93a3;border-color:#1d2430;}
 .ipo-btn-danger{border-color:#4a2323;color:#f87171;}
-.ipo-btn-amber{background:#fbbf24;color:#332a05;border-color:#fbbf24;}
 .ipo-yr{font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid #1d2430;color:#565e6c;cursor:pointer;background:transparent;}
 .ipo-yr.active{background:#12161f;color:#e6e8eb;border-color:#565e6c;}
 .ipo-note{font-size:11px;color:#565e6c;line-height:1.6;padding:12px 16px;border-top:1px solid #161b25;}
@@ -106,11 +106,12 @@ const Stat = ({ label, value, sub, green }) => (
   </div>
 );
 
-const NameCell = ({ zh, en, pending }) => (
+const NameCell = ({ zh, en }) => (
   <td>
-    <div className={zh ? 'ipo-name' : 'ipo-co'}>{zh || en || '—'}</div>
-    {zh && en && <div className="ipo-name-en">{en}</div>}
-    {!zh && pending && <div className="ipo-name-en">zh pending · t_437922f4</div>}
+    <div className="ipo-name">{zh || en || '—'}</div>
+    {zh && en
+      ? <div className="ipo-name-en">{en}</div>
+      : !zh && en && <div className="ipo-name-en" title="Chinese name pending upstream — qr_etl t_437922f4">EN only · zh pending</div>}
   </td>
 );
 
@@ -292,7 +293,7 @@ export function IpoTab({ onOpen }) {
         tag={subs && subs.length ? <Tag kind="live">LIVE</Tag> : <Tag kind="pending">PENDING</Tag>}
         right={subs && subs.length ? `${subs.length} open` : 'no tracked windows'}
         scroll
-        note={<span>Min. investment is one board lot at the top of the offer range plus a ~0.77% brokerage/levies estimate, HK$. The subscription-window feed is incomplete upstream (application dates unpopulated, no forward calendar rows) — <code>qr_etl t_e71cffde</code>. An empty table means &quot;no tracked windows&quot;, not &quot;no HK IPOs open&quot;.</span>}
+        note={<span>Min. investment is one board lot at the top of the offer range plus a ~0.77% brokerage/levies estimate, HK$. The subscription-window feed is incomplete upstream (offer ranges / oversubscription multiples unpopulated for open windows, no forward calendar rows) — <code>qr_etl t_e71cffde · t_90585bf2</code>. An empty table means &quot;no tracked windows&quot;, not &quot;no HK IPOs open&quot;. Grey-market quotes exist only on the trading day before listing.</span>}
       >
         {subs && subs.length > 0 ? (
           <table className="ipo-tbl">
@@ -300,7 +301,7 @@ export function IpoTab({ onOpen }) {
               <tr>
                 <th>Ticker</th><th>Name</th><th>Sector</th>
                 <th className="num">Price range</th><th className="num">Lot size</th><th className="num">Min. investment</th>
-                <th>Subscription period</th><th className="num">Oversub (retail)</th><th className="num">Grey market</th>
+                <th>Subscription window</th><th className="num">Closes</th><th className="num">Oversub (retail)</th><th className="num">Grey market</th>
                 <th className="num">Listing</th><th>Action</th>
               </tr>
             </thead>
@@ -313,16 +314,20 @@ export function IpoTab({ onOpen }) {
                 return (
                   <tr key={r.ticker}>
                     <td className="ipo-ticker">{r.ticker}</td>
-                    <NameCell zh={null} en={r.stock_name} pending />
+                    <NameCell zh={r.stock_name_zh} en={r.stock_name} />
                     <td className="ipo-co">{r.sector || '—'}</td>
-                    <td className="num">{r.fixed_price ? `${num(r.offer_price)} (fixed)` : r.offer_price_low != null ? `${num(r.offer_price_low)}–${num(r.offer_price_high)}` : '—'}</td>
+                    <td className="num">{r.fixed_price ? `${num(r.offer_price)} (fixed)` : r.offer_price_low != null ? `${num(r.offer_price_low)}–${num(r.offer_price_high)}` : <span className="ipo-faint" title="Offer range not published upstream — qr_etl t_90585bf2">—</span>}</td>
                     <td className="num">{r.lot_size ? `${r.lot_size} sh` : '—'}</td>
-                    <td className="num">{minInvestment(r) != null ? minInvestment(r).toLocaleString() : '—'}</td>
+                    <td className="num">{minInvestment(r) != null ? minInvestment(r).toLocaleString() : <span className="ipo-faint" title="Needs the offer range — not published upstream yet">—</span>}</td>
                     <td>{r.application_end
-                      ? <span className={`ipo-pill ${urgent ? 'ipo-st-urgent' : 'ipo-st-open'}`}>{urgent ? 'CLOSES SOON' : 'OPEN'} · ends {r.application_end}</span>
+                      ? <div>
+                          <span className={`ipo-pill ${urgent ? 'ipo-st-urgent' : 'ipo-st-open'}`}>{urgent ? 'CLOSES SOON' : 'OPEN'}</span>
+                          <div className="ipo-name-en" style={{ marginTop: 4 }}>{r.application_start || '?'} → {r.application_end}</div>
+                        </div>
                       : <span className="ipo-pill ipo-st-book">WINDOW TBC</span>}</td>
-                    <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : '—'}</td>
-                    <td className={`num ${sgnCl(greyPct)}`}>{greyPct != null ? signed(greyPct, 0) : '—'}</td>
+                    <td className="num">{r.application_end || '—'}</td>
+                    <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : <span className="ipo-faint" title="Retail oversubscription not published upstream yet — qr_etl t_90585bf2">—</span>}</td>
+                    <td className={`num ${sgnCl(greyPct)}`}>{greyPct != null ? signed(greyPct, 0) : <span className="ipo-faint" title="Grey-market session is the trading day before listing — not held yet">—</span>}</td>
                     <td className="num">{r.listing_date || '—'}</td>
                     <td><button className="ipo-btn ipo-btn-primary" disabled title="IPO subscription is not wired to a broker route">Apply ↗</button></td>
                   </tr>
@@ -367,7 +372,7 @@ export function IpoTab({ onOpen }) {
                 return (
                   <tr key={`${r.strategy_id}-${r.ticker}`}>
                     <td className="ipo-ticker">{r.ticker}</td>
-                    <NameCell zh={null} en={r.stock_name} pending />
+                    <NameCell zh={r.stock_name_zh} en={r.stock_name} />
                     <td>{pill}</td>
                     <td className="num">{num(r.offer_price)}</td>
                     <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : '—'}</td>
@@ -415,7 +420,7 @@ export function IpoTab({ onOpen }) {
             {view.map(r => (
               <tr key={`${r.ticker}-${r.listing_date}`}>
                 <td className="ipo-ticker">{r.ticker}</td>
-                <NameCell zh={r.stock_name_zh} en={r.stock_name} pending={!r.stock_name_zh} />
+                <NameCell zh={r.stock_name_zh} en={r.stock_name} />
                 <td className="ipo-co">{r.sector || '—'}</td>
                 <td className="num">{r.listing_date}</td>
                 <td className="num">{num(r.offer_price)}</td>
@@ -430,7 +435,7 @@ export function IpoTab({ onOpen }) {
           </tbody>
         </table>
         <div className="ipo-note">
-          {view.length} rows · Day-20 = 20th trading day close vs offer, computed from <code>silver.unified_prices</code> until <code>gold.hk_ipo_performance.return_day20_pct</code> is backfilled (<code>qr_etl t_e71cffde</code>) · names show English until <code>stock_name_zh</code> lands (<code>qr_etl t_437922f4</code>)
+          {view.length} rows · Day-20 = 20th trading day close vs offer, computed from <code>silver.unified_prices</code> until <code>gold.hk_ipo_performance.return_day20_pct</code> is backfilled (<code>qr_etl t_e71cffde</code>) · names show English only where <code>stock_name_zh</code> is still missing (<code>qr_etl t_437922f4</code>)
         </div>
       </Panel>
 
