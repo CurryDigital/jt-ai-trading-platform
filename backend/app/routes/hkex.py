@@ -23,10 +23,11 @@ def _d(v):
     return str(v) if v is not None else None
 
 
-# Day-20 close: gold.hk_ipo_performance.return_day20_pct exists but is 0/1429 populated
-# (qr_etl backfill pending). Compute the 20th trading day's close from silver.unified_prices
-# (real data, no synthesis). Once the gold column is backfilled it takes precedence via
-# COALESCE on the pct; day20_price always comes from the lateral so the UI can show the level.
+# Day-20 close: prefer gold.hk_ipo_performance.return_day20_pct (backfilled by qr_etl,
+# task t_e71cffde). The lateral below computes the 20th trading day's close from
+# silver.unified_prices and is used ONLY as a fallback when the gold column is NULL
+# (via COALESCE on the pct). day20_price always comes from the lateral so the UI can
+# show the level.
 _DAY20_LATERAL = """
     LEFT JOIN LATERAL (
         SELECT sp.close AS close, sp.date AS dt
@@ -109,9 +110,8 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
 def get_hkex_ipo_subscription(db: Session = Depends(get_db)):
     """IPOs currently in (or approaching) their public subscription window.
 
-    Coverage note: gold.hk_ipo_details.application_start/end are 0/1546 populated and the
-    calendar carries no upcoming rows as of 2026-09-02 — the feed is incomplete pending
-    qr_etl backfill, so an empty list means 'no tracked windows', not 'no HK IPOs open'.
+    Subscription windows come from gold.hk_ipo_details.application_start/end (backfilled
+    by qr_etl, task t_e71cffde). An empty list means no tracked windows are open right now.
     """
     result = db.execute(text("""
         SELECT c.ticker, c.stock_name, c.listing_date, c.offer_price, c.sector, c.sponsor,
