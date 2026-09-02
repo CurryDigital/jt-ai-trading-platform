@@ -113,8 +113,10 @@ def get_hkex_ipo_subscription(db: Session = Depends(get_db)):
     Subscription windows come from gold.hk_ipo_details.application_start/end (backfilled
     by qr_etl, task t_e71cffde). An empty list means no tracked windows are open right now.
     """
-    result = db.execute(text("""
-        SELECT c.ticker, c.stock_name, c.listing_date, c.offer_price, c.sector, c.sponsor,
+    zh_col = "c.stock_name_zh" if _has_column(db, "gold", "hk_ipo_calendar", "stock_name_zh") \
+        else "NULL::varchar AS stock_name_zh"
+    result = db.execute(text(f"""
+        SELECT c.ticker, c.stock_name, {zh_col}, c.listing_date, c.offer_price, c.sector, c.sponsor,
                d.application_start, d.application_end,
                d.oversubscription_retail,
                s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
@@ -134,7 +136,7 @@ def get_hkex_ipo_subscription(db: Session = Depends(get_db)):
         LIMIT 50
     """)).fetchall()
     return {"ipos": [{
-        "ticker": r.ticker, "stock_name": r.stock_name,
+        "ticker": r.ticker, "stock_name": r.stock_name, "stock_name_zh": r.stock_name_zh,
         "listing_date": _d(r.listing_date),
         "offer_price": _f(r.offer_price), "sector": r.sector, "sponsor": r.sponsor,
         "application_start": _d(r.application_start), "application_end": _d(r.application_end),
@@ -153,11 +155,13 @@ def get_hkex_ipo_book(db: Session = Depends(get_db)):
     calendar/performance/details. Empty means no open IPO positions — the drift strategy
     is event-driven and spends most of its time flat.
     """
-    result = db.execute(text("""
+    zh_col = "c.stock_name_zh" if _has_column(db, "gold", "hk_ipo_calendar", "stock_name_zh") \
+        else "NULL::varchar AS stock_name_zh"
+    result = db.execute(text(f"""
         SELECT pos.strategy_id, pos.ticker, pos.side, pos.quantity, pos.entry_price,
                pos.entry_date, pos.current_price AS pos_current_price, pos.market_value,
                pos.unrealized_pnl, pos.updated_at,
-               c.stock_name, c.listing_date,
+               c.stock_name, {zh_col}, c.listing_date,
                p.offer_price, p.current_price, p.performance_tier,
                d.oversubscription_retail,
                last_px.volume AS last_volume, last_px.dt AS last_price_date
@@ -177,6 +181,7 @@ def get_hkex_ipo_book(db: Session = Depends(get_db)):
     """)).fetchall()
     return {"positions": [{
         "strategy_id": r.strategy_id, "ticker": r.ticker, "stock_name": r.stock_name,
+        "stock_name_zh": r.stock_name_zh,
         "side": r.side, "quantity": _f(r.quantity),
         "entry_price": _f(r.entry_price), "entry_date": _d(r.entry_date),
         "current_price": _f(r.current_price) or _f(r.pos_current_price),
