@@ -237,7 +237,7 @@ const watchRow = (r) => {
   return { ...r, entry, exit, entryEstimated: estimated, exitEstimated, phase, daysToEntry, chg, ipoPx, entryPx, exitPx, pnl, pnlKind };
 };
 
-const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter, onClearSector }) => {
+const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter, onClearSector, ipoWindow }) => {
   const bt = ev?.metrics?.backtest || {};
   const modes = ev?.metrics_by_mode || {};
   const latestSignal = (ev?.recent_signals || []).slice().sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))[0];
@@ -251,13 +251,18 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter,
 
   const watch = useMemo(() => {
     if (!ipos) return null;
-    const rows = ipos
-      .filter(r => r.listing_date && r.listing_date <= TODAY)
-      .filter(r => r.oversubscription_retail != null && r.oversubscription_retail >= DRIFT_RULE.bandLo && r.oversubscription_retail <= DRIFT_RULE.bandHi)
-      .filter(r => !sectorFilter || r.sector === sectorFilter)
+    const base = ipos.filter(r => r.listing_date && r.listing_date <= TODAY);
+    // Sector drill-down: show ALL of the sector's IPOs in the selected window
+    // (same rule-mirror columns, oversub band NOT applied). Unfiltered: the
+    // strategy's mechanical band + recency view.
+    const rows = (sectorFilter
+      ? base.filter(r => r.sector === sectorFilter && r.listing_date >= windowCutoff(ipoWindow))
+      : base
+          .filter(r => r.oversubscription_retail != null && r.oversubscription_retail >= DRIFT_RULE.bandLo && r.oversubscription_retail <= DRIFT_RULE.bandHi)
+    )
       .map(watchRow)
       .filter(Boolean)
-      .filter(r => r.entry >= addDays(TODAY, -120)); // only recent windows
+      .filter(r => sectorFilter || r.entry >= addDays(TODAY, -120)); // recency cap only in band mode
     const inHold = rows.filter(r => r.phase === 'in_hold').sort((a, b) => a.exit.localeCompare(b.exit));
     const ahead = rows.filter(r => r.phase === 'ahead').sort((a, b) => a.entry.localeCompare(b.entry));
     const passed = rows.filter(r => r.phase === 'passed').sort((a, b) => b.exit.localeCompare(a.exit));
@@ -273,7 +278,7 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter,
         avg: sum / closed.length, sum,
       } : null,
     };
-  }, [ipos, sectorFilter]);
+  }, [ipos, sectorFilter, ipoWindow]);
 
   const wr = pctOrRatio(s.win_rate);
   const mdd = pctOrRatio(s.max_drawdown);
@@ -313,7 +318,7 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter,
           <tr key={r.ticker}>
             <td className="ipo-ticker">{r.ticker}</td>
             <NameCell zh={r.stock_name_zh} en={r.stock_name} />
-            <td className="num">{num(r.oversubscription_retail, 1)}x</td>
+            <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : '—'}</td>
             <td className="num">{r.ipoPx != null ? num(r.ipoPx) : '—'}</td>
             <td className="num">{num(r.first_day_close)}</td>
             <PxDate px={r.entryPx} date={r.entry} estimated={r.entryEstimated} faint={r.phase === 'ahead'} />
@@ -402,12 +407,14 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter,
         {' · '}{s.assigned_capital != null ? `$${Number(s.assigned_capital).toLocaleString()} assigned` : 'capital unassigned'}
       </div>
 
-      {/* SIM rule-mirror trades — what the strategy would have traded */}
+      {/* SIM rule-mirror trades — what the strategy would have traded; sector drill-down shows all sector IPOs in the window */}
       <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span>SIM · RULE-MIRROR TRADES — what the strategy would have traded (oversub {DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x · enter +{DRIFT_RULE.entryTd}td · hold {DRIFT_RULE.holdTd}td)</span>
+        <span>{sectorFilter
+          ? `SECTOR · ${sectorFilter} — IPOs listed in the ${WINDOWS.find(w => w.k === ipoWindow)?.label || ipoWindow} window (rule-mirror columns · oversub band not applied)`
+          : `SIM · RULE-MIRROR TRADES — what the strategy would have traded (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td)`}</span>
         {sectorFilter && (
           <span className="ipo-pill" style={{ background: '#12161f', color: '#8b93a3', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            sector: {sectorFilter}
+            clear sector filter
             <button onClick={onClearSector} title="Clear sector filter" style={{ background: 'none', border: 'none', color: '#8b93a3', cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1 }}>×</button>
           </span>
         )}
@@ -428,11 +435,17 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter,
         </div>
       ) : (
         <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 6 }}>
-          {watch ? `No listed IPOs inside the oversub band and entry window${sectorFilter ? ` for sector ${sectorFilter}` : ''}.` : 'Loading watchlist…'}
+          {watch
+            ? (sectorFilter
+              ? `No ${sectorFilter} IPOs listed in the selected window.`
+              : 'No listed IPOs inside the oversub band and entry window.')
+            : 'Loading watchlist…'}
         </div>
       )}
       <div style={{ fontSize: 10, color: '#565e6c', lineHeight: 1.5, marginBottom: 14 }}>
-        Mechanical replay of the documented rule over the IPO calendar using measured closes (entry = 20th trading day, exit = 40th) — <span style={{ color: '#8b93a3' }}>not the engine signal</span>. The engine decides entries itself and is currently flat (CASH); these windows pre-date strategy creation 2026-08-31, so they show what SIM would have traded, not what was traded. ◦ = open, marked to current price.
+        {sectorFilter
+          ? 'Entry/exit columns replay the documented rule window (+20td entry, +40td exit) on every sector name so the dates and P&L stay comparable — the strategy itself only trades the oversub band. ◦ = open, marked to current price.'
+          : <>Mechanical replay of the documented rule over the IPO calendar using measured closes (entry = 20th trading day, exit = 40th) — <span style={{ color: '#8b93a3' }}>not the engine signal</span>. The engine decides entries itself and is currently flat (CASH); these windows pre-date strategy creation 2026-08-31, so they show what SIM would have traded, not what was traded. ◦ = open, marked to current price.</>}
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
@@ -817,6 +830,7 @@ export function IpoTab({ onOpen }) {
               onPause={pauseStrategy}
               sectorFilter={sectorFilter}
               onClearSector={() => setSectorFilter(null)}
+              ipoWindow={ipoWindow}
             />
           ))}
         </div>
