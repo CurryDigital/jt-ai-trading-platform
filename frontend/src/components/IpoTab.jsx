@@ -646,25 +646,6 @@ export function IpoTab({ onOpen }) {
         </div>
       )}
 
-      {/* strategy book */}
-      <Panel title="HK IPO STRATEGIES" tag={<Tag kind="live">LIVE</Tag>}>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {strategies.length === 0 ? (
-            <div style={{ fontSize: 11, color: '#565e6c' }}>No HK IPO strategies registered in the strategy book.</div>
-          ) : strategies.map(s => (
-            <IpoStrategyCard
-              key={s.id}
-              s={s}
-              ev={evals[s.id]}
-              ipos={ipos}
-              onOpen={onOpen}
-              onAdjust={adjustAllocation}
-              onPause={pauseStrategy}
-            />
-          ))}
-        </div>
-      </Panel>
-
       {/* stage pipeline */}
       <Panel
         title="IPO PIPELINE — BY STAGE"
@@ -805,6 +786,25 @@ export function IpoTab({ onOpen }) {
             </div>
           )
         )}
+      </Panel>
+
+      {/* strategy book */}
+      <Panel title="HK IPO STRATEGIES" tag={<Tag kind="live">LIVE</Tag>}>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {strategies.length === 0 ? (
+            <div style={{ fontSize: 11, color: '#565e6c' }}>No HK IPO strategies registered in the strategy book.</div>
+          ) : strategies.map(s => (
+            <IpoStrategyCard
+              key={s.id}
+              s={s}
+              ev={evals[s.id]}
+              ipos={ipos}
+              onOpen={onOpen}
+              onAdjust={adjustAllocation}
+              onPause={pauseStrategy}
+            />
+          ))}
+        </div>
       </Panel>
 
       {/* active IPO book — positions, metrics only */}
