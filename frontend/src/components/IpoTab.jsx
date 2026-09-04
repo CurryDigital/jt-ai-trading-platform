@@ -237,7 +237,7 @@ const watchRow = (r) => {
   return { ...r, entry, exit, entryEstimated: estimated, exitEstimated, phase, daysToEntry, chg, ipoPx, entryPx, exitPx, pnl, pnlKind };
 };
 
-const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause }) => {
+const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause, sectorFilter, onClearSector }) => {
   const bt = ev?.metrics?.backtest || {};
   const modes = ev?.metrics_by_mode || {};
   const latestSignal = (ev?.recent_signals || []).slice().sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))[0];
@@ -254,6 +254,7 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause }) => {
     const rows = ipos
       .filter(r => r.listing_date && r.listing_date <= TODAY)
       .filter(r => r.oversubscription_retail != null && r.oversubscription_retail >= DRIFT_RULE.bandLo && r.oversubscription_retail <= DRIFT_RULE.bandHi)
+      .filter(r => !sectorFilter || r.sector === sectorFilter)
       .map(watchRow)
       .filter(Boolean)
       .filter(r => r.entry >= addDays(TODAY, -120)); // only recent windows
@@ -272,7 +273,7 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause }) => {
         avg: sum / closed.length, sum,
       } : null,
     };
-  }, [ipos]);
+  }, [ipos, sectorFilter]);
 
   const wr = pctOrRatio(s.win_rate);
   const mdd = pctOrRatio(s.max_drawdown);
@@ -402,8 +403,14 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause }) => {
       </div>
 
       {/* SIM rule-mirror trades — what the strategy would have traded */}
-      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>
-        SIM · RULE-MIRROR TRADES — what the strategy would have traded (oversub {DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x · enter +{DRIFT_RULE.entryTd}td · hold {DRIFT_RULE.holdTd}td)
+      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span>SIM · RULE-MIRROR TRADES — what the strategy would have traded (oversub {DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x · enter +{DRIFT_RULE.entryTd}td · hold {DRIFT_RULE.holdTd}td)</span>
+        {sectorFilter && (
+          <span className="ipo-pill" style={{ background: '#12161f', color: '#8b93a3', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            sector: {sectorFilter}
+            <button onClick={onClearSector} title="Clear sector filter" style={{ background: 'none', border: 'none', color: '#8b93a3', cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1 }}>×</button>
+          </span>
+        )}
       </div>
       {watch && watch.all.length > 0 ? (
         <div style={{ overflowX: 'auto', marginBottom: 6 }}>
@@ -421,7 +428,7 @@ const IpoStrategyCard = ({ s, ev, ipos, onOpen, onAdjust, onPause }) => {
         </div>
       ) : (
         <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 6 }}>
-          {watch ? 'No listed IPOs currently inside the oversub band and entry window.' : 'Loading watchlist…'}
+          {watch ? `No listed IPOs inside the oversub band and entry window${sectorFilter ? ` for sector ${sectorFilter}` : ''}.` : 'Loading watchlist…'}
         </div>
       )}
       <div style={{ fontSize: 10, color: '#565e6c', lineHeight: 1.5, marginBottom: 14 }}>
@@ -448,6 +455,7 @@ export function IpoTab({ onOpen }) {
   const [subs, setSubs] = useState(null);
   const [book, setBook] = useState(null);
   const [stage, setStage] = useState(null); // null = auto-pick once data lands
+  const [sectorFilter, setSectorFilter] = useState(null); // click a sector row → filters the strategy rule-mirror list
   const [actionMsg, setActionMsg] = useState(null);
 
   const load = useCallback(async () => {
@@ -592,7 +600,7 @@ export function IpoTab({ onOpen }) {
         tag={<Tag kind="live">LIVE</Tag>}
         right={`window: ${activeWindowLabel}`}
         scroll
-        note={<span>Average returns vs IPO offer price over the selected window (D1 = first-day close, D20 = 20th trading-day close, Now = latest price). Win = share of IPOs with a positive first-day return. Cell tooltips show measurement coverage — a thin window means a thin sample, not a strong signal.</span>}
+        note={<span>Average returns vs IPO offer price over the selected window (D1 = first-day close, D20 = 20th trading-day close, Now = latest price). Win = share of IPOs with a positive first-day return. Click a sector to filter the strategy rule-mirror list below to that sector.</span>}
       >
         {sectorView.named.length === 0 ? (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>No classified sectors returned for this window.</div>
@@ -609,8 +617,13 @@ export function IpoTab({ onOpen }) {
             </thead>
             <tbody>
               {sectorView.named.map(s => (
-                <tr key={s.sector}>
-                  <td style={{ color: '#8b93a3' }}>{s.sector}</td>
+                <tr key={s.sector}
+                    onClick={() => setSectorFilter(f => f === s.sector ? null : s.sector)}
+                    title={sectorFilter === s.sector ? 'Clear sector filter' : 'Filter the strategy rule-mirror list below to this sector'}
+                    style={{ cursor: 'pointer', background: sectorFilter === s.sector ? '#12161f' : undefined }}>
+                  <td style={{ color: sectorFilter === s.sector ? '#e6e8eb' : '#8b93a3' }}>
+                    <span style={{ marginRight: 6, color: '#565e6c' }}>{sectorFilter === s.sector ? '▾' : '▸'}</span>{s.sector}
+                  </td>
                   <td className="num">{s.ipo_count}</td>
                   <td className={`num ${sgnCl(s.avg_first_day_return)}`}>{s.avg_first_day_return == null ? '—' : fmtPct(s.avg_first_day_return)}</td>
                   <td className={`num ${sgnCl(s.avg_day20_return)}`} title={`measured on ${s.day20_n ?? '?'} of ${s.ipo_count}`}>
@@ -802,6 +815,8 @@ export function IpoTab({ onOpen }) {
               onOpen={onOpen}
               onAdjust={adjustAllocation}
               onPause={pauseStrategy}
+              sectorFilter={sectorFilter}
+              onClearSector={() => setSectorFilter(null)}
             />
           ))}
         </div>
