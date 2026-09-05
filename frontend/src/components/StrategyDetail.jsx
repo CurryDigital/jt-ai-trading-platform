@@ -161,7 +161,7 @@ const fmtDollar = (v) => {
 const HATCH = 'repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0 6px, transparent 6px 12px)';
 
 const MODE_TABS = [
-  { id: 'sim',       label: 'SIM',       source: 'OOS backtest · gold.strategy_backtest_runs' },
+  { id: 'sim',       label: 'SIM · BACKTEST', source: 'OOS backtest · gold.strategy_backtest_runs' },
   { id: 'paper',     label: 'PAPER',     source: 'gold.paper_trades_synthetic' },
   { id: 'uat',       label: 'UAT',       source: 'IBKR broker rehearsal · gold.paper_uat_fills' },
   { id: 'live',      label: 'LIVE',      source: 'gold.trade_executions' },
