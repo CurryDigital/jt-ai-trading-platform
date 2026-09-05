@@ -71,7 +71,8 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
                p.return_day30_pct, p.total_return_pct, p.current_price, p.performance_tier,
                s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
                s.grey_close, s.grey_session_date,
-               CASE WHEN c.listing_date > CURRENT_DATE THEN 'Upcoming'
+               CASE WHEN c.listing_date IS NULL THEN 'Announced'
+                    WHEN c.listing_date > CURRENT_DATE THEN 'Upcoming'
                     WHEN c.listing_date = CURRENT_DATE THEN 'Listing Today' ELSE 'Listed' END as status
         FROM gold.hk_ipo_calendar c
         LEFT JOIN gold.hk_ipo_details d ON c.ticker = d.ticker
@@ -92,12 +93,15 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
     elif status == "listed": query += " AND c.listing_date < CURRENT_DATE"
     if sector: query += " AND c.sector = :sector"; params["sector"] = sector
     if year: query += " AND EXTRACT(YEAR FROM c.listing_date) = :year"; params["year"] = year
-    query += " ORDER BY c.listing_date DESC LIMIT :limit"; params["limit"] = limit
+    # Dated rows first (listed/public analytics need full history); the A1-/A1G-
+    # pre-subscription placeholders (listing_date NULL) trail the list, so callers
+    # must pass a limit that covers BOTH sets (~1.9k rows as of 2026-09).
+    query += " ORDER BY c.listing_date DESC NULLS LAST LIMIT :limit"; params["limit"] = limit
 
     result = db.execute(text(query), params).fetchall()
     return {"ipos": [{
         "ticker": r.ticker, "stock_name": r.stock_name, "stock_name_zh": r.stock_name_zh,
-        "listing_date": str(r.listing_date),
+        "listing_date": _d(r.listing_date),
         "offer_price": _f(r.offer_price),
         "market_cap_hkd": _f(r.market_cap_hkd),
         "sector": r.sector, "sub_sector": r.sub_sector, "sponsor": r.sponsor, "board": r.board,

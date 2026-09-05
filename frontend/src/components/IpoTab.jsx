@@ -18,10 +18,11 @@ import { fmtPct, api, usePoll } from '../utils';
 //   labelled as such — never presented as the engine signal).
 //
 // Data sources:
-//   GET /api/hkex/ipos?limit=400      enriched list: calendar + details + performance
+//   GET /api/hkex/ipos?limit=2000     enriched list: calendar + details + performance
 //                                     + price range/lot/grey (silver) + day-20 (lateral
 //                                     silver.unified_prices until gold.return_day20_pct
-//                                     is backfilled — qr_etl t_e71cffde)
+//                                     is backfilled — qr_etl t_e71cffde); NULLS LAST —
+//                                     A1-/A1G- announced placeholders trail the dated rows
 //   GET /api/hkex/ipos/subscription   open/upcoming subscription windows
 //                                     (feed incomplete — qr_etl t_e71cffde)
 //   GET /api/hkex/ipos/book           active paper-book positions in IPO names
@@ -510,7 +511,9 @@ export function IpoTab({ onOpen }) {
 
   const load = useCallback(async () => {
     const [lst, strat, sub, bk] = await Promise.all([
-      api.get('/api/hkex/ipos?limit=400'),
+      // limit must cover BOTH the dated calendar (~1.5k) and the A1-/A1G- announced
+      // placeholders (~380, listing_date null, sorted last server-side)
+      api.get('/api/hkex/ipos?limit=2000'),
       api.get('/api/strategies/researcher'),
       api.get('/api/hkex/ipos/subscription'),
       api.get('/api/hkex/ipos/book'),
@@ -764,7 +767,7 @@ export function IpoTab({ onOpen }) {
         tag={<Tag kind="live">LIVE</Tag>}
         right={`${TODAY} UTC`}
         scroll
-        note={<span>Stages are classified client-side from the calendar fields the API serves (application window vs listing date, {TODAY} UTC). The pre-subscription forward calendar is thin upstream — an empty ANNOUNCED stage means &quot;no tracked rows&quot;, not &quot;no HK IPOs filed&quot; (<code>qr_etl t_e71cffde</code>); oversubscription for open windows is pending upstream (<code>qr_etl t_90585bf2</code>).</span>}
+        note={<span>Stages are classified client-side from the calendar fields the API serves (application window vs listing date, {TODAY} UTC). ANNOUNCED rows are HKEXnews A1/PHIP filings (A1-/A1G- tickers, listing date TBC) from the upstream filings feed (<code>qr_etl t_59228b1e</code>); oversubscription for open windows is pending upstream (<code>qr_etl t_90585bf2</code>).</span>}
       >
         <div className="ipo-stages">
           {STAGES.map((st, i) => {
@@ -809,7 +812,7 @@ export function IpoTab({ onOpen }) {
             </table>
           ) : (
             <div style={{ padding: 16, fontSize: 11, color: '#565e6c' }}>
-              No announced (pre-subscription) IPOs tracked — the forward calendar feed is incomplete upstream, so this reads "no tracked rows", not "nothing filed" (qr_etl t_e71cffde).
+              No announced (pre-subscription) IPOs tracked — the HKEXnews A1/PHIP filings feed (qr_etl t_59228b1e) returned no active filings, so this reads &quot;no tracked filings&quot;, not &quot;nothing filed&quot;.
             </div>
           )
         )}
