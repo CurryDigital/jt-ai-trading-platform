@@ -110,7 +110,7 @@ function Metric({ label, value, color, big }) {
 // openBar (paper mode only): mark-to-market OPEN book, rendered as a dashed
 // outline bar labelled 'open' — visibly distinct from solid realized bars so
 // unrealized P&L is never mistaken for a closed-trade return.
-function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet', normalize = true, openBar = null }) {
+export function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet', normalize = true, openBar = null }) {
   const years = Object.keys(yearly || {}).sort();
   const entries = years
     .map((y) => ({ y, v: normalize ? pctOrRatio(yearly[y]?.return_pct, 1) : (yearly[y]?.return_pct != null ? +Number(yearly[y].return_pct).toFixed(1) : null) }))

@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { fmtPct, api, usePoll } from '../utils';
+import { Chip, Button, ModeBadge, pnlColor } from './jtkit';
+import { YearlyBars } from './StrategiesWorkspace';
 
 // =================================================================
 // IPO subtab (Strategies > IPO) — HK IPO only, redesign 2026-09-02
@@ -9,13 +11,16 @@ import { fmtPct, api, usePoll } from '../utils';
 //     1 ANNOUNCED (pre-subscription) — "start looking"
 //     2 UNDER SUBSCRIPTION — "monitor whether to apply"
 //     3 GREY MARKET — subscription closed, listing imminent; grey trend
-//   One global window toggle (1M/3M/6M/YTD/2Y) drives both the IPO sentiment
-//   sector table (server-side window) and the IPO KPI stats strip
-//   (client-side listing-date filter).
-//   HK IPO STRATEGIES cards are actionable: backtest metrics + annual
-//   returns + SIM/PAPER/UAT/LIVE mode ladder + engine state + an
-//   entry-window watchlist (mechanical mirror of the documented rule,
-//   labelled as such — never presented as the engine signal).
+//   One global window toggle (1M/3M/6M/YTD/2Y) drives the IPO sentiment
+//   sector table (server-side window), the IPO KPI stats strip (client-side
+//   listing-date filter), and the rule-mirror ticker list (entry windows
+//   inside the selected window).
+//   HK IPO STRATEGIES cards are compact, themed like the Strategies >
+//   Performance subtab (jt-surface + jtkit + YearlyBars): backtest metrics,
+//   annual bars, SIM/PAPER/UAT/LIVE mode ladder strip, engine/ledger
+//   one-liners. Position/trade tables live in ACTIVE IPO BOOK and the
+//   Strategy Detail page. The rule-mirror ticker list is a mechanical mirror
+//   of the documented rule, labelled as such — never the engine signal.
 //
 // Data sources:
 //   GET /api/hkex/ipos?limit=2000     enriched list: calendar + details + performance
@@ -73,7 +78,6 @@ const CSS = `
 .ipo-btn:disabled{opacity:.4;cursor:not-allowed;}
 .ipo-btn:disabled:hover{border-color:#1d2430;color:#8b93a3;}
 .ipo-btn-primary{background:#1b2230;color:#8b93a3;border-color:#1d2430;}
-.ipo-btn-danger{border-color:#4a2323;color:#f87171;}
 .ipo-yr{font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid #1d2430;color:#565e6c;cursor:pointer;background:transparent;}
 .ipo-yr.active{background:#12161f;color:#e6e8eb;border-color:#565e6c;}
 .ipo-note{font-size:11px;color:#565e6c;line-height:1.6;padding:12px 16px;border-top:1px solid #161b25;}
@@ -89,16 +93,6 @@ const CSS = `
 .ipo-stage .step{font-size:9px;color:#565e6c;letter-spacing:.5px;font-weight:700;}
 .ipo-stage .n{font-size:20px;font-weight:600;font-family:ui-monospace,monospace;color:#e6e8eb;margin:2px 0;}
 .ipo-stage .sub{font-size:10px;color:#565e6c;line-height:1.5;}
-.ipo-ladder{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
-.ipo-mode{border:1px solid #161b25;border-radius:8px;padding:10px 12px;background:#0d1118;}
-.ipo-mode.active{border-color:#565e6c;background:#12161f;}
-.ipo-mode .ml{font-size:9px;color:#565e6c;letter-spacing:.5px;font-weight:700;display:flex;justify-content:space-between;}
-.ipo-mode .mv{font-size:15px;font-weight:600;font-family:ui-monospace,monospace;color:#e6e8eb;margin-top:4px;}
-.ipo-mode .ms{font-size:10px;color:#565e6c;margin-top:2px;}
-.ipo-yrchips{display:flex;gap:8px;flex-wrap:wrap;}
-.ipo-yrchip{border:1px solid #161b25;border-radius:6px;padding:6px 10px;background:#0d1118;min-width:86px;}
-.ipo-yrchip .y{font-size:9px;color:#565e6c;letter-spacing:.4px;}
-.ipo-yrchip .r{font-size:13px;font-weight:600;font-family:ui-monospace,monospace;margin-top:2px;}
 `;
 
 const num = (v, d = 2) => v == null || isNaN(v) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -242,18 +236,20 @@ const watchRow = (r) => {
 };
 
 // Rule-mirror watch list. Unfiltered: the strategy's mechanical band
-// (oversub 100–500x) + 120d recency. With a sector selected (click a row in
-// IPO SENTIMENT): ALL of that sector's IPOs listed in the selected window,
-// same columns, oversub band not applied.
+// (oversub 100–500x) restricted to entry windows inside the selected global
+// window. With a sector selected (click a row in IPO SENTIMENT): ALL of that
+// sector's IPOs listed in the selected window, same columns, oversub band
+// not applied.
 const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   if (!ipos) return null;
   const base = ipos.filter(r => r.listing_date && r.listing_date <= TODAY);
+  const cutoff = windowCutoff(ipoWindow);
   const rows = (sectorFilter
-    ? base.filter(r => r.sector === sectorFilter && r.listing_date >= windowCutoff(ipoWindow))
+    ? base.filter(r => r.sector === sectorFilter && r.listing_date >= cutoff)
     : base.filter(r => r.oversubscription_retail != null && r.oversubscription_retail >= DRIFT_RULE.bandLo && r.oversubscription_retail <= DRIFT_RULE.bandHi))
     .map(watchRow)
     .filter(Boolean)
-    .filter(r => sectorFilter || r.entry >= addDays(TODAY, -120)); // recency cap only in band mode
+    .filter(r => sectorFilter || r.entry >= cutoff); // entry windows inside the selected window (band mode)
   const inHold = rows.filter(r => r.phase === 'in_hold').sort((a, b) => a.exit.localeCompare(b.exit));
   const ahead = rows.filter(r => r.phase === 'ahead').sort((a, b) => a.entry.localeCompare(b.entry));
   const passed = rows.filter(r => r.phase === 'passed').sort((a, b) => b.exit.localeCompare(a.exit));
@@ -317,6 +313,22 @@ const WatchTable = ({ rows }) => (
   </table>
 );
 
+// Compact metric cell — same visual language as the Performance subtab's
+// RealMetrics block (8px uppercase muted label over a mono value).
+const Metric = ({ label, value, color, big }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>{label}</span>
+    <span style={{ fontFamily: 'var(--font-mono)', fontSize: big ? 15 : 12, fontWeight: 700, color: color || 'var(--text-secondary)' }}>{value}</span>
+  </div>
+);
+
+const money0 = (v) => v == null ? '—' : `${v >= 0 ? '+' : '−'}$${Math.abs(Number(v)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+// HK IPO strategy card — compact, themed like the Strategies > Performance
+// subtab cards (jt-surface + jtkit chips/badges/buttons + YearlyBars). The
+// heavy tables (open positions, past trades) live on the ACTIVE IPO BOOK
+// panel and the Strategy Detail page; the card carries one-line engine /
+// ledger summaries instead.
 const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) => {
   const bt = ev?.metrics?.backtest || {};
   const modes = ev?.metrics_by_mode || {};
@@ -324,172 +336,94 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
   const activeMode = (() => {
     const em = (s.execution_mode || '').toUpperCase();
     if (em === 'LIVE_TRADING' || em === 'LIVE') return 'live';
+    if (em === 'UAT' || em === 'PAPER_UAT') return 'uat';
     if (em === 'PAPER_TRADING' || em === 'PAPER') return 'paper';
     return 'sim';
   })();
   const flat = (ev?.in_market_capital ?? 0) === 0 && (modes.paper?.total_trades ?? 0) === 0;
-  const trades = Array.isArray(ev?.recent_trades) ? ev.recent_trades : [];
-  const shownTrades = trades.slice(0, 10);
+  const tradeEvents = Array.isArray(ev?.recent_trades) ? ev.recent_trades.length : 0;
 
   const wr = pctOrRatio(s.win_rate);
   const mdd = pctOrRatio(s.max_drawdown);
   const ret = pctOrRatio(s.returns_oos);
-  const years = Object.entries(s.yearly_backtest || {}).sort(([a], [b]) => a.localeCompare(b));
 
-  const ModeTile = ({ k, label, active, children }) => (
-    <div className={`ipo-mode ${active ? 'active' : ''}`}>
-      <div className="ml"><span>{label}</span>{active && <span style={{ color: '#8b93a3' }}>ACTIVE</span>}</div>
-      {children}
-    </div>
-  );
+  const ladder = [
+    { k: 'sim', label: 'SIM · BACKTEST',
+      value: modes.sim?.win_rate != null ? `${(modes.sim.win_rate * 100).toFixed(1)}%` : '—',
+      sub: `${modes.sim?.total_trades ?? '—'} OOS trades` },
+    { k: 'paper', label: 'PAPER',
+      value: modes.paper ? money0(modes.paper.total_pnl) : '—',
+      color: modes.paper?.total_pnl != null ? pnlColor(modes.paper.total_pnl) : undefined,
+      sub: modes.paper ? `${modes.paper.total_trades ?? 0} closed${flat ? ' · flat' : ''}` : 'not reached' },
+    { k: 'uat', label: 'UAT',
+      value: modes.uat?.total_fills ? String(modes.uat.total_fills) : '—',
+      sub: modes.uat?.total_fills ? 'fills booked' : 'not reached' },
+    { k: 'live', label: 'LIVE',
+      value: modes.live?.total_trades ? money0(modes.live.total_pnl ?? 0) : '—',
+      color: modes.live?.total_pnl != null ? pnlColor(modes.live.total_pnl) : undefined,
+      sub: modes.live?.total_trades ? `${modes.live.total_trades} trades` : 'not reached' },
+  ];
 
   return (
-    <div style={{ border: '1px solid #161b25', borderRadius: 8, padding: 16, background: '#0d1118' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{s.name || s.id}</div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-        {s.status && <Tag kind="paper">{String(s.status).toUpperCase()}</Tag>}
-        {s.priority && <Tag kind="exp">{s.priority}</Tag>}
-        {s.is_paper_monitoring && <Tag kind="watch">PAPER · {String(s.paper_state || 'watching').toUpperCase()}</Tag>}
-        {flat && <Tag kind="pending">BOOK FLAT</Tag>}
-      </div>
-
-      {/* backtest block */}
-      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>BACKTEST · OOS 2024-01 → 2026-08 (per registry)</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 18, marginBottom: 12 }}>
-        <div><div style={{ fontSize: 10, color: '#565e6c', marginBottom: 4 }}>SHARPE</div>
-          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: 'ui-monospace,monospace' }}>{s.sharpe_ratio == null ? '—' : Number(s.sharpe_ratio).toFixed(2)}</div></div>
-        <div><div style={{ fontSize: 10, color: '#565e6c', marginBottom: 4 }}>OOS RET</div>
-          <div className={ret == null ? '' : sgnCl(ret)} style={{ fontSize: 16, fontWeight: 600, fontFamily: 'ui-monospace,monospace' }}>{ret == null ? '—' : fmtPct(ret)}</div></div>
-        <div><div style={{ fontSize: 10, color: '#565e6c', marginBottom: 4 }}>WIN</div>
-          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: 'ui-monospace,monospace' }}>{wr == null ? '—' : `${wr.toFixed(0)}%`}</div></div>
-        <div><div style={{ fontSize: 10, color: '#565e6c', marginBottom: 4 }}>MDD</div>
-          <div className={mdd == null ? '' : sgnCl(mdd)} style={{ fontSize: 16, fontWeight: 600, fontFamily: 'ui-monospace,monospace' }}>{mdd == null ? '—' : fmtPct(mdd)}</div></div>
-        <div><div style={{ fontSize: 10, color: '#565e6c', marginBottom: 4 }}>PROFIT FACTOR</div>
-          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: 'ui-monospace,monospace' }}>{bt.profit_factor == null ? '—' : Number(bt.profit_factor).toFixed(2)}</div></div>
-        <div><div style={{ fontSize: 10, color: '#565e6c', marginBottom: 4 }}>OOS TRADES</div>
-          <div style={{ fontSize: 16, fontWeight: 600, fontFamily: 'ui-monospace,monospace' }}>{bt.total_trades ?? s.backtest_trades ?? s.trade_count_oos ?? '—'}</div></div>
-      </div>
-      {years.length > 0 && (
-        <div className="ipo-yrchips" style={{ marginBottom: 14 }}>
-          {years.map(([y, v]) => {
-            const rp = pctOrRatio(v?.return_pct);
-            return (
-              <div key={y} className="ipo-yrchip">
-                <div className="y">ANNUAL BT {y}</div>
-                <div className={`r ${sgnCl(rp)}`}>{rp == null ? '—' : signed(rp)}</div>
-              </div>
-            );
-          })}
+    <div className="jt-surface" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 9 }}>
+      {/* header — name + chips, mode badge right (Performance card layout) */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => onOpen && onOpen(s.id)} title="Open strategy detail">
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name || s.id}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+            {s.status && <Chip color="slate">{String(s.status).toUpperCase()}</Chip>}
+            {s.priority && <Chip color="slate">{s.priority}</Chip>}
+            {s.is_paper_monitoring && <Chip color="slate">PAPER · {String(s.paper_state || 'watching').toUpperCase()}</Chip>}
+            {flat && <Chip color="slate">BOOK FLAT</Chip>}
+          </div>
         </div>
-      )}
-
-      {/* mode ladder */}
-      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>MODE LADDER</div>
-      <div className="ipo-ladder" style={{ marginBottom: 14 }}>
-        <ModeTile k="sim" label="SIM · BACKTEST" active={activeMode === 'sim'}>
-          <div className="mv">{modes.sim?.win_rate != null ? `${(modes.sim.win_rate * 100).toFixed(1)}%` : '—'}</div>
-          <div className="ms">win rate · {modes.sim?.total_trades ?? '—'} OOS trades</div>
-        </ModeTile>
-        <ModeTile k="paper" label="PAPER" active={activeMode === 'paper'}>
-          <div className="mv">{modes.paper?.total_pnl != null ? `$${Number(modes.paper.total_pnl).toLocaleString()}` : '—'}</div>
-          <div className="ms">{modes.paper ? `${modes.paper.total_trades ?? 0} closed round-trips${flat ? ' · flat (CASH)' : ''}` : 'stage not reached'}</div>
-        </ModeTile>
-        <ModeTile k="uat" label="UAT" active={activeMode === 'uat'}>
-          <div className="mv">{modes.uat?.total_fills != null && modes.uat.total_fills > 0 ? modes.uat.total_fills : '—'}</div>
-          <div className="ms">{modes.uat?.total_fills ? 'fills booked' : 'stage not reached'}</div>
-        </ModeTile>
-        <ModeTile k="live" label="LIVE" active={activeMode === 'live'}>
-          <div className="mv">{modes.live?.total_trades ? `$${Number(modes.live.total_pnl ?? 0).toLocaleString()}` : '—'}</div>
-          <div className="ms">{modes.live?.total_trades ? `${modes.live.total_trades} trades` : 'stage not reached'}</div>
-        </ModeTile>
+        <ModeBadge mode={s.execution_mode} />
       </div>
 
-      {/* engine state */}
-      <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 14, lineHeight: 1.6 }}>
+      {/* backtest metrics — RealMetrics-style grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+        <Metric label="Sharpe" value={s.sharpe_ratio == null ? '—' : Number(s.sharpe_ratio).toFixed(2)} big />
+        <Metric label="OOS ret" value={ret == null ? '—' : fmtPct(ret)} color={ret == null ? undefined : pnlColor(ret)} big />
+        <Metric label="Win" value={wr == null ? '—' : `${wr.toFixed(0)}%`} color={wr == null ? undefined : wr >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
+        <Metric label="MDD" value={mdd == null ? '—' : fmtPct(mdd)} color={mdd == null ? undefined : pnlColor(mdd)} />
+        <Metric label="Profit factor" value={bt.profit_factor == null ? '—' : Number(bt.profit_factor).toFixed(2)} />
+        <Metric label="OOS trades" value={bt.total_trades ?? s.backtest_trades ?? s.trade_count_oos ?? '—'} />
+      </div>
+
+      {/* annual backtest bars — the exact Performance subtab component */}
+      <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Annual backtest returns</span>
+        <YearlyBars yearly={s.yearly_backtest} normalize />
+      </div>
+
+      {/* mode ladder — compact strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 4 }}>
+        {ladder.map(c => (
+          <div key={c.k} style={{ padding: '5px 7px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', boxShadow: activeMode === c.k ? 'inset 0 0 0 1px var(--border-strong)' : 'none' }}>
+            <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', gap: 4 }}>
+              <span>{c.label}</span>{activeMode === c.k && <span style={{ color: 'var(--text-secondary)' }}>ACTIVE</span>}
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: c.color || 'var(--text-secondary)', marginTop: 2 }}>{c.value}</div>
+            <div style={{ fontSize: 8, color: 'var(--text-faint)', marginTop: 1 }}>{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* engine + ledger one-liners */}
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
         Engine: {latestSignal
-          ? <>latest signal <span style={{ fontFamily: 'ui-monospace,monospace', color: '#8b93a3' }}>{latestSignal.ticker} · {latestSignal.signal}</span> at {(latestSignal.ts || '').replace('T', ' ').slice(0, 16)} UTC — {flat ? 'book flat (all CASH), waiting for an in-band entry event' : 'book active'}</>
+          ? <>latest signal <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{latestSignal.ticker} · {latestSignal.signal}</span> at {(latestSignal.ts || '').replace('T', ' ').slice(0, 16)} UTC{flat ? ' — book flat (all CASH), waiting for an in-band entry event' : ''}</>
           : ev ? 'no signals returned by the evaluation endpoint' : 'evaluation endpoint unreachable — engine state unknown'}
         {' · '}{s.assigned_capital != null ? `$${Number(s.assigned_capital).toLocaleString()} assigned` : 'capital unassigned'}
       </div>
-
-      {/* open positions — this strategy's slice of the paper IPO book */}
-      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>POSITIONS · PAPER BOOK</div>
-      {positions.length > 0 ? (
-        <div style={{ overflowX: 'auto', marginBottom: 14 }}>
-          <table className="ipo-tbl">
-            <thead>
-              <tr>
-                <th>Ticker</th><th>Name</th>
-                <th className="num">Qty</th>
-                <th className="num" title="Entry (buy) price">Buy px</th>
-                <th className="num" title="IPO offer price">IPO px</th>
-                <th className="num">Current</th>
-                <th className="num" title="Current vs buy price">vs Buy</th>
-                <th className="num" title="Unrealized P&amp;L">P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {positions.map(r => {
-                const vsBuy = r.current_price != null && r.entry_price ? (r.current_price / r.entry_price - 1) * 100 : null;
-                return (
-                  <tr key={r.ticker}>
-                    <td className="ipo-ticker">{r.ticker}</td>
-                    <NameCell zh={r.stock_name_zh} en={r.stock_name} />
-                    <td className="num">{r.quantity != null ? Number(r.quantity).toLocaleString() : '—'}</td>
-                    <td className="num" title={r.entry_date ? `bought ${r.entry_date}` : undefined}>{num(r.entry_price)}</td>
-                    <td className="num">{num(r.offer_price)}</td>
-                    <td className="num" title={r.last_price_date ? `as of ${r.last_price_date}` : undefined}>{num(r.current_price)}</td>
-                    <td className={`num ${sgnCl(vsBuy)}`}>{vsBuy != null ? signed(vsBuy) : '—'}</td>
-                    <td className={`num ${sgnCl(r.unrealized_pnl)}`}>{r.unrealized_pnl != null ? `${r.unrealized_pnl >= 0 ? '+' : '-'}$${Math.abs(Number(r.unrealized_pnl)).toLocaleString()}` : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 14 }}>
-          Flat — no open positions in the paper book. Entries fire when an in-band IPO (oversub {DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x) reaches its +{DRIFT_RULE.entryTd}td entry day.
-        </div>
-      )}
-
-      {/* past trades — paper ledger round-trip events */}
-      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>
-        PAST TRADES · PAPER BOOK{trades.length > shownTrades.length ? ` · last ${shownTrades.length} of ${trades.length} events` : ''}
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        Paper ledger: {positions.length} open · {tradeEvents} trade events since 2026-08-31{tradeEvents === 0 ? ' — fills in after the first round-trip closes' : ''}. Position & trade tables live in ACTIVE IPO BOOK and the detail page.
       </div>
-      {shownTrades.length > 0 ? (
-        <div style={{ overflowX: 'auto', marginBottom: 14 }}>
-          <table className="ipo-tbl">
-            <thead>
-              <tr>
-                <th>Date</th><th>Ticker</th><th>Side</th>
-                <th className="num">Qty</th><th className="num">Price</th><th className="num">P&amp;L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shownTrades.map((t, i) => (
-                <tr key={`${t.ts}-${t.ticker}-${t.side}-${i}`}>
-                  <td className="num">{(t.ts || '').slice(0, 10)}</td>
-                  <td className="ipo-ticker">{t.ticker}</td>
-                  <td><span className={`ipo-pill ${t.side === 'BUY' ? 'ipo-st-open' : 'ipo-st-exit'}`}>{t.side}</span></td>
-                  <td className="num">{t.quantity != null ? Number(t.quantity).toLocaleString() : '—'}</td>
-                  <td className="num">{num(t.price)}</td>
-                  <td className={`num ${sgnCl(t.pnl)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : '-'}$${Math.abs(Number(t.pnl)).toLocaleString()}` : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 14 }}>
-          No paper trades yet — the book opened 2026-08-31 and has been flat (CASH) since. This fills in after the first round-trip closes.
-        </div>
-      )}
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button className="ipo-btn" onClick={() => onOpen && onOpen(s.id)}>View detail ↗</button>
-        <button className="ipo-btn" onClick={() => onAdjust(s)}>Adjust allocation</button>
-        <button className="ipo-btn ipo-btn-danger" onClick={() => onPause(s)}>Pause strategy</button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Button variant="primary" size="sm" style={{ flex: 1 }} onClick={() => onOpen && onOpen(s.id)}>View detail ↗</Button>
+        <Button variant="ghost" size="sm" onClick={() => onAdjust(s)}>Adjust allocation</Button>
+        <Button variant="ghost" size="sm" onClick={() => onPause(s)}>Pause</Button>
       </div>
     </div>
   );
@@ -640,7 +574,7 @@ export function IpoTab({ onOpen }) {
 
       {/* global window toggle — drives IPO SENTIMENT (server-side) and the IPO KPIs strip (client-side) */}
       <div className="ipo-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', fontWeight: 600 }}>WINDOW — APPLIES TO IPO SENTIMENT &amp; IPO KPIS</div>
+        <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', fontWeight: 600 }}>WINDOW — APPLIES TO IPO SENTIMENT, IPO KPIS &amp; THE TICKER LIST</div>
         <span style={{ display: 'flex', gap: 6 }}>
           {WINDOWS.map(w => (
             <button key={w.k} className={`ipo-yr ${ipoWindow === w.k ? 'active' : ''}`} onClick={() => setIpoWindow(w.k)}>
@@ -728,12 +662,12 @@ export function IpoTab({ onOpen }) {
         ) : (watch ? `${watch.all.length} names` : '')}
         note={sectorFilter
           ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window, with the rule-mirror entry/exit columns (+${DRIFT_RULE.entryTd}td entry, +${DRIFT_RULE.entryTd + DRIFT_RULE.holdTd}td exit) so names stay comparable — the oversub band is not applied here; the strategy itself only trades the band. ◦ = open, marked to current price.`
-          : `Mechanical replay of the documented rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over recent IPOs — not the engine signal; the engine decides entries itself and the book is currently flat. ◦ = open, marked to current price.`}
+          : `Mechanical replay of the documented rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over entry windows in the ${activeWindowLabel} window — not the engine signal; the engine decides entries itself and the book is currently flat. ◦ = open, marked to current price.`}
       >
         <div style={{ padding: '10px 16px 0', fontSize: 10, color: '#565e6c', letterSpacing: '.3px' }}>
           {sectorFilter
             ? `IPOs listed in the ${activeWindowLabel} window · rule-mirror columns · oversub band not applied`
-            : `oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td · last 120d of entry windows`}
+            : `oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td · entry windows in the ${activeWindowLabel} window`}
         </div>
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
@@ -903,9 +837,9 @@ export function IpoTab({ onOpen }) {
         )}
       </Panel>
 
-      {/* strategy book */}
+      {/* strategy book — compact cards in a grid, Performance-subtab theme */}
       <Panel title="HK IPO STRATEGIES" tag={<Tag kind="live">LIVE</Tag>}>
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ padding: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12, alignItems: 'start' }}>
           {strategies.length === 0 ? (
             <div style={{ fontSize: 11, color: '#565e6c' }}>No HK IPO strategies registered in the strategy book.</div>
           ) : strategies.map(s => (
