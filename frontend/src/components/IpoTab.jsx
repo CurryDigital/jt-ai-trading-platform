@@ -53,6 +53,7 @@ const CSS = `
 .ipo-tbl tbody tr:hover td{background:#12161f;}
 .ipo-tbl th.num,.ipo-tbl td.num{text-align:right;font-family:ui-monospace,'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;}
 .ipo-tbl th.sortable{cursor:pointer;user-select:none;}
+.ipo-tbl thead th{position:sticky;top:0;background:#10141c;z-index:1;}
 .ipo-tbl th.sortable:hover{color:#8b93a3;}
 .ipo-ticker{color:#e6e8eb;font-family:ui-monospace,'JetBrains Mono',monospace;font-weight:600;}
 .ipo-name{color:#e6e8eb;font-size:12px;}
@@ -315,7 +316,7 @@ const WatchTable = ({ rows }) => (
   </table>
 );
 
-const IpoStrategyCard = ({ s, ev, onOpen, onAdjust, onPause }) => {
+const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) => {
   const bt = ev?.metrics?.backtest || {};
   const modes = ev?.metrics_by_mode || {};
   const latestSignal = (ev?.recent_signals || []).slice().sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))[0];
@@ -326,6 +327,8 @@ const IpoStrategyCard = ({ s, ev, onOpen, onAdjust, onPause }) => {
     return 'sim';
   })();
   const flat = (ev?.in_market_capital ?? 0) === 0 && (modes.paper?.total_trades ?? 0) === 0;
+  const trades = Array.isArray(ev?.recent_trades) ? ev.recent_trades : [];
+  const shownTrades = trades.slice(0, 10);
 
   const wr = pctOrRatio(s.win_rate);
   const mdd = pctOrRatio(s.max_drawdown);
@@ -407,6 +410,80 @@ const IpoStrategyCard = ({ s, ev, onOpen, onAdjust, onPause }) => {
           : ev ? 'no signals returned by the evaluation endpoint' : 'evaluation endpoint unreachable — engine state unknown'}
         {' · '}{s.assigned_capital != null ? `$${Number(s.assigned_capital).toLocaleString()} assigned` : 'capital unassigned'}
       </div>
+
+      {/* open positions — this strategy's slice of the paper IPO book */}
+      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>POSITIONS · PAPER BOOK</div>
+      {positions.length > 0 ? (
+        <div style={{ overflowX: 'auto', marginBottom: 14 }}>
+          <table className="ipo-tbl">
+            <thead>
+              <tr>
+                <th>Ticker</th><th>Name</th>
+                <th className="num">Qty</th>
+                <th className="num" title="Entry (buy) price">Buy px</th>
+                <th className="num" title="IPO offer price">IPO px</th>
+                <th className="num">Current</th>
+                <th className="num" title="Current vs buy price">vs Buy</th>
+                <th className="num" title="Unrealized P&amp;L">P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map(r => {
+                const vsBuy = r.current_price != null && r.entry_price ? (r.current_price / r.entry_price - 1) * 100 : null;
+                return (
+                  <tr key={r.ticker}>
+                    <td className="ipo-ticker">{r.ticker}</td>
+                    <NameCell zh={r.stock_name_zh} en={r.stock_name} />
+                    <td className="num">{r.quantity != null ? Number(r.quantity).toLocaleString() : '—'}</td>
+                    <td className="num" title={r.entry_date ? `bought ${r.entry_date}` : undefined}>{num(r.entry_price)}</td>
+                    <td className="num">{num(r.offer_price)}</td>
+                    <td className="num" title={r.last_price_date ? `as of ${r.last_price_date}` : undefined}>{num(r.current_price)}</td>
+                    <td className={`num ${sgnCl(vsBuy)}`}>{vsBuy != null ? signed(vsBuy) : '—'}</td>
+                    <td className={`num ${sgnCl(r.unrealized_pnl)}`}>{r.unrealized_pnl != null ? `${r.unrealized_pnl >= 0 ? '+' : '-'}$${Math.abs(Number(r.unrealized_pnl)).toLocaleString()}` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 14 }}>
+          Flat — no open positions in the paper book. Entries fire when an in-band IPO (oversub {DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x) reaches its +{DRIFT_RULE.entryTd}td entry day.
+        </div>
+      )}
+
+      {/* past trades — paper ledger round-trip events */}
+      <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', marginBottom: 8 }}>
+        PAST TRADES · PAPER BOOK{trades.length > shownTrades.length ? ` · last ${shownTrades.length} of ${trades.length} events` : ''}
+      </div>
+      {shownTrades.length > 0 ? (
+        <div style={{ overflowX: 'auto', marginBottom: 14 }}>
+          <table className="ipo-tbl">
+            <thead>
+              <tr>
+                <th>Date</th><th>Ticker</th><th>Side</th>
+                <th className="num">Qty</th><th className="num">Price</th><th className="num">P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shownTrades.map((t, i) => (
+                <tr key={`${t.ts}-${t.ticker}-${t.side}-${i}`}>
+                  <td className="num">{(t.ts || '').slice(0, 10)}</td>
+                  <td className="ipo-ticker">{t.ticker}</td>
+                  <td><span className={`ipo-pill ${t.side === 'BUY' ? 'ipo-st-open' : 'ipo-st-exit'}`}>{t.side}</span></td>
+                  <td className="num">{t.quantity != null ? Number(t.quantity).toLocaleString() : '—'}</td>
+                  <td className="num">{num(t.price)}</td>
+                  <td className={`num ${sgnCl(t.pnl)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : '-'}$${Math.abs(Number(t.pnl)).toLocaleString()}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, color: '#565e6c', marginBottom: 14 }}>
+          No paper trades yet — the book opened 2026-08-31 and has been flat (CASH) since. This fills in after the first round-trip closes.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="ipo-btn" onClick={() => onOpen && onOpen(s.id)}>View detail ↗</button>
@@ -646,7 +723,6 @@ export function IpoTab({ onOpen }) {
             sector filter ×
           </span>
         ) : (watch ? `${watch.all.length} names` : '')}
-        scroll
         note={sectorFilter
           ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window, with the rule-mirror entry/exit columns (+${DRIFT_RULE.entryTd}td entry, +${DRIFT_RULE.entryTd + DRIFT_RULE.holdTd}td exit) so names stay comparable — the oversub band is not applied here; the strategy itself only trades the band. ◦ = open, marked to current price.`
           : `Mechanical replay of the documented rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over recent IPOs — not the engine signal; the engine decides entries itself and the book is currently flat. ◦ = open, marked to current price.`}
@@ -668,7 +744,9 @@ export function IpoTab({ onOpen }) {
                 {watch.counts.ahead > 0 && <span>{watch.counts.ahead} awaiting entry</span>}
               </div>
             )}
-            <WatchTable rows={watch.all} />
+            <div style={{ maxHeight: 560, overflow: 'auto' }}>
+              <WatchTable rows={watch.all} />
+            </div>
           </div>
         ) : (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>
@@ -832,6 +910,7 @@ export function IpoTab({ onOpen }) {
               key={s.id}
               s={s}
               ev={evals[s.id]}
+              positions={(book || []).filter(r => r.strategy_id === s.id)}
               onOpen={onOpen}
               onAdjust={adjustAllocation}
               onPause={pauseStrategy}

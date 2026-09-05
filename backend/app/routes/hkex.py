@@ -37,6 +37,19 @@ _DAY20_LATERAL = """
     ) d20 ON TRUE
 """
 
+# Day-40 close: exit leg of the post-listing drift rule (enter +20td, hold 20td ->
+# exit at the 40th trading day). Computed from silver.unified_prices via lateral;
+# NULL until 40 trading days have elapsed since listing. Durable gold column
+# backfill is qr_etl's deliverable (same pattern as return_day20_pct, t_e71cffde).
+_DAY40_LATERAL = """
+    LEFT JOIN LATERAL (
+        SELECT sp.close AS close, sp.date AS dt
+        FROM silver.unified_prices sp
+        WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
+        ORDER BY sp.date OFFSET 39 LIMIT 1
+    ) d40 ON TRUE
+"""
+
 
 @router.get("/ipos")
 def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limit: int = 50,
@@ -54,6 +67,7 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
                         CASE WHEN d20.close IS NOT NULL AND c.offer_price > 0
                              THEN (d20.close / c.offer_price - 1) * 100 END) AS return_day20_pct,
                d20.close AS day20_price, d20.dt AS day20_date,
+               d40.close AS day40_price, d40.dt AS day40_date,
                p.return_day30_pct, p.total_return_pct, p.current_price, p.performance_tier,
                s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
                s.grey_close, s.grey_session_date,
@@ -70,6 +84,7 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
             ORDER BY s.listing_date DESC LIMIT 1
         ) s ON TRUE
         {_DAY20_LATERAL}
+        {_DAY40_LATERAL}
         WHERE 1=1
     """
     params = {}
@@ -95,6 +110,7 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
         "first_day_return": _f(r.first_day_return_pct),
         "return_day20": _f(r.return_day20_pct),
         "day20_price": _f(r.day20_price), "day20_date": _d(r.day20_date),
+        "day40_price": _f(r.day40_price), "day40_date": _d(r.day40_date),
         "return_day30": _f(r.return_day30_pct),
         "total_return": _f(r.total_return_pct),
         "current_price": _f(r.current_price),
@@ -131,7 +147,7 @@ def get_hkex_ipo_subscription(db: Session = Depends(get_db)):
             ORDER BY s.listing_date DESC LIMIT 1
         ) s ON TRUE
         WHERE (d.application_end IS NOT NULL AND d.application_end >= CURRENT_DATE)
-           OR c.listing_date >= CURRENT_DATE
+           OR (d.application_end IS NULL AND c.listing_date >= CURRENT_DATE)
         ORDER BY COALESCE(d.application_end, c.listing_date) ASC
         LIMIT 50
     """)).fetchall()
@@ -215,22 +231,47 @@ def get_hkex_ipo_leaderboard(period: str = "first_day", limit: int = 20, db: Ses
                              for i, r in enumerate(result)], "count": len(result), "period": period}
 
 
+# Sector sentiment windows — keys are the API vocabulary, values are SQL date
+# cutoffs. 'ytd' is calendar-year-to-date; the rest are rolling intervals.
+_SECTOR_WINDOWS = {
+    "1m": "CURRENT_DATE - INTERVAL '1 month'",
+    "3m": "CURRENT_DATE - INTERVAL '3 months'",
+    "6m": "CURRENT_DATE - INTERVAL '6 months'",
+    "ytd": "DATE_TRUNC('year', CURRENT_DATE)::date",
+    "2y": "CURRENT_DATE - INTERVAL '2 years'",
+}
+
+
 @router.get("/ipos/sectors")
-def get_hkex_ipo_sectors(db: Session = Depends(get_db)):
-    result = db.execute(text("""
+def get_hkex_ipo_sectors(window: str = "2y", db: Session = Depends(get_db)):
+    cutoff = _SECTOR_WINDOWS.get((window or "").lower(), _SECTOR_WINDOWS["2y"])
+    result = db.execute(text(f"""
         SELECT c.sector, COUNT(*) as ipo_count,
                AVG(p.first_day_return_pct) as avg_first_day_return,
-               AVG(p.return_day30_pct) as avg_day30_return,
+               AVG(COALESCE(p.return_day20_pct,
+                            CASE WHEN d20.close IS NOT NULL AND c.offer_price > 0
+                                 THEN (d20.close / c.offer_price - 1) * 100 END)) as avg_day20_return,
+               COUNT(COALESCE(p.return_day20_pct,
+                              CASE WHEN d20.close IS NOT NULL AND c.offer_price > 0
+                                   THEN (d20.close / c.offer_price - 1) * 100 END)) as day20_n,
+               AVG(p.total_return_pct) as avg_current_return,
+               COUNT(p.total_return_pct) as current_n,
                COUNT(CASE WHEN p.first_day_return_pct > 0 THEN 1 END)::DECIMAL / COUNT(*) * 100 as win_rate
         FROM gold.hk_ipo_calendar c
         JOIN gold.hk_ipo_performance p ON c.ticker = p.ticker
-        WHERE c.listing_date >= CURRENT_DATE - INTERVAL '2 years'
+        {_DAY20_LATERAL}
+        WHERE c.listing_date >= {cutoff}
         GROUP BY c.sector ORDER BY avg_first_day_return DESC NULLS LAST
     """)).fetchall()
-    return {"sectors": [{"sector": r.sector, "ipo_count": r.ipo_count,
-                          "avg_first_day_return": round(float(r.avg_first_day_return), 2) if r.avg_first_day_return else None,
-                          "win_rate": round(float(r.win_rate), 1) if r.win_rate else None}
-                         for r in result]}
+    return {"window": window, "sectors": [{
+        "sector": r.sector, "ipo_count": r.ipo_count,
+        "avg_first_day_return": round(float(r.avg_first_day_return), 2) if r.avg_first_day_return is not None else None,
+        "avg_day20_return": round(float(r.avg_day20_return), 2) if r.avg_day20_return is not None else None,
+        "day20_n": r.day20_n,
+        "avg_current_return": round(float(r.avg_current_return), 2) if r.avg_current_return is not None else None,
+        "current_n": r.current_n,
+        "win_rate": round(float(r.win_rate), 1) if r.win_rate is not None else None}
+        for r in result]}
 
 
 @router.get("/ipos/{ticker}")
