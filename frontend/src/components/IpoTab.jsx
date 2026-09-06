@@ -211,6 +211,31 @@ const OfferRangeCell = ({ r }) => (
 
 const DRIFT_RULE = { bandLo: 100, bandHi: 500, entryTd: 20, holdTd: 20 };
 
+// Card display order in HK IPO STRATEGIES — deterministic regardless of the
+// researcher book's row order: day-1 momentum first, then the post-listing
+// drift lineage (V3 frozen baseline, then the P2 deal-health variant).
+// Unknown HK IPO strategies trail, sorted by id.
+const STRATEGY_ORDER = {
+  hk_ipo_day1_green_momentum_v1: 0,
+  hk_ipo_postlisting_drift_p1_v3: 1,
+  hk_ipo_postlisting_drift_p2: 2,
+};
+
+// Per-strategy engine-convention notes, rendered on the card so rule-mirror
+// reconciliation never confuses the engine's bar indexing with the ticker
+// list's measured OFFSET legs. Mechanics only — signal text stays
+// research-owned (registry description/exit_logic, rendered verbatim).
+const ENGINE_NOTES = {
+  // P2's engine (ipo_pulse_p2.py) enters at bar index 20 and exits at bar
+  // index 40 after listing — one bar LATER than the rule-mirror ticker
+  // list's +20td/+40td columns, which measure silver.unified_prices
+  // OFFSET 19/39 (the V3 mirror convention). Flagged so a one-trading-day
+  // offset between this card and the mirror table reads as expected, not
+  // as a data bug.
+  hk_ipo_postlisting_drift_p2:
+    'Engine bar convention: entry at bar index 20 after listing, exit at bar index 40 — one bar later than the rule-mirror ticker list above (its +20td/+40td columns measure OFFSET 19/39, the V3 mirror convention). A −10% close-basis stop can exit earlier; max 1 new position per listing ISO-week. Expect a one-trading-day offset when reconciling engine entries/exits against the mirror table.',
+};
+
 const watchRow = (r) => {
   // entry = 20th trading day after listing, exit = 40th (enter +20td, hold 20td).
   // API serves measured day20/day40 closes; dates fall back to ≈ calendar estimates.
@@ -220,8 +245,11 @@ const watchRow = (r) => {
   const estimated = !r.day20_date;
   const exitEstimated = !r.day40_date;
   const chg = r.current_price != null && r.offer_price ? (r.current_price / r.offer_price - 1) * 100 : null;
-  let phase, daysToEntry = null;
-  if (TODAY < entry) { phase = 'ahead'; daysToEntry = -daysSince(entry); }
+  let phase, daysToEntry = null, daysToListing = null;
+  if (r.listing_date && r.listing_date > TODAY) {
+    // not yet listed — the whole entry/exit timeline is a calendar estimate
+    phase = 'pre_listing'; daysToListing = -daysSince(r.listing_date);
+  } else if (TODAY < entry) { phase = 'ahead'; daysToEntry = -daysSince(entry); }
   else if (TODAY <= exit) phase = 'in_hold';
   else phase = 'passed';
   const ipoPx = r.offer_price ?? r.offer_price_high ?? null;
@@ -232,13 +260,18 @@ const watchRow = (r) => {
   let pnl = null, pnlKind = null;
   if (phase === 'passed' && entryPx && exitPx) { pnl = (exitPx / entryPx - 1) * 100; pnlKind = 'realized'; }
   else if (phase === 'in_hold' && entryPx && r.current_price) { pnl = (r.current_price / entryPx - 1) * 100; pnlKind = 'open'; }
-  return { ...r, entry, exit, entryEstimated: estimated, exitEstimated, phase, daysToEntry, chg, ipoPx, entryPx, exitPx, pnl, pnlKind };
+  return { ...r, entry, exit, entryEstimated: estimated, exitEstimated, phase, daysToEntry, daysToListing, chg, ipoPx, entryPx, exitPx, pnl, pnlKind };
 };
 
 // Rule-mirror watch list. Unfiltered: the strategy's mechanical band
 // (oversub 100–500x) restricted to entry windows inside the selected global
-// window. With a sector selected (click a row in IPO SENTIMENT): ALL of that
-// sector's IPOs listed in the selected window, same columns, oversub band
+// window, PLUS names not yet listed (listing_date in the future) so the
+// listing → +20td entry → +40td exit timeline is visible before the fact.
+// Pre-listing rows bypass the oversub band: retail oversubscription is only
+// published at allotment (~1 trading day before listing) — qr_etl t_90585bf2 —
+// so band membership is undecidable until then and the row says so.
+// With a sector selected (click a row in IPO SENTIMENT): ALL of that
+// sector's IPOs in the selected window, same columns, oversub band
 // not applied.
 const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   if (!ipos) return null;
@@ -250,6 +283,12 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
     .map(watchRow)
     .filter(Boolean)
     .filter(r => sectorFilter || r.entry >= cutoff); // entry windows inside the selected window (band mode)
+  // upcoming (not yet listed) — band undecidable until allotment, always shown
+  const pre = ipos
+    .filter(r => r.listing_date && r.listing_date > TODAY && (!sectorFilter || r.sector === sectorFilter))
+    .map(watchRow)
+    .filter(Boolean)
+    .sort((a, b) => a.listing_date.localeCompare(b.listing_date));
   const inHold = rows.filter(r => r.phase === 'in_hold').sort((a, b) => a.exit.localeCompare(b.exit));
   const ahead = rows.filter(r => r.phase === 'ahead').sort((a, b) => a.entry.localeCompare(b.entry));
   const passed = rows.filter(r => r.phase === 'passed').sort((a, b) => b.exit.localeCompare(a.exit));
@@ -257,8 +296,8 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   const wins = closed.filter(r => r.pnl > 0).length;
   const sum = closed.reduce((a, r) => a + r.pnl, 0);
   return {
-    all: [...inHold, ...ahead, ...passed],
-    counts: { inHold: inHold.length, ahead: ahead.length, passed: passed.length },
+    all: [...inHold, ...ahead, ...pre, ...passed],
+    counts: { inHold: inHold.length, ahead: ahead.length, preListing: pre.length, passed: passed.length },
     stats: closed.length ? {
       n: closed.length, wins,
       winRate: wins / closed.length * 100,
@@ -293,10 +332,14 @@ const WatchTable = ({ rows }) => (
         <tr key={r.ticker}>
           <td className="ipo-ticker">{r.ticker}</td>
           <NameCell zh={r.stock_name_zh} en={r.stock_name} />
-          <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : '—'}</td>
+          <td className="num">{r.oversubscription_retail != null
+            ? `${num(r.oversubscription_retail, 1)}x`
+            : r.phase === 'pre_listing'
+              ? <span className="ipo-faint" title="Retail oversubscription is published at allotment (~1 trading day before listing) — the 100–500x band is undecidable until then (qr_etl t_90585bf2)">band at allotment</span>
+              : '—'}</td>
           <td className="num">{r.ipoPx != null ? num(r.ipoPx) : '—'}</td>
           <td className="num">{num(r.first_day_close)}</td>
-          <PxDate px={r.entryPx} date={r.entry} estimated={r.entryEstimated} faint={r.phase === 'ahead'} />
+          <PxDate px={r.entryPx} date={r.entry} estimated={r.entryEstimated} faint={r.phase === 'ahead' || r.phase === 'pre_listing'} />
           <PxDate px={r.exitPx} date={r.exit} estimated={r.exitEstimated} faint={r.phase !== 'passed'} />
           <td className="num">{num(r.current_price)}</td>
           <td className={`num ${sgnCl(r.pnl)}`} title={r.pnlKind === 'open' ? 'Open — marked to current price, exit day not reached yet' : r.pnlKind === 'realized' ? 'Realized — exit at 40th trading-day close' : 'Not entered'}>
@@ -306,7 +349,12 @@ const WatchTable = ({ rows }) => (
             ? <span className="ipo-pill ipo-st-hold">IN HOLD WINDOW</span>
             : r.phase === 'ahead'
               ? <span className="ipo-pill ipo-st-open">ENTRY IN {r.daysToEntry}d</span>
-              : <span className="ipo-pill ipo-st-exit">CLOSED {r.exit}</span>}</td>
+              : r.phase === 'pre_listing'
+                ? <div>
+                    <span className="ipo-pill ipo-st-listing">{r.daysToListing === 0 ? 'LISTS TODAY' : `LISTS IN ${r.daysToListing}d`}</span>
+                    <div style={{ fontSize: 9, color: '#565e6c', marginTop: 3 }}>listing {r.listing_date}</div>
+                  </div>
+                : <span className="ipo-pill ipo-st-exit">CLOSED {r.exit}</span>}</td>
         </tr>
       ))}
     </tbody>
@@ -409,6 +457,37 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
         ))}
       </div>
 
+      {/* entry mechanics — verbatim from the strategy registry so the entry
+          venue (subscription vs grey market vs on-exchange) is never ambiguous;
+          text is research-owned, clamped to 3 lines with the full text on hover */}
+      {(s.description || s.exit_logic) && (
+        <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+          {s.description && (
+            <div title={s.description}
+                 style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+              <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>How it trades — </span>
+              {s.description}
+            </div>
+          )}
+          {s.exit_logic && (
+            <div style={{ marginTop: 3 }} title={s.exit_logic}>
+              <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Exit — </span>
+              {s.exit_logic}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* engine-convention flag — only for strategies whose engine bar
+          indexing differs from the rule-mirror ticker list's OFFSET legs
+          (currently P2: engine 20/40 vs mirror 19/39) */}
+      {ENGINE_NOTES[s.id] && (
+        <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+          <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Engine convention — </span>
+          {ENGINE_NOTES[s.id]}
+        </div>
+      )}
+
       {/* engine + ledger one-liners */}
       <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
         Engine: {latestSignal
@@ -456,6 +535,11 @@ export function IpoTab({ onOpen }) {
     const bookRows = Array.isArray(strat?.strategies) ? strat.strategies : (Array.isArray(strat?.data) ? strat.data : []);
     const ipoStrats = bookRows.filter(s =>
       (s.asset_class || '').toLowerCase().includes('ipo') || (s.id || '').toLowerCase().startsWith('hk_ipo')
+    );
+    // deterministic card order — day-1 momentum, V3 baseline, P2 variant,
+    // unknown HK IPO strategies trailing by id (API row order is not stable)
+    ipoStrats.sort((a, b) =>
+      (STRATEGY_ORDER[a.id] ?? 99) - (STRATEGY_ORDER[b.id] ?? 99) || (a.id || '').localeCompare(b.id || '')
     );
     setStrategies(ipoStrats);
     setSubs(Array.isArray(sub?.ipos) ? sub.ipos : []);
@@ -662,7 +746,7 @@ export function IpoTab({ onOpen }) {
         ) : (watch ? `${watch.all.length} names` : '')}
         note={sectorFilter
           ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window, with the rule-mirror entry/exit columns (+${DRIFT_RULE.entryTd}td entry, +${DRIFT_RULE.entryTd + DRIFT_RULE.holdTd}td exit) so names stay comparable — the oversub band is not applied here; the strategy itself only trades the band. ◦ = open, marked to current price.`
-          : `Mechanical replay of the documented rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over entry windows in the ${activeWindowLabel} window — not the engine signal; the engine decides entries itself and the book is currently flat. ◦ = open, marked to current price.`}
+          : `Mechanical replay of the documented drift rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over entry windows in the ${activeWindowLabel} window — not the engine signal; the engine decides entries itself and the book is currently flat. Names not yet listed appear as LISTS IN Nd with ≈ entry/exit dates (listing + 20td / + 40td, calendar estimate) and their oversub band is decided at allotment. The Day-1 Green rule enters at the listing-day close itself — each strategy card states its own entry mechanics below. ◦ = open, marked to current price.`}
       >
         <div style={{ padding: '10px 16px 0', fontSize: 10, color: '#565e6c', letterSpacing: '.3px' }}>
           {sectorFilter
@@ -679,6 +763,7 @@ export function IpoTab({ onOpen }) {
                 <span>sum <span className={sgnCl(watch.stats.sum)}>{signed(watch.stats.sum)}</span></span>
                 {watch.counts.inHold > 0 && <span>{watch.counts.inHold} open (marked to current)</span>}
                 {watch.counts.ahead > 0 && <span>{watch.counts.ahead} awaiting entry</span>}
+                {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
               </div>
             )}
             <div style={{ maxHeight: 560, overflow: 'auto' }}>
