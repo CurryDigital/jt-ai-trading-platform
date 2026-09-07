@@ -340,6 +340,15 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     return Array.from(groups.values()).sort((a, b) => b.date.localeCompare(a.date));
   }, [data && data.backtest_trades]);
 
+  // Simulation side: current positions = OOS backtest trades still open at the
+  // end of the backtest window (no exit_date). Shown in the Allocation tab of
+  // the Simulation ledger, mirroring the paper/UAT ledger layout. holding_days
+  // on these rows is measured to the backtest as-of date, not to today.
+  const simOpen = useMemo(() =>
+    ((data && data.backtest_trades) || []).filter(t => !t.exit_date)
+      .sort((a, b) => (b.entry_date || '').localeCompare(a.entry_date || '')),
+  [data && data.backtest_trades]);
+
   const activeSignals = useMemo(() =>
     ((data && data.recent_signals) || []).filter(s => s.signal === 'BUY').sort((a, b) => a.ticker.localeCompare(b.ticker)),
   [data && data.recent_signals]);
@@ -587,6 +596,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
               <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-1">
                 {[
                   { id: 'rebalances', label: `Rebalances (${simRebalances.length})` },
+                  { id: 'allocation', label: `Allocation (${simOpen.length})` },
                   { id: 'trades',     label: `Ledger (${(data.backtest_trades || []).length})` },
                 ].map(t => (
                   <button
@@ -633,6 +643,41 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {simTab === 'allocation' && (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-slate-900 z-10">
+                      <tr className="border-b border-white/[0.06]">
+                        <th className="qr-label text-left py-1 px-2">Ticker</th>
+                        <th className="qr-label text-left py-1 px-2">Entry</th>
+                        <th className="qr-label text-right py-1 px-2">Entry px</th>
+                        <th className="qr-label text-right py-1 px-2" title="Calendar days held at the backtest as-of date">Days</th>
+                        <th className="qr-label text-right py-1 px-2" title="Open backtest positions carry no realized P&L">P&L %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {simOpen.map((t, i) => (
+                        <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
+                          <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{t.ticker}</td>
+                          <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
+                          <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
+                          <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
+                          <td className="py-1 px-2 qr-num text-right text-slate-500">open</td>
+                        </tr>
+                      ))}
+                      {!simOpen.length && (
+                        <tr><td colSpan={5} className="py-6 text-center text-slate-600 text-[11px]">No open positions — every OOS backtest trade is closed</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  {simOpen.length > 0 && (
+                    <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
+                      Open at the OOS backtest as-of date · days held measured to that date · no realized P&amp;L until exit
+                    </div>
+                  )}
                 </div>
               )}
 
