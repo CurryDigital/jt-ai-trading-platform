@@ -85,7 +85,7 @@ function returnsFor(row) {
     const years = Object.keys(yb).sort();
     for (let i = years.length - 1; i >= 0; i--) {
       const v = yb[years[i]]?.return_pct;
-      if (v != null) return pctOrRatio(v, 1);
+      if (v != null) return fracToPct(v, 1);
     }
   }
   return null;
@@ -96,22 +96,31 @@ function btPF(row) {
   return null;
 }
 
-// The backend returns mixed scaling: yearly_backtest.return_pct is a ratio
-// (0.1405 = 14.05%), while top-level win_rate / max_drawdown are already
-// percentages (61.54 / -5.69). Convert only when the value looks like a ratio.
-export function pctOrRatio(value, digits = 1) {
+// Unit contract for /api/strategies/researcher fields (verified live 2026-09-07
+// across all 24 rows): win_rate / max_drawdown arrive ALREADY percent-scaled
+// (61.54 / -5.69); returns_oos and yearly_backtest[].return_pct arrive as
+// FRACTIONS (0.1405 / 1.4546). NEVER sniff units from magnitude — a +145.5%
+// OOS return (1.4546) must not be mistaken for an already-percent value, and
+// a 0.5% win rate must not be multiplied by 100.
+export function pctAsIs(value, digits = 1) {
   if (value == null) return null;
   const n = Number(value);
   if (Number.isNaN(n)) return null;
-  return +(Math.abs(n) > 1 ? n : n * 100).toFixed(digits);
+  return +n.toFixed(digits);
+}
+export function fracToPct(value, digits = 1) {
+  if (value == null) return null;
+  const n = Number(value);
+  if (Number.isNaN(n)) return null;
+  return +(n * 100).toFixed(digits);
 }
 
 export function mapApiToBook(rows) {
   return (rows || []).map((row) => {
     const asset = ASSET_MAP[(row.asset_class || '').toUpperCase()] || 'EQUITY';
     const stage = stageFor(row);
-    const wr = row.win_rate != null ? pctOrRatio(row.win_rate, 0) : null;
-    const dd = row.max_drawdown != null ? -Math.abs(pctOrRatio(row.max_drawdown, 1)) : null;
+    const wr = row.win_rate != null ? pctAsIs(row.win_rate, 0) : null;
+    const dd = row.max_drawdown != null ? -Math.abs(pctAsIs(row.max_drawdown, 1)) : null;
     const deployed = stage === 'deployed';
     const paperWr = row.paper_wr != null ? +Number(row.paper_wr).toFixed(1) : null;
     const paperPf = row.paper_pf != null ? +Number(row.paper_pf).toFixed(2) : null;

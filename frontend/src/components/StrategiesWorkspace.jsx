@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, usePoll } from '../utils';
 import { Chip, KpiTile, Button, ModeBadge, fmtPct, fmtK } from './jtkit';
-import { HORIZON, mapApiToBook, pctOrRatio } from './strategyProfiles';
+import { HORIZON, mapApiToBook, fracToPct } from './strategyProfiles';
 
 // Strategies workspace — Performance card grid + Pipeline mode-ladder board.
 // Universe = the quality-gated pipeline feed (gold.v_pipeline_ui_feed), the
@@ -104,16 +104,17 @@ function Metric({ label, value, color, big }) {
 
 // Real annual backtest returns from gold.strategy_backtest_runs (via the API's
 // yearly_backtest map) — replaces the old fabricated quarter bars.
-// normalize=true applies pctOrRatio (backtest rows mix ratio / pp scaling);
-// paper_yearly is emitted in percentage points already, so paper mode passes
-// normalize=false to avoid a 0.5% bar rendering as +50%.
+// normalize=true applies fracToPct (backtest yearly return_pct is ALWAYS a
+// fraction — 0.3281 = +32.8%); paper_yearly is emitted in percentage points
+// already, so paper mode passes normalize=false to avoid a 0.5% bar rendering
+// as +50%.
 // openBar (paper mode only): mark-to-market OPEN book, rendered as a dashed
 // outline bar labelled 'open' — visibly distinct from solid realized bars so
 // unrealized P&L is never mistaken for a closed-trade return.
 export function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet', normalize = true, openBar = null }) {
   const years = Object.keys(yearly || {}).sort();
   const entries = years
-    .map((y) => ({ y, v: normalize ? pctOrRatio(yearly[y]?.return_pct, 1) : (yearly[y]?.return_pct != null ? +Number(yearly[y].return_pct).toFixed(1) : null) }))
+    .map((y) => ({ y, v: normalize ? fracToPct(yearly[y]?.return_pct, 1) : (yearly[y]?.return_pct != null ? +Number(yearly[y].return_pct).toFixed(1) : null) }))
     .filter((e) => e.v != null);
   const showOpen = openBar && openBar.v != null;
   if (!entries.length && !showOpen) {

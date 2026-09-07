@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { fmtPct, api, usePoll } from '../utils';
 import { Chip, Button, ModeBadge, pnlColor } from './jtkit';
 import { YearlyBars } from './StrategiesWorkspace';
+import { pctAsIs, fracToPct } from './strategyProfiles';
 
 // =================================================================
 // IPO subtab (Strategies > IPO) — HK IPO only, redesign 2026-09-02
@@ -98,11 +99,6 @@ const CSS = `
 const num = (v, d = 2) => v == null || isNaN(v) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 const signed = (v, d = 1) => v == null ? '—' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(d)}%`;
 const sgnCl = (v) => v == null ? 'ipo-faint' : v >= 0 ? 'ipo-green' : 'ipo-red';
-const pctOrRatio = (v, d = 1) => {
-  if (v == null || isNaN(v)) return null;
-  const n = Number(v);
-  return Math.abs(n) > 1 ? +n.toFixed(d) : +(n * 100).toFixed(d);
-};
 const median = (arr) => {
   if (!arr.length) return null;
   const s = [...arr].sort((a, b) => a - b);
@@ -263,13 +259,17 @@ const watchRow = (r) => {
   return { ...r, entry, exit, entryEstimated: estimated, exitEstimated, phase, daysToEntry, daysToListing, chg, ipoPx, entryPx, exitPx, pnl, pnlKind };
 };
 
-// Rule-mirror watch list. Unfiltered: the strategy's mechanical band
-// (oversub 100–500x) restricted to entry windows inside the selected global
-// window, PLUS names not yet listed (listing_date in the future) so the
-// listing → +20td entry → +40td exit timeline is visible before the fact.
-// Pre-listing rows bypass the oversub band: retail oversubscription is only
-// published at allotment (~1 trading day before listing) — qr_etl t_90585bf2 —
-// so band membership is undecidable until then and the row says so.
+// Rule-mirror watch list. Shows ALL IPOs in the selected window — the
+// oversub band (100–500x) is the strategy's trade filter, not a list
+// filter. Rows are flagged in-band/out-of-band instead of dropped, so hot
+// names (>500x) and quiet ones (<100x) stay visible with the reason they
+// sit outside the strategy; headline stats still describe the in-band
+// cohort only. PLUS names not yet listed (listing_date in the future) so
+// the listing → +20td entry → +40td exit timeline is visible before the
+// fact. Pre-listing rows bypass the oversub band: retail oversubscription
+// is only published at allotment (~1 trading day before listing) —
+// qr_etl t_90585bf2 — so band membership is undecidable until then and the
+// row says so.
 // With a sector selected (click a row in IPO SENTIMENT): ALL of that
 // sector's IPOs in the selected window, same columns, oversub band
 // not applied.
@@ -279,10 +279,13 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   const cutoff = windowCutoff(ipoWindow);
   const rows = (sectorFilter
     ? base.filter(r => r.sector === sectorFilter && r.listing_date >= cutoff)
-    : base.filter(r => r.oversubscription_retail != null && r.oversubscription_retail >= DRIFT_RULE.bandLo && r.oversubscription_retail <= DRIFT_RULE.bandHi))
+    : base)
     .map(watchRow)
     .filter(Boolean)
-    .filter(r => sectorFilter || r.entry >= cutoff); // entry windows inside the selected window (band mode)
+    .map(r => ({ ...r, inBand: r.oversubscription_retail != null && r.oversubscription_retail >= DRIFT_RULE.bandLo && r.oversubscription_retail <= DRIFT_RULE.bandHi }))
+    // listed in the window OR entering in the window — recently listed
+    // names whose +20td entry is still ahead must stay visible.
+    .filter(r => sectorFilter || r.listing_date >= cutoff || r.entry >= cutoff);
   // upcoming (not yet listed) — band undecidable until allotment, always shown
   const pre = ipos
     .filter(r => r.listing_date && r.listing_date > TODAY && (!sectorFilter || r.sector === sectorFilter))
@@ -292,12 +295,17 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   const inHold = rows.filter(r => r.phase === 'in_hold').sort((a, b) => a.exit.localeCompare(b.exit));
   const ahead = rows.filter(r => r.phase === 'ahead').sort((a, b) => a.entry.localeCompare(b.entry));
   const passed = rows.filter(r => r.phase === 'passed').sort((a, b) => b.exit.localeCompare(a.exit));
-  const closed = passed.filter(r => r.pnl != null);
+  // Strategy-cohort stats: in-band names only (the band is what V3 trades);
+  // in sector drill-down the band is not applied, so stats cover all rows.
+  const cohort = sectorFilter ? passed : passed.filter(r => r.inBand);
+  const closed = cohort.filter(r => r.pnl != null);
   const wins = closed.filter(r => r.pnl > 0).length;
   const sum = closed.reduce((a, r) => a + r.pnl, 0);
   return {
     all: [...inHold, ...ahead, ...pre, ...passed],
     counts: { inHold: inHold.length, ahead: ahead.length, preListing: pre.length, passed: passed.length },
+    bandCount: sectorFilter ? null : rows.filter(r => r.inBand).length,
+    rowCount: rows.length,
     stats: closed.length ? {
       n: closed.length, wins,
       winRate: wins / closed.length * 100,
@@ -333,7 +341,14 @@ const WatchTable = ({ rows }) => (
           <td className="ipo-ticker">{r.ticker}</td>
           <NameCell zh={r.stock_name_zh} en={r.stock_name} />
           <td className="num">{r.oversubscription_retail != null
-            ? `${num(r.oversubscription_retail, 1)}x`
+            ? <>
+                {num(r.oversubscription_retail, 1)}x
+                {r.inBand === false && (
+                  <div style={{ fontSize: 9, color: '#565e6c' }} title={`The V3 drift strategy only trades the ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail-oversub band — this row is shown for reference, the rule skips it`}>
+                    {r.oversubscription_retail > DRIFT_RULE.bandHi ? `>${DRIFT_RULE.bandHi}x · out of band` : `<${DRIFT_RULE.bandLo}x · out of band`}
+                  </div>
+                )}
+              </>
             : r.phase === 'pre_listing'
               ? <span className="ipo-faint" title="Retail oversubscription is published at allotment (~1 trading day before listing) — the 100–500x band is undecidable until then (qr_etl t_90585bf2)">band at allotment</span>
               : '—'}</td>
@@ -391,9 +406,11 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
   const flat = (ev?.in_market_capital ?? 0) === 0 && (modes.paper?.total_trades ?? 0) === 0;
   const tradeEvents = Array.isArray(ev?.recent_trades) ? ev.recent_trades.length : 0;
 
-  const wr = pctOrRatio(s.win_rate);
-  const mdd = pctOrRatio(s.max_drawdown);
-  const ret = pctOrRatio(s.returns_oos);
+  // researcher-endpoint units: win_rate / max_drawdown are already percent;
+  // returns_oos is a fraction — deterministic conversion, no magnitude sniffing.
+  const wr = pctAsIs(s.win_rate, 1);
+  const mdd = pctAsIs(s.max_drawdown, 1);
+  const ret = fracToPct(s.returns_oos, 1);
 
   const ladder = [
     { k: 'sim', label: 'SIM · BACKTEST',
@@ -746,18 +763,25 @@ export function IpoTab({ onOpen }) {
         ) : (watch ? `${watch.all.length} names` : '')}
         note={sectorFilter
           ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window, with the rule-mirror entry/exit columns (+${DRIFT_RULE.entryTd}td entry, +${DRIFT_RULE.entryTd + DRIFT_RULE.holdTd}td exit) so names stay comparable — the oversub band is not applied here; the strategy itself only trades the band. ◦ = open, marked to current price.`
-          : `Mechanical replay of the documented drift rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over entry windows in the ${activeWindowLabel} window — not the engine signal; the engine decides entries itself and the book is currently flat. Names not yet listed appear as LISTS IN Nd with ≈ entry/exit dates (listing + 20td / + 40td, calendar estimate) and their oversub band is decided at allotment. The Day-1 Green rule enters at the listing-day close itself — each strategy card states its own entry mechanics below. ◦ = open, marked to current price.`}
+          : `Mechanical replay of the documented drift rule (oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td) over the ${activeWindowLabel} window — ALL listed IPOs in the window are shown; the oversub band is flagged per row (out-of-band names the rule skips say so under the oversub figure), and headline stats cover the in-band cohort only. Not the engine signal; the engine decides entries itself and the book is currently flat. Names not yet listed appear as LISTS IN Nd with ≈ entry/exit dates (listing + 20td / + 40td, calendar estimate) and their oversub band is decided at allotment. The Day-1 Green rule enters at the listing-day close itself — each strategy card states its own entry mechanics below. ◦ = open, marked to current price.`}
       >
         <div style={{ padding: '10px 16px 0', fontSize: 10, color: '#565e6c', letterSpacing: '.3px' }}>
           {sectorFilter
             ? `IPOs listed in the ${activeWindowLabel} window · rule-mirror columns · oversub band not applied`
-            : `oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td · entry windows in the ${activeWindowLabel} window`}
+            : `all IPOs in the ${activeWindowLabel} window · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td · strategy band oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x flagged per row, not filtered`}
         </div>
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
+            {watch.bandCount != null && (
+              <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px 0', flexWrap: 'wrap' }}>
+                <span title={`${watch.bandCount} of ${watch.rowCount} listed names pass the ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail-oversub band the V3 rule trades`}>
+                  {watch.bandCount} of {watch.rowCount} listed in band ({DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x)
+                </span>
+              </div>
+            )}
             {watch.stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
-                <span>{watch.stats.n} closed round-trips</span>
+                <span title="Closed rule-mirror round-trips, in-band cohort only">{watch.stats.n} in-band closed round-trips</span>
                 <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
                 <span>avg <span className={sgnCl(watch.stats.avg)}>{signed(watch.stats.avg)}</span></span>
                 <span>sum <span className={sgnCl(watch.stats.sum)}>{signed(watch.stats.sum)}</span></span>
@@ -773,7 +797,7 @@ export function IpoTab({ onOpen }) {
         ) : (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>
             {watch
-              ? (sectorFilter ? `No ${sectorFilter} IPOs listed in the selected window.` : 'No listed IPOs inside the oversub band and entry window.')
+              ? (sectorFilter ? `No ${sectorFilter} IPOs listed in the selected window.` : 'No listed IPOs in the selected window.')
               : 'Loading watchlist…'}
           </div>
         )}
