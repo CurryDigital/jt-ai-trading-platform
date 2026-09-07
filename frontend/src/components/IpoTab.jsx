@@ -302,7 +302,10 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   const wins = closed.filter(r => r.pnl > 0).length;
   const sum = closed.reduce((a, r) => a + r.pnl, 0);
   return {
-    all: [...inHold, ...ahead, ...pre, ...passed],
+    // Ordered by IPO listing date, newest first (upcoming listings on top) —
+    // the list is a chronological tape of the window, not phase-grouped.
+    all: [...inHold, ...ahead, ...pre, ...passed]
+      .sort((a, b) => (b.listing_date || '').localeCompare(a.listing_date || '')),
     counts: { inHold: inHold.length, ahead: ahead.length, preListing: pre.length, passed: passed.length },
     bandCount: sectorFilter ? null : rows.filter(r => r.inBand).length,
     rowCount: rows.length,
@@ -338,7 +341,9 @@ const WatchTable = ({ rows }) => (
     <tbody>
       {rows.map(r => (
         <tr key={r.ticker}>
-          <td className="ipo-ticker">{r.ticker}</td>
+          <td className="ipo-ticker">{r.ticker}
+            <div style={{ fontSize: 9, color: '#565e6c', fontWeight: 400 }} title="Listing date — the list is ordered by this, newest first">listed {r.listing_date}</div>
+          </td>
           <NameCell zh={r.stock_name_zh} en={r.stock_name} />
           <td className="num">{r.oversubscription_retail != null
             ? <>
