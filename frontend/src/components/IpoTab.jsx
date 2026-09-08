@@ -88,6 +88,9 @@ const CSS = `
 .ipo-stages{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 16px;}
 .ipo-split{display:grid;grid-template-columns:5fr 7fr;gap:16px;align-items:start;}
 @media (max-width:1200px){.ipo-split{grid-template-columns:1fr;}}
+/* ticker column stays put while the 13-col table scrolls horizontally */
+.ipo-tbl .ipo-stick{position:sticky;left:0;background:#10141c;z-index:2;}
+.ipo-tbl thead .ipo-stick{z-index:3;}
 .ipo-stage{border:1px solid #161b25;border-radius:8px;padding:10px 12px;cursor:pointer;background:#0d1118;text-align:left;}
 .ipo-stage:hover{border-color:#2a3242;}
 .ipo-stage.active{border-color:#565e6c;background:#12161f;}
@@ -217,12 +220,16 @@ const STRATEGY_ORDER = {
   hk_ipo_postlisting_drift_p2: 2,
 };
 
-// Short column tags for the per-strategy B/S columns in the ticker list —
-// one column per HK IPO strategy, in card order. Full name rides in tooltips.
+// Short column tags for the per-strategy decision columns in the ticker list —
+// one column per HK IPO strategy, in card order. Full name + rule ride in
+// tooltips; the cell itself answers "is it a buy, and when".
 const STRAT_COLS = [
-  { id: 'hk_ipo_day1_green_momentum_v1',     tag: 'D1', name: 'HK IPO Day-1 Green Momentum V1' },
-  { id: 'hk_ipo_postlisting_drift_p1_v3',    tag: 'V3', name: 'HK IPO Post-Listing Drift V3 (oversub 100-500x, D1-close band 0.9-1.3x, enter +20d, hold 20d)' },
-  { id: 'hk_ipo_postlisting_drift_p2',       tag: 'P2', name: 'HK IPO Post-Listing Drift P2' },
+  { id: 'hk_ipo_day1_green_momentum_v1',     tag: 'D1', name: 'HK IPO Day-1 Green Momentum V1',
+    rule: 'buy at day-1 close if Main-board · oversub ≥500x · green day-1 · no-chase ≤1.5× offer — exit listing+5td' },
+  { id: 'hk_ipo_postlisting_drift_p1_v3',    tag: 'V3', name: 'HK IPO Post-Listing Drift V3',
+    rule: 'buy at listing+20td close if oversub 100–500x · entry px within 0.9–1.3× day-1 close — exit +40td' },
+  { id: 'hk_ipo_postlisting_drift_p2',       tag: 'P2', name: 'HK IPO Post-Listing Drift P2',
+    rule: 'buy at listing+20td close if Main-board · oversub 100–500x · day-1 close ≥ offer — exit −10% stop or +40td · max 1 per listing-week' },
 ];
 
 // Per-strategy engine-convention notes, rendered on the card. The mirror legs
@@ -333,18 +340,88 @@ const PxDate = ({ px, date, estimated, faint, sub }) => (
   </td>
 );
 
-// Per-strategy trade cell: B <entry date> on the first line, S <exit date>
-// (or "open") on the second, so each ticker row shows at a glance which of
-// the three HK IPO strategies actually traded it and when. '—' = the engine
-// never took this name.
-const StratTradeCell = ({ tr, stratName }) => {
-  if (!tr) return <td className="num" title={`${stratName}: no trade in this name`}>—</td>;
-  const pnl = tr.pnl_pct != null ? tr.pnl_pct : tr.unrealized_pnl_pct;
-  const tip = `${stratName}: bought ${tr.entry_date}${tr.exit_date ? ` · sold ${tr.exit_date}` : ' · position open'}${pnl != null ? ` · P&L ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(1)}%${tr.pnl_pct == null ? ' (unrealized)' : ''}` : ''}`;
+// ---- per-strategy buy decisions (rule mirror) ------------------------------
+// Deterministic mirror of the registry rules (research-owned text lives on the
+// cards). Answers per ticker, per strategy: is it a buy, and when. Inputs are
+// the same measured fields the rest of the table shows (oversub, offer, D1
+// close, day-20/40 legs). word: BUY (rule fires — entry date is when to buy) ·
+// BOUGHT (entry leg already measured/passed) · SKIP (a rule condition fails) ·
+// WATCH (a required input is not published yet — retail oversub lands at
+// allotment, qr_etl t_90585bf2). Where the engine's own backtest ledger has a
+// round-trip in the name, the cell shows the engine trade instead (see
+// StratDecisionCell) — engine truth beats the mirror.
+const D1_RULE = { bandLo: 500, chaseHi: 1.5, holdTd: 5 };
+
+const mmdd = (d) => (d || '').slice(5).replace('-', '/');
+// HK GEM board codes are 8xxx; all three IPO strategies are Main-board only
+// (D1/P2 say so verbatim in the registry).
+const isGem = (t) => /^8\d{3}\./.test(t || '');
+
+const stratDecision = (stratId, r) => {
+  const oversub = r.oversubscription_retail;
+  const d1c = r.first_day_close;
+  const offer = r.ipoPx;
+  const oversubPending = oversub == null
+    ? (r.phase === 'pre_listing' ? 'band at allotment' : 'oversub pending (t_90585bf2)')
+    : null;
+
+  if (stratId === 'hk_ipo_day1_green_momentum_v1') {
+    const tip = `Day-1 Green Momentum V1 — ${STRAT_COLS[0].rule}`;
+    if (isGem(r.ticker)) return { word: 'SKIP', sub: 'GEM · main-board only', tip };
+    if (oversubPending) return { word: 'WATCH', date: r.listing_date, sub: oversubPending, tip: `${tip}. Decision is the day-1 close on ${r.listing_date}.` };
+    if (oversub < D1_RULE.bandLo) return { word: 'SKIP', sub: `${num(oversub, 0)}x <500x`, tip };
+    if (d1c == null || offer == null) return { word: 'WATCH', date: r.listing_date, sub: 'awaiting D1 close', tip };
+    if (d1c <= offer) return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} ≤ offer ${num(offer)}.` };
+    if (d1c > offer * D1_RULE.chaseHi) return { word: 'SKIP', sub: 'chase >1.5×', tip: `${tip}. Day-1 close ${num(d1c)} > 1.5× offer ${num(offer)}.` };
+    const exitD = addDays(r.listing_date, D1_RULE.holdTd + 2); // ≈ listing+5td
+    return { word: 'BUY', date: r.listing_date, sub: `D1 close · out ${mmdd(exitD)} ≈`, tip: `${tip}. All conditions met — buy was the ${r.listing_date} close.` };
+  }
+
+  const isP2 = stratId === 'hk_ipo_postlisting_drift_p2';
+  const tip = `${isP2 ? 'Post-Listing Drift P2' : 'Post-Listing Drift V3'} — ${(STRAT_COLS.find(c => c.id === stratId) || {}).rule}`;
+  if (isP2 && isGem(r.ticker)) return { word: 'SKIP', sub: 'GEM · main-board only', tip };
+  if (oversubPending) return { word: 'WATCH', date: r.entry, sub: oversubPending, tip: `${tip}. Entry decision at the ${r.entry} close.` };
+  if (oversub < DRIFT_RULE.bandLo || oversub > DRIFT_RULE.bandHi)
+    return { word: 'SKIP', sub: oversub > DRIFT_RULE.bandHi ? `${num(oversub, 0)}x >${DRIFT_RULE.bandHi}x` : `${num(oversub, 0)}x <${DRIFT_RULE.bandLo}x`, tip };
+  if (isP2) {
+    if (d1c != null && offer != null && d1c < offer)
+      return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} < offer ${num(offer)}.` };
+    if (d1c == null && r.phase !== 'pre_listing')
+      return { word: 'WATCH', date: r.entry, sub: 'awaiting D1 close', tip };
+  } else if (r.entryPx != null && r.d1Out) {
+    return { word: 'SKIP', sub: `entry/D1 ${r.d1Ratio.toFixed(2)} out`, tip: `${tip}. Entry/D1 ${r.d1Ratio.toFixed(2)} outside ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}.` };
+  }
+  if (r.phase === 'in_hold')
+    return { word: 'BOUGHT', date: r.entry, sub: `exit ${mmdd(r.exit)}${r.exitEstimated ? ' ≈' : ''}${isP2 ? ' · −10% stop' : ''}`, tip };
+  if (r.phase === 'passed')
+    return { word: 'BOUGHT', date: r.entry, sub: `sold ${mmdd(r.exit)}${r.exitEstimated ? ' ≈' : ''}`, tip };
+  // ahead / pre_listing with the band already known to pass — the date is the buy
+  return { word: 'BUY', date: r.entry,
+    sub: !isP2 && r.entryPx == null ? `if entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}×` : (isP2 ? 'stop −10% · +40td exit' : ''),
+    tip: `${tip}. Entry decision at the ${r.entry} close${r.entryEstimated ? ' (calendar estimate)' : ''}.` };
+};
+
+// Per-strategy cell: the engine's own round-trip (B/S dates from the backtest
+// ledger) when one exists, otherwise the rule-mirror decision — BUY / SKIP /
+// WATCH / BOUGHT plus the date, so each ticker row reads "is it a buy, and
+// when" per strategy at a glance.
+const StratDecisionCell = ({ r, tr, strat }) => {
+  if (tr) {
+    const pnl = tr.pnl_pct != null ? tr.pnl_pct : tr.unrealized_pnl_pct;
+    const tip = `${strat.name}: engine bought ${tr.entry_date}${tr.exit_date ? ` · sold ${tr.exit_date}` : ' · position open'}${pnl != null ? ` · P&L ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(1)}%${tr.pnl_pct == null ? ' (unrealized)' : ''}` : ''}`;
+    return (
+      <td className="num" title={tip}>
+        <div style={{ fontWeight: 600 }}>B {mmdd(tr.entry_date)}</div>
+        <div style={{ fontSize: 9, color: '#565e6c' }}>{tr.exit_date ? `S ${mmdd(tr.exit_date)}` : 'open'}</div>
+      </td>
+    );
+  }
+  const d = stratDecision(strat.id, r);
+  const color = d.word === 'SKIP' ? '#565e6c' : d.word === 'WATCH' ? '#8b93a3' : '#e6e8eb';
   return (
-    <td className="num" title={tip}>
-      <div>B {(tr.entry_date || '').slice(5)}</div>
-      <div style={{ fontSize: 9, color: '#565e6c' }}>{tr.exit_date ? `S ${tr.exit_date.slice(5)}` : 'open'}</div>
+    <td className="num" title={d.tip}>
+      <div style={{ fontWeight: 600, color }}>{d.word}{d.date ? ` ${mmdd(d.date)}` : ''}</div>
+      {d.sub ? <div style={{ fontSize: 9, color: '#565e6c' }}>{d.sub}</div> : null}
     </td>
   );
 };
@@ -353,7 +430,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
   <table className="ipo-tbl">
     <thead>
       <tr>
-        <th>Ticker</th><th>Name</th><th className="num">Oversub</th>
+        <th className="ipo-stick">Ticker</th><th>Name</th><th className="num">Oversub</th>
         <th className="num" title="Offer price">IPO px</th>
         <th className="num" title="First-day close">D1 close</th>
         <th className="num" title="Entry leg: close 20 trading days after listing (engine bar 20)">Entry +20td</th>
@@ -361,7 +438,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
         <th className="num">Current</th>
         <th className="num" title="Rule-mirror round trip: exit vs entry (open trades marked to current)">Trade P&amp;L</th>
         {STRAT_COLS.map(c => (
-          <th key={c.id} className="num" title={`${c.name} — engine round-trips in this name (B = bought, S = sold)`}>{c.tag}</th>
+          <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: engine round-trip when the ledger has one, else the rule-mirror decision (BUY <date> = when to buy · SKIP = condition fails · WATCH = input not published yet).`}>{c.tag}</th>
         ))}
         <th>Phase</th>
       </tr>
@@ -369,7 +446,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
     <tbody>
       {rows.map(r => (
         <tr key={r.ticker}>
-          <td className="ipo-ticker">{r.ticker}
+          <td className="ipo-ticker ipo-stick">{r.ticker}
             <div style={{ fontSize: 9, color: '#565e6c', fontWeight: 400 }} title="Listing date — the list is ordered by this, newest first">listed {r.listing_date}</div>
           </td>
           <NameCell zh={r.stock_name_zh} en={r.stock_name} />
@@ -399,7 +476,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
             {r.pnl != null ? <>{signed(r.pnl)}{r.pnlKind === 'open' ? ' ◦' : ''}</> : '—'}
           </td>
           {STRAT_COLS.map(c => (
-            <StratTradeCell key={c.id} tr={(stratTrades[c.id] || {})[r.ticker]} stratName={c.name} />
+            <StratDecisionCell key={c.id} r={r} tr={(stratTrades[c.id] || {})[r.ticker]} strat={c} />
           ))}
           <td>{r.phase === 'in_hold'
             ? <span className="ipo-pill ipo-st-hold">IN HOLD WINDOW</span>
@@ -823,7 +900,7 @@ export function IpoTab({ onOpen }) {
         ) : (watch ? `${watch.all.length} names` : '')}
         note={sectorFilter
           ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window — band not applied here. ◦ = open, marked to current.`
-          : `Rule mirror: oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td — not the engine signal; P&L gross of costs (engine nets ~0.3pp). All ${activeWindowLabel} IPOs shown; band flagged per row. ◦ = open, marked to current.`}
+          : `Rule mirror: oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td — not the engine signal; P&L gross of costs (engine nets ~0.3pp). All ${activeWindowLabel} IPOs shown; band flagged per row. ◦ = open, marked to current. D1/V3/P2 columns: per-strategy buy decision + when (engine round-trip when the ledger has one; hover a cell for the full rule).`}
       >
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
