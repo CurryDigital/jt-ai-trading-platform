@@ -579,11 +579,17 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
             </div>
 
             <div className="qr-surface overflow-hidden">
-              <div className="px-3 py-2 border-b border-white/[0.05]">
+              <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
                 <span className="qr-label" title="consumption.strategy_monthly_returns · OOS backtest trades">Monthly Returns (%) · OOS backtest</span>
+                <span className="qr-chip qr-chip-rose text-[9px] ml-auto" title="qr_etl t_d152898f">PENDING</span>
               </div>
-              <div className="p-2">
-                <MonthlyHeatmap rows={data.monthly_returns} />
+              {/* gated 2026-09-07 (qr_etl t_d152898f): the view serves SUM of
+                  unweighted per-trade pnl_pct, not portfolio monthly returns —
+                  V3 compounds to +4877% vs true total_return +145.5%. Cells
+                  suppressed until the view is rebuilt; re-enable MonthlyHeatmap
+                  with fracToPct scaling + compounded YTD then. */}
+              <div className="p-3 text-[10px] text-slate-500 leading-relaxed">
+                Monthly grid suspended — source view sums unweighted per-trade returns and does not reconcile with the yearly backtest figures above. Rebuild tracked in qr_etl t_d152898f.
               </div>
             </div>
 
@@ -654,8 +660,9 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                         <th className="qr-label text-left py-1 px-2">Ticker</th>
                         <th className="qr-label text-left py-1 px-2">Entry</th>
                         <th className="qr-label text-right py-1 px-2">Entry px</th>
+                        <th className="qr-label text-right py-1 px-2" title="Latest close (silver.unified_prices, gold.daily_ohlcv fallback)">Current px</th>
                         <th className="qr-label text-right py-1 px-2" title="Calendar days held at the backtest as-of date">Days</th>
-                        <th className="qr-label text-right py-1 px-2" title="Open backtest positions carry no realized P&L">P&L %</th>
+                        <th className="qr-label text-right py-1 px-2" title="Open positions: unrealized P&L marked to the latest close (◦)">P&L %</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
@@ -664,18 +671,19 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                           <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{t.ticker}</td>
                           <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
                           <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
+                          <td className="py-1 px-2 qr-num text-slate-300 text-right" title={t.current_price_date ? `Close ${t.current_price_date} · ${t.price_source || ''}` : undefined}>{t.current_price != null ? fmt(t.current_price) : '—'}</td>
                           <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
-                          <td className="py-1 px-2 qr-num text-right text-slate-500">open</td>
+                          <td className={`py-1 px-2 qr-num text-right font-bold ${t.unrealized_pnl_pct != null ? pnlCl(t.unrealized_pnl_pct) : 'text-slate-500'}`} title={t.unrealized_pnl_pct != null ? `Unrealized — marked to latest close ${t.current_price_date || ''}` : 'No current price available'}>{t.unrealized_pnl_pct != null ? `${t.unrealized_pnl_pct >= 0 ? '+' : ''}${(t.unrealized_pnl_pct * 100).toFixed(1)}% ◦` : 'open'}</td>
                         </tr>
                       ))}
                       {!simOpen.length && (
-                        <tr><td colSpan={5} className="py-6 text-center text-slate-600 text-[11px]">No open positions — every OOS backtest trade is closed</td></tr>
+                        <tr><td colSpan={6} className="py-6 text-center text-slate-600 text-[11px]">No open positions — every OOS backtest trade is closed</td></tr>
                       )}
                     </tbody>
                   </table>
                   {simOpen.length > 0 && (
                     <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
-                      Open at the OOS backtest as-of date · days held measured to that date · no realized P&amp;L until exit
+                      Open at the OOS backtest as-of date · days held measured to that date · ◦ = unrealized, marked to the latest close
                     </div>
                   )}
                 </div>
@@ -697,18 +705,22 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
-                      {(data.backtest_trades || []).map((t, i) => (
+                      {(data.backtest_trades || []).map((t, i) => {
+                        const mtmPnl = t.pnl_pct != null ? t.pnl_pct : t.unrealized_pnl_pct;
+                        const isMtm = t.pnl_pct == null && t.unrealized_pnl_pct != null;
+                        return (
                         <tr key={i} className="qr-tr-hover">
                           <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
                           <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.exit_date || 'open'}</td>
                           <td className="py-1 px-2 text-white text-[11px] font-mono">{t.ticker}</td>
                           <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
-                          <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.exit_price != null ? fmt(t.exit_price) : '—'}</td>
-                          <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(t.pnl_pct)}`}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${(t.pnl_pct * 100).toFixed(1)}%` : '—'}</td>
+                          <td className="py-1 px-2 qr-num text-slate-300 text-right" title={isMtm && t.current_price_date ? `Latest close ${t.current_price_date} · ${t.price_source || ''}` : undefined}>{t.exit_price != null ? fmt(t.exit_price) : (t.current_price != null ? `${fmt(t.current_price)} ◦` : '—')}</td>
+                          <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(mtmPnl)}`} title={isMtm ? `Unrealized — marked to latest close ${t.current_price_date || ''}` : undefined}>{mtmPnl != null ? `${mtmPnl >= 0 ? '+' : ''}${(mtmPnl * 100).toFixed(1)}%${isMtm ? ' ◦' : ''}` : '—'}</td>
                           <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
                           <td className="py-1 px-2 text-right text-[9px] text-slate-500">{t.exit_reason || '—'}</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                       {!(data.backtest_trades || []).length && (
                         <tr><td colSpan={8} className="py-6 text-center text-slate-600 text-[11px]">No per-trade backtest records</td></tr>
                       )}

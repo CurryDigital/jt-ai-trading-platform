@@ -5318,6 +5318,43 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         "exit_reason": r.exit_reason,
     } for r in bt_trade_rows]
 
+    # Mark-to-market for open OOS positions: latest close per open ticker so
+    # the UI can show unrealized P&L instead of a bare "open" / "—".
+    # silver.unified_prices is the canonical mark (same source as the
+    # open-positions view), gold.daily_ohlcv is the daily fallback.
+    # Closed rows are untouched. Open rows are few (current book), so a
+    # per-ticker lookup is fine and avoids array-binding pitfalls.
+    open_bt_tickers = sorted({t["ticker"] for t in backtest_trades if not t["exit_date"] and t["ticker"]})
+    bt_marks = {}
+    for tk in open_bt_tickers:
+        mark = safe_query_one(db, """
+            SELECT close, date FROM silver.unified_prices
+            WHERE ticker = :t AND close IS NOT NULL
+            ORDER BY date DESC LIMIT 1
+        """, {"t": tk}, label="eval_bt_mark_silver")
+        src = "silver.unified_prices"
+        if not mark:
+            mark = safe_query_one(db, """
+                SELECT close, date FROM gold.daily_ohlcv
+                WHERE ticker = :t AND close IS NOT NULL
+                ORDER BY date DESC LIMIT 1
+            """, {"t": tk}, label="eval_bt_mark_gold")
+            src = "gold.daily_ohlcv"
+        if mark and mark.close is not None:
+            bt_marks[tk] = {
+                "current_price": float(mark.close),
+                "current_price_date": mark.date.isoformat() if mark.date else None,
+                "price_source": src,
+            }
+    for t in backtest_trades:
+        if t["exit_date"] or not t["ticker"]:
+            continue
+        m = bt_marks.get(t["ticker"])
+        if m:
+            t.update(m)
+            if t["entry_price"]:
+                t["unrealized_pnl_pct"] = m["current_price"] / t["entry_price"] - 1.0
+
     # ---- Paper-book skip surface -------------------------------------------
     # consumption.strategy_paper_skips_current (qr_etl, refreshed every paper
     # rebalancer run): one row per (strategy_id, ticker) BUY signal the paper
