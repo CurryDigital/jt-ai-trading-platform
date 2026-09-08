@@ -961,12 +961,12 @@ export default function App() {
       <main className="pt-[72px] pb-20 md:pb-4 px-3 md:px-4 max-w-[1800px] mx-auto">
         {/* Sub-tab bar for merged tabs */}
         {currentSubTabs && (
-          <div className="flex items-center gap-1 mb-3 p-1 rounded-md bg-slate-900/50 border border-white/[0.05] w-fit">
+          <div className="flex items-center gap-1 mb-3 p-1 rounded-md bg-slate-900/50 border border-white/[0.05] w-fit max-w-full overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {currentSubTabs.map(sub => (
               <button
                 key={sub.id}
                 onClick={() => setSubTab(currentTab, sub.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold transition-all shrink-0 whitespace-nowrap ${
                   activeSubTab === sub.id
                     ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-500/30'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'

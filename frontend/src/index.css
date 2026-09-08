@@ -394,6 +394,88 @@ body {
   display: none;
 }
 
+/* ── Strategies workspace — responsive grids (mobile-first) ── */
+/* All tracks use minmax(0, …): a bare 1fr keeps an automatic (content-based)
+   minimum, so any nowrap content inside (strategy names, table cells) blows
+   the track out past the viewport and the overflow-x:hidden body clips it. */
+/* KPI tile strips: 2-up on phones, 4-up on desktop */
+.strat-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (min-width: 768px) {
+  .strat-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Performance card grid: min() so the 300px floor can never exceed the
+   viewport on narrow phones (a bare minmax(300px,1fr) overflows <340px). */
+.strat-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 10px;
+}
+.strat-card-grid > * {
+  min-width: 0;
+}
+
+/* Pipeline mode-ladder board: stacked on phones, 2-up on small tablets,
+   4 columns only when there is real room */
+.strat-pipeline-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.strat-pipeline-grid > * {
+  min-width: 0;
+}
+@media (min-width: 640px) {
+  .strat-pipeline-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1280px) {
+  .strat-pipeline-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Segmented filter controls (mode/asset/horizon/sort): scroll internally
+   instead of being clipped when the options exceed the viewport width */
+.strat-seg {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.strat-seg::-webkit-scrollbar {
+  display: none;
+}
+
+/* IPO subtab: 6-tile KPI strip → 2-up phones, 3-up small, 6-up desktop */
+.ipo-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ipo-kpi-grid > * {
+  min-width: 0;
+}
+@media (min-width: 640px) {
+  .ipo-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1100px) {
+  .ipo-kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* IPO strategy cards: min() guards the 340px floor on narrow phones */
+.ipo-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+}
+.ipo-card-grid > * {
+  min-width: 0;
+}
+
 /* Bottom nav for mobile */
 .bottom-nav {
   @apply fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-white/5;

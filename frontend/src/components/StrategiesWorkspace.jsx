@@ -52,7 +52,7 @@ function useStrategyBook() {
 function HorizonSeg({ hzn, setHzn, counts }) {
   const opts = [['all', 'All'], ['day', 'Day Trade'], ['swing', 'Swing'], ['position', 'Position']];
   return (
-    <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
+    <div className="strat-seg" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
       {opts.map(([k, l]) => (
         <button key={k} onClick={() => setHzn(k)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, background: hzn === k ? 'var(--primary)' : 'transparent', color: hzn === k ? '#fff' : 'var(--text-secondary)' }}>
           {l}<span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, opacity: 0.7 }}>{counts[k] ?? 0}</span>
@@ -71,7 +71,7 @@ const Placeholder = ({ label, hint }) => (
 
 function ModeSeg({ mode, setMode }) {
   return (
-    <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
+    <div className="strat-seg" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
       {PERF_MODES.map((o) => (
         <button key={o.k} onClick={() => setMode(o.k)} style={{ padding: '4px 9px', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, background: mode === o.k ? 'var(--primary)' : 'transparent', color: mode === o.k ? '#fff' : 'var(--text-secondary)' }}>{o.l}</button>
       ))}
@@ -83,7 +83,7 @@ function ModeSeg({ mode, setMode }) {
 // actually present in the book so the toggle never shows dead filters.
 function AssetSeg({ asset, setAsset, opts, counts }) {
   return (
-    <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
+    <div className="strat-seg" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
       {opts.map((k) => (
         <button key={k} onClick={() => setAsset(k)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, background: asset === k ? 'var(--primary)' : 'transparent', color: asset === k ? '#fff' : 'var(--text-secondary)' }}>
           {k === 'all' ? 'All Assets' : k}<span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, opacity: 0.7 }}>{counts[k] ?? 0}</span>
@@ -179,7 +179,7 @@ function RealMetrics({ s, mode }) {
     // Off are neutral states (Watching is default text, Off is muted).
     const stateColor = paperState === 'engaged' ? 'var(--pnl-pos)' : paperState === 'off' ? 'var(--text-muted)' : undefined;
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
         <Metric label="P&L" value={pnl != null ? fmtK(pnl) : '—'} color={pnl == null ? undefined : pnl >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
         <Metric label="Profit factor" value={s.paperPF != null ? s.paperPF.toFixed(2) : '—'} big />
         <Metric label="Win rate" value={s.paperWR != null ? `${s.paperWR}%` : '—'} color={s.paperWR == null ? undefined : s.paperWR >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
@@ -196,7 +196,7 @@ function RealMetrics({ s, mode }) {
     // arrive with the qr_etl mirror (kanban t_b64f7302) — render honest
     // pending slots until then, never backtest numbers dressed as rehearsal.
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
         <Metric label="Realized P&L" value="—" big />
         <Metric label="Fills" value="—" big />
         <Metric label="Avg slippage" value="—" big />
@@ -209,7 +209,7 @@ function RealMetrics({ s, mode }) {
 
   if (mode === 'live') {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
         <Metric label="P&L" value="—" big />
         <Metric label="Profit factor" value="—" big />
         <Metric label="Win rate" value="—" big />
@@ -221,7 +221,7 @@ function RealMetrics({ s, mode }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
       <Metric label="Return (BT)" value={s.returns != null ? `${s.returns >= 0 ? '+' : ''}${s.returns}%` : '—'} color={s.returns == null ? undefined : s.returns >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
       <Metric label="Sharpe" value={s.sharpe ? s.sharpe.toFixed(2) : '—'} big />
       <Metric label="Win rate" value={s.btWR != null ? `${s.btWR}%` : '—'} color={s.btWR == null ? undefined : s.btWR >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
@@ -501,14 +501,14 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
         <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>Sort</span>
-        <div style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
+        <div className="strat-seg" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
           {currentSorts.map((o) => (
             <button key={o.k} onClick={() => setSortKey(o.k)} style={{ padding: '4px 9px', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, background: sortKey === o.k ? 'var(--primary)' : 'transparent', color: sortKey === o.k ? '#fff' : 'var(--text-secondary)' }}>{o.l}</button>
           ))}
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+      <div className="strat-kpi-grid">
         {perfMode === 'sim' && (
           <>
             <KpiTile label={hzn === 'all' ? 'Strategies' : HORIZON[hzn].label} value={src.length} sub={`${liveN} live · ${uatN} uat · ${paperN} paper`} />
@@ -545,7 +545,7 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
 
       {sorted.length === 0
         ? <Placeholder label="No strategies match these filters." hint="Try another mode, asset class, or horizon — or deploy strategies from the Lab." />
-        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
+        : <div className="strat-card-grid">
             {sorted.map((s) => <StrategyCard key={s.id} s={s} onOpen={onOpen} onAction={onAction} showLadder={false} viewMode={perfMode} />)}
           </div>}
     </div>
@@ -580,7 +580,7 @@ export function StrategyPipelineBoard({ book, error, hzn, setHzn, onOpen, onActi
         <HorizonSeg hzn={hzn} setHzn={setHzn} counts={counts} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, alignItems: 'start' }}>
+      <div className="strat-pipeline-grid">
         {LADDER.map((st, i) => {
           const items = view.filter((s) => s.mode === st.mode);
           return (

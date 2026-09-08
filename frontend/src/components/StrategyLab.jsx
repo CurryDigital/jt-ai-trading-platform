@@ -245,7 +245,7 @@ const StrategyLab = ({ onOpen }) => {
       </div>
 
       {/* Asset-class filter */}
-      <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-900/60 border border-white/[0.06] w-fit overflow-x-auto">
+      <div className="flex items-center gap-0.5 p-0.5 rounded-md bg-slate-900/60 border border-white/[0.06] w-fit max-w-full overflow-x-auto">
         {ASSET_CLASSES.map(ac => {
           const count = ac.id === 'ALL' ? strategies.length : strategies.filter(s => normalizeAssetClass(s.asset) === ac.id).length;
           return (

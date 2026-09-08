@@ -519,7 +519,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                 {data.execution_mode && <span className={`qr-chip ${MODE_STYLE[data.execution_mode] || 'qr-chip-slate'}`}>{data.execution_mode.replace('_TRADING','').replace('SIMULATION','SIM')}</span>}
                 {data.version && <span className="qr-chip qr-chip-slate">v{data.version}</span>}
               </div>
-              <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
+              <div className="flex items-center gap-x-3 gap-y-1 mt-1 text-[10px] text-slate-500 flex-wrap">
                 <span><span className="qr-label">ID</span> <span className="qr-num text-slate-300">{strategyId}</span></span>
                 <span><span className="qr-label">ASSET</span> <span className="text-slate-300">{data.asset_class}</span></span>
                 <span><span className="qr-label">DIR</span> <span className="text-slate-300">{data.direction}</span></span>

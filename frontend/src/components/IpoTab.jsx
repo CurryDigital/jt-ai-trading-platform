@@ -85,9 +85,10 @@ const CSS = `
 .ipo-note code{font-family:ui-monospace,monospace;color:#8b93a3;background:#12161f;padding:1px 5px;border-radius:3px;}
 .ipo-sector-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #161b25;font-size:11px;}
 .ipo-sector-row:last-child{border-bottom:none;}
-.ipo-stages{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 16px;}
-.ipo-split{display:grid;grid-template-columns:5fr 7fr;gap:16px;align-items:start;}
-@media (max-width:1200px){.ipo-split{grid-template-columns:1fr;}}
+.ipo-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px;}
+.ipo-split{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px;align-items:start;}
+.ipo-split>*{min-width:0;}
+@media (max-width:1200px){.ipo-split{grid-template-columns:minmax(0,1fr);}}
 /* ticker column stays put while the 13-col table scrolls horizontally */
 .ipo-tbl .ipo-stick{position:sticky;left:0;background:#10141c;z-index:2;}
 .ipo-tbl thead .ipo-stick{z-index:3;}
@@ -564,7 +565,7 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
       </div>
 
       {/* backtest metrics — RealMetrics-style grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
         <Metric label="Sharpe" value={s.sharpe_ratio == null ? '—' : Number(s.sharpe_ratio).toFixed(2)} big />
         <Metric label="OOS ret" value={ret == null ? '—' : fmtPct(ret)} color={ret == null ? undefined : pnlColor(ret)} big />
         <Metric label="Win" value={wr == null ? '—' : `${wr.toFixed(0)}%`} color={wr == null ? undefined : wr >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
@@ -580,7 +581,7 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
       </div>
 
       {/* mode ladder — compact strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 4 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 4 }}>
         {ladder.map(c => (
           <div key={c.k} style={{ padding: '5px 7px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', boxShadow: activeMode === c.k ? 'inset 0 0 0 1px var(--border-strong)' : 'none' }}>
             <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', gap: 4 }}>
@@ -824,7 +825,7 @@ export function IpoTab({ onOpen }) {
 
       {/* stats strip — IPO KPIs, filtered by the global window */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12 }}>
+        <div className="ipo-kpi-grid">
           <Stat label={`IPOS · ${activeWindowLabel}`} value={stats.n} sub={stats.window} />
           <Stat label="AVG FIRST-DAY" value={stats.fdAvg == null ? '—' : fmtPct(stats.fdAvg)} sub={`measured on ${stats.fdN} of ${stats.n}`} green={stats.fdAvg > 0} />
           <Stat label="MEDIAN FIRST-DAY" value={stats.fdMed == null ? '—' : fmtPct(stats.fdMed)} sub="median, measured rows" green={stats.fdMed > 0} />
@@ -1080,7 +1081,7 @@ export function IpoTab({ onOpen }) {
 
       {/* strategy book — compact cards in a grid, Performance-subtab theme */}
       <Panel title="HK IPO STRATEGIES" tag={<Tag kind="live">LIVE</Tag>}>
-        <div style={{ padding: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12, alignItems: 'start' }}>
+        <div className="ipo-card-grid">
           {strategies.length === 0 ? (
             <div style={{ fontSize: 11, color: '#565e6c' }}>No HK IPO strategies registered in the strategy book.</div>
           ) : strategies.map(s => (
