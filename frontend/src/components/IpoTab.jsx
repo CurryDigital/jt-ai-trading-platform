@@ -12,6 +12,10 @@ import { pctAsIs, fracToPct } from './strategyProfiles';
 //     1 ANNOUNCED (pre-subscription) — "start looking"
 //     2 UNDER SUBSCRIPTION — "monitor whether to apply"
 //     3 GREY MARKET — subscription closed, listing imminent; grey trend
+//     4 RECENT IPOs (reinstated 2026-09-09 per user) — listed <= 90d, monitor
+//       closely: offer vs current, D1/D20, oversub. Stage bodies are capped
+//       with a vertical scroll (stage 1 can hold hundreds of A1 filings and
+//       is the least actionable).
 //   One global window toggle (1M/3M/6M/YTD/2Y) drives the IPO sentiment
 //   sector table (server-side window), the IPO KPI stats strip (client-side
 //   listing-date filter), and the rule-mirror ticker list (entry windows
@@ -132,7 +136,12 @@ const STAGES = [
   { key: 'announced',    step: 'STAGE 1', label: 'ANNOUNCED',          hint: 'pre-subscription · start looking' },
   { key: 'subscription', step: 'STAGE 2', label: 'UNDER SUBSCRIPTION', hint: 'window open · decide whether to apply' },
   { key: 'grey',         step: 'STAGE 3', label: 'GREY MARKET',        hint: 'closed · listing imminent · grey trend' },
+  { key: 'recent',       step: 'STAGE 4', label: 'RECENT IPOs',        hint: 'listed ≤ 90d · monitor closely' },
 ];
+// Stage bodies share one scroll cap so a long ANNOUNCED list (hundreds of A1
+// filings) never stretches the page; stages 2/3 are a handful of rows.
+const STAGE_SCROLL = { maxHeight: 340, overflow: 'auto' };
+const RECENT_LISTED_DAYS = 90;
 
 // Global window toggle — drives IPO SENTIMENT (server-side) + IPO KPIs (client-side).
 const WINDOWS = [
@@ -717,6 +726,10 @@ export function IpoTab({ onOpen }) {
     g.subscription.sort((a, b) => (a.application_end || '').localeCompare(b.application_end || ''));
     g.grey.sort((a, b) => (a.listing_date || '').localeCompare(b.listing_date || ''));
     g.public.sort((a, b) => (b.listing_date || '').localeCompare(a.listing_date || ''));
+    g.recent = g.public.filter(r => {
+      const d = daysSince(r.listing_date);
+      return d != null && d <= RECENT_LISTED_DAYS;
+    });
     return g;
   }, [ipos]);
 
@@ -957,7 +970,7 @@ export function IpoTab({ onOpen }) {
         tag={<Tag kind="live">LIVE</Tag>}
         right={`${TODAY} UTC`}
         scroll
-        note={<span>Stages classified from application window vs listing date. ANNOUNCED = A1/PHIP filings (<code>qr_etl t_59228b1e</code>); open-window oversub pending (<code>qr_etl t_90585bf2</code>).</span>}
+        note={<span>Stages classified from application window vs listing date. ANNOUNCED = A1/PHIP filings (<code>qr_etl t_59228b1e</code>); open-window oversub pending (<code>qr_etl t_90585bf2</code>). Stage lists scroll — ANNOUNCED runs long. RECENT IPOs = listed ≤ 90d, newest first.</span>}
       >
         <div className="ipo-stages">
           {STAGES.map((st, i) => {
@@ -965,7 +978,7 @@ export function IpoTab({ onOpen }) {
             const tickers = rows.slice(0, 3).map(r => r.ticker).join(' · ');
             return (
               <button key={st.key} className={`ipo-stage ${activeStage === st.key ? 'active' : ''}`} onClick={() => setStage(st.key)}>
-                <div className="step">{st.step}{i < 2 ? ' →' : ''}</div>
+                <div className="step">{st.step}{i < STAGES.length - 1 ? ' →' : ''}</div>
                 <div className="n">{rows.length}</div>
                 <div style={{ fontSize: 11, color: '#8b93a3', fontWeight: 600 }}>{st.label}</div>
                 <div className="sub">{st.hint}{tickers ? <><br />{tickers}{rows.length > 3 ? ` +${rows.length - 3}` : ''}</> : ''}</div>
@@ -974,9 +987,10 @@ export function IpoTab({ onOpen }) {
           })}
         </div>
 
-        {/* STAGE 1 — announced */}
+        {/* STAGE 1 — announced (long A1-filings list — scroll-capped, least actionable) */}
         {activeStage === 'announced' && (
           staged.announced.length > 0 ? (
+            <div style={STAGE_SCROLL}>
             <table className="ipo-tbl">
               <thead>
                 <tr>
@@ -1000,6 +1014,7 @@ export function IpoTab({ onOpen }) {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <div style={{ padding: 16, fontSize: 11, color: '#565e6c' }}>
               No announced IPOs — A1/PHIP filings feed (qr_etl t_59228b1e) returned none active.
@@ -1088,6 +1103,55 @@ export function IpoTab({ onOpen }) {
           ) : (
             <div style={{ padding: 16, fontSize: 11, color: '#565e6c' }}>
               No IPOs between subscription close and listing right now.
+            </div>
+          )
+        )}
+
+        {/* STAGE 4 — recent IPOs (listed ≤ 90d) — post-listing monitoring */}
+        {activeStage === 'recent' && (
+          staged.recent.length > 0 ? (
+            <div style={STAGE_SCROLL}>
+            <table className="ipo-tbl">
+              <thead>
+                <tr>
+                  <th>Ticker</th><th>Name</th><th>Sector</th>
+                  <th className="num">Listing</th><th className="num" title="Calendar days since listing">Listed</th>
+                  <th className="num">Offer px</th><th className="num" title="Retail oversubscription (published at allotment)">Oversub</th>
+                  <th className="num" title="First-day return vs offer price">D1 %</th>
+                  <th className="num" title="20th-trading-day return vs offer price">D20 %</th>
+                  <th className="num">Current</th>
+                  <th className="num" title="Latest close vs offer price — marked to current">Now %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staged.recent.map(r => {
+                  const age = daysSince(r.listing_date);
+                  const nowPct = r.total_return != null ? r.total_return
+                    : (r.current_price != null && r.offer_price > 0 ? (r.current_price / r.offer_price - 1) * 100 : null);
+                  return (
+                    <tr key={r.ticker}>
+                      <td className="ipo-ticker">{r.ticker}</td>
+                      <NameCell zh={r.stock_name_zh} en={r.stock_name} />
+                      <td className="ipo-co">{r.sector || '—'}</td>
+                      <td className="num">{r.listing_date || '—'}</td>
+                      <td className="num">{age != null ? (age === 0 ? 'today' : `${age}d`) : '—'}</td>
+                      <td className="num">{r.offer_price != null ? num(r.offer_price, 2) : '—'}</td>
+                      <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : '—'}</td>
+                      <td className={`num ${sgnCl(r.first_day_return)}`}>{r.first_day_return == null ? '—' : fmtPct(r.first_day_return)}</td>
+                      <td className={`num ${sgnCl(r.return_day20)}`}>{r.return_day20 == null ? '—' : fmtPct(r.return_day20)}</td>
+                      <td className="num">{r.current_price != null ? num(r.current_price, 2) : '—'}</td>
+                      <td className={`num ${sgnCl(nowPct)}`} title={r.total_return == null && nowPct != null ? 'Derived from latest close vs offer (total_return_pct not persisted upstream yet — qr_etl t_5b2c6fad)' : 'Total return vs offer price'}>
+                        {nowPct == null ? '—' : fmtPct(nowPct)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            </div>
+          ) : (
+            <div style={{ padding: 16, fontSize: 11, color: '#565e6c' }}>
+              No IPOs listed in the last {RECENT_LISTED_DAYS} days.
             </div>
           )
         )}
