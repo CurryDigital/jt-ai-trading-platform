@@ -24,29 +24,65 @@ def _d(v):
 
 
 # Day-20 close: prefer gold.hk_ipo_performance.return_day20_pct (backfilled by qr_etl,
-# task t_e71cffde). The lateral below computes the 20th trading day's close from
-# silver.unified_prices and is used ONLY as a fallback when the gold column is NULL
+# task t_e71cffde). The lateral below computes the close 20 trading days AFTER listing
+# from silver.unified_prices and is used ONLY as a fallback when the gold column is NULL
 # (via COALESCE on the pct). day20_price always comes from the lateral so the UI can
 # show the level.
+# CONVENTION (2026-09-07): engine bar convention — listing day = bar 0, entry = bar 20
+# close => OFFSET 20 (previously OFFSET 19, one trading day early; verified against V3
+# engine fills: 1377.HK entered 2026-08-06 @374.00, 2493.HK 2026-06-10 @24.50,
+# 6745.HK 2026-08-07 @3.365, 6951.HK 2026-08-06 @103.80 — all bar-20 closes).
+# GUARD: legs are NULLed when the measured date is implausibly far after listing
+# (>60d for the +20td leg, >120d for +40td; 40td can span ~75 calendar days over
+# summer holidays) — that means silver's price series for the ticker starts long
+# after listing (recycled ticker, e.g. 8603.HK listed 2018 with prices from 2026)
+# and the OFFSET row is NOT the entry leg.
 _DAY20_LATERAL = """
     LEFT JOIN LATERAL (
-        SELECT sp.close AS close, sp.date AS dt
-        FROM silver.unified_prices sp
-        WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
-        ORDER BY sp.date OFFSET 19 LIMIT 1
+        SELECT CASE WHEN v.dt <= c.listing_date + 60 THEN v.close END AS close,
+               CASE WHEN v.dt <= c.listing_date + 60 THEN v.dt END AS dt
+        FROM (
+            SELECT sp.close AS close, sp.date AS dt
+            FROM silver.unified_prices sp
+            WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
+            ORDER BY sp.date OFFSET 20 LIMIT 1
+        ) v
     ) d20 ON TRUE
 """
 
+# Day-5 close: exit leg of the Day-1 Green Momentum rule (buy at the day-1 close =
+# bar 0, hold 5 trading days -> exit at bar 5 => OFFSET 5). Computed from
+# silver.unified_prices via lateral; NULL until 5 trading days have elapsed since
+# listing. Same recycled-ticker guard as _DAY20_LATERAL (5td spans ~7 calendar
+# days; 30d is a generous bound).
+_DAY5_LATERAL = """
+    LEFT JOIN LATERAL (
+        SELECT CASE WHEN v.dt <= c.listing_date + 30 THEN v.close END AS close,
+               CASE WHEN v.dt <= c.listing_date + 30 THEN v.dt END AS dt
+        FROM (
+            SELECT sp.close AS close, sp.date AS dt
+            FROM silver.unified_prices sp
+            WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
+            ORDER BY sp.date OFFSET 5 LIMIT 1
+        ) v
+    ) d5 ON TRUE
+"""
+
 # Day-40 close: exit leg of the post-listing drift rule (enter +20td, hold 20td ->
-# exit at the 40th trading day). Computed from silver.unified_prices via lateral;
-# NULL until 40 trading days have elapsed since listing. Durable gold column
-# backfill is qr_etl's deliverable (same pattern as return_day20_pct, t_e71cffde).
+# exit at bar 40, i.e. 40 trading days after listing => OFFSET 40). Computed from
+# silver.unified_prices via lateral; NULL until 40 trading days have elapsed since
+# listing. Durable gold column backfill is qr_etl's deliverable (same pattern as
+# return_day20_pct, t_e71cffde). Same recycled-ticker guard as _DAY20_LATERAL.
 _DAY40_LATERAL = """
     LEFT JOIN LATERAL (
-        SELECT sp.close AS close, sp.date AS dt
-        FROM silver.unified_prices sp
-        WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
-        ORDER BY sp.date OFFSET 39 LIMIT 1
+        SELECT CASE WHEN v.dt <= c.listing_date + 120 THEN v.close END AS close,
+               CASE WHEN v.dt <= c.listing_date + 120 THEN v.dt END AS dt
+        FROM (
+            SELECT sp.close AS close, sp.date AS dt
+            FROM silver.unified_prices sp
+            WHERE sp.ticker = c.ticker AND sp.date >= c.listing_date
+            ORDER BY sp.date OFFSET 40 LIMIT 1
+        ) v
     ) d40 ON TRUE
 """
 
@@ -68,6 +104,7 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
                              THEN (d20.close / c.offer_price - 1) * 100 END) AS return_day20_pct,
                d20.close AS day20_price, d20.dt AS day20_date,
                d40.close AS day40_price, d40.dt AS day40_date,
+               d5.close AS day5_price, d5.dt AS day5_date,
                p.return_day30_pct, p.total_return_pct, p.current_price, p.performance_tier,
                s.offer_price_low, s.offer_price_high, s.lot_size, s.fixed_price,
                s.grey_close, s.grey_session_date,
@@ -86,6 +123,7 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
         ) s ON TRUE
         {_DAY20_LATERAL}
         {_DAY40_LATERAL}
+        {_DAY5_LATERAL}
         WHERE 1=1
     """
     params = {}
@@ -115,6 +153,7 @@ def get_hkex_ipos(status: str = None, sector: str = None, year: int = None, limi
         "return_day20": _f(r.return_day20_pct),
         "day20_price": _f(r.day20_price), "day20_date": _d(r.day20_date),
         "day40_price": _f(r.day40_price), "day40_date": _d(r.day40_date),
+        "day5_price": _f(r.day5_price), "day5_date": _d(r.day5_date),
         "return_day30": _f(r.return_day30_pct),
         "total_return": _f(r.total_return_pct),
         "current_price": _f(r.current_price),
@@ -258,12 +297,23 @@ def get_hkex_ipo_sectors(window: str = "2y", db: Session = Depends(get_db)):
                COUNT(COALESCE(p.return_day20_pct,
                               CASE WHEN d20.close IS NOT NULL AND c.offer_price > 0
                                    THEN (d20.close / c.offer_price - 1) * 100 END)) as day20_n,
-               AVG(p.total_return_pct) as avg_current_return,
-               COUNT(p.total_return_pct) as current_n,
+               AVG(COALESCE(p.return_day40_pct,
+                            CASE WHEN d40.close IS NOT NULL AND c.offer_price > 0
+                                 THEN (d40.close / c.offer_price - 1) * 100 END)) as avg_day40_return,
+               COUNT(COALESCE(p.return_day40_pct,
+                              CASE WHEN d40.close IS NOT NULL AND c.offer_price > 0
+                                   THEN (d40.close / c.offer_price - 1) * 100 END)) as day40_n,
+               AVG(COALESCE(p.total_return_pct,
+                            CASE WHEN p.current_price IS NOT NULL AND c.offer_price > 0
+                                 THEN (p.current_price / c.offer_price - 1) * 100 END)) as avg_current_return,
+               COUNT(COALESCE(p.total_return_pct,
+                              CASE WHEN p.current_price IS NOT NULL AND c.offer_price > 0
+                                   THEN (p.current_price / c.offer_price - 1) * 100 END)) as current_n,
                COUNT(CASE WHEN p.first_day_return_pct > 0 THEN 1 END)::DECIMAL / COUNT(*) * 100 as win_rate
         FROM gold.hk_ipo_calendar c
         JOIN gold.hk_ipo_performance p ON c.ticker = p.ticker
         {_DAY20_LATERAL}
+        {_DAY40_LATERAL}
         WHERE c.listing_date >= {cutoff}
         GROUP BY c.sector ORDER BY avg_first_day_return DESC NULLS LAST
     """)).fetchall()
@@ -272,6 +322,8 @@ def get_hkex_ipo_sectors(window: str = "2y", db: Session = Depends(get_db)):
         "avg_first_day_return": round(float(r.avg_first_day_return), 2) if r.avg_first_day_return is not None else None,
         "avg_day20_return": round(float(r.avg_day20_return), 2) if r.avg_day20_return is not None else None,
         "day20_n": r.day20_n,
+        "avg_day40_return": round(float(r.avg_day40_return), 2) if r.avg_day40_return is not None else None,
+        "day40_n": r.day40_n,
         "avg_current_return": round(float(r.avg_current_return), 2) if r.avg_current_return is not None else None,
         "current_n": r.current_n,
         "win_rate": round(float(r.win_rate), 1) if r.win_rate is not None else None}

@@ -333,24 +333,17 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   };
 };
 
-const PxDate = ({ px, date, estimated, faint, sub }) => (
-  <td className="num" title={estimated ? 'Estimated: trading-day close not measured yet — calendar approximation' : 'Measured trading-day close (silver.unified_prices)'}>
-    <div className={faint ? 'ipo-faint' : ''}>{px != null ? num(px) : '—'}</div>
-    <div style={{ fontSize: 9, color: '#565e6c' }}>{date}{estimated ? ' ≈' : ''}</div>
-    {sub}
-  </td>
-);
-
-// ---- per-strategy buy decisions (rule mirror) ------------------------------
+// ---- per-strategy round-trips (rule mirror) --------------------------------
 // Deterministic mirror of the registry rules (research-owned text lives on the
-// cards). Answers per ticker, per strategy: is it a buy, and when. Inputs are
-// the same measured fields the rest of the table shows (oversub, offer, D1
-// close, day-20/40 legs). word: BUY (rule fires — entry date is when to buy) ·
-// BOUGHT (entry leg already measured/passed) · SKIP (a rule condition fails) ·
-// WATCH (a required input is not published yet — retail oversub lands at
-// allotment, qr_etl t_90585bf2). Where the engine's own backtest ledger has a
-// round-trip in the name, the cell shows the engine trade instead (see
-// StratDecisionCell) — engine truth beats the mirror.
+// cards). Answers per ticker, per strategy: does it enter the market, and if
+// so the exact BUY date and SELL date for THAT strategy, plus the P&L % once
+// the exit signal has triggered (◦ = still open, marked to current). word:
+// BUY (rule fires — entry date is when to buy) · BOUGHT (entry leg already
+// measured/passed) · SKIP (a rule condition fails) · WATCH (a required input
+// is not published yet — retail oversub lands at allotment, qr_etl
+// t_90585bf2). Where the engine's own backtest ledger has a round-trip in the
+// name, the cell shows the engine trade instead (see StratDecisionCell) —
+// engine truth beats the mirror.
 const D1_RULE = { bandLo: 500, chaseHi: 1.5, holdTd: 5 };
 
 const mmdd = (d) => (d || '').slice(5).replace('-', '/');
@@ -374,8 +367,15 @@ const stratDecision = (stratId, r) => {
     if (d1c == null || offer == null) return { word: 'WATCH', date: r.listing_date, sub: 'awaiting D1 close', tip };
     if (d1c <= offer) return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} ≤ offer ${num(offer)}.` };
     if (d1c > offer * D1_RULE.chaseHi) return { word: 'SKIP', sub: 'chase >1.5×', tip: `${tip}. Day-1 close ${num(d1c)} > 1.5× offer ${num(offer)}.` };
-    const exitD = addDays(r.listing_date, D1_RULE.holdTd + 2); // ≈ listing+5td
-    return { word: 'BUY', date: r.listing_date, sub: `D1 close · out ${mmdd(exitD)} ≈`, tip: `${tip}. All conditions met — buy was the ${r.listing_date} close.` };
+    // enter at the day-1 close, exit at the bar-5 close (hold 5td). Exit leg is
+    // the measured day5_price when available, else a calendar estimate.
+    const sellD = r.day5_date || addDays(r.listing_date, D1_RULE.holdTd + 2); // ≈ listing+5td
+    let pnl = null, pnlKind = null;
+    if (r.day5_price != null && d1c) { pnl = (r.day5_price / d1c - 1) * 100; pnlKind = 'realized'; }
+    else if (r.current_price != null && r.listing_date <= TODAY && TODAY <= addDays(sellD, 10)) { pnl = (r.current_price / d1c - 1) * 100; pnlKind = 'open'; }
+    return { word: 'BUY', date: r.listing_date,
+      tip: `${tip}. All conditions met — buy the ${r.listing_date} close @ ${num(d1c)}, exit the bar-5 close${r.day5_price != null ? ` @ ${num(r.day5_price)}` : ''} (${sellD}). Close-to-close, gross of costs.`,
+      trade: { buy: r.listing_date, sell: sellD, sellEst: !r.day5_date, pnl, pnlKind } };
   }
 
   const isP2 = stratId === 'hk_ipo_postlisting_drift_p2';
@@ -392,33 +392,56 @@ const stratDecision = (stratId, r) => {
   } else if (r.entryPx != null && r.d1Out) {
     return { word: 'SKIP', sub: `entry/D1 ${r.d1Ratio.toFixed(2)} out`, tip: `${tip}. Entry/D1 ${r.d1Ratio.toFixed(2)} outside ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}.` };
   }
+  // Rule fires (or fired): enter at the +20td close, exit at the +40td close.
+  // r.pnl / r.pnlKind already carry the mirror round-trip — realized once the
+  // exit leg has traded, marked-to-current (◦) inside the hold window.
+  const legsTip = `${tip}. Entry ${num(r.entryPx)} @ ${r.entry} · exit ${num(r.exitPx)} @ ${r.exit} — close-to-close, gross of costs (engine nets ~0.3pp).${isP2 ? ' −10% stop can exit before the mirror sell date; max 1 per listing-week.' : ''}`;
+  const trade = { buy: r.entry, sell: r.exit, sellEst: r.exitEstimated, pnl: r.pnl, pnlKind: r.pnlKind };
   if (r.phase === 'in_hold')
-    return { word: 'BOUGHT', date: r.entry, sub: `exit ${mmdd(r.exit)}${r.exitEstimated ? ' ≈' : ''}${isP2 ? ' · −10% stop' : ''}`, tip };
+    return { word: 'BOUGHT', date: r.entry, tip: legsTip, trade };
   if (r.phase === 'passed')
-    return { word: 'BOUGHT', date: r.entry, sub: `sold ${mmdd(r.exit)}${r.exitEstimated ? ' ≈' : ''}`, tip };
+    return { word: 'BOUGHT', date: r.entry, tip: legsTip, trade };
   // ahead / pre_listing with the band already known to pass — the date is the buy
   return { word: 'BUY', date: r.entry,
     sub: !isP2 && r.entryPx == null ? `if entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}×` : (isP2 ? 'stop −10% · +40td exit' : ''),
-    tip: `${tip}. Entry decision at the ${r.entry} close${r.entryEstimated ? ' (calendar estimate)' : ''}.` };
+    tip: `${legsTip} Entry decision at the ${r.entry} close${r.entryEstimated ? ' (calendar estimate)' : ''}.`,
+    trade };
 };
 
-// Per-strategy cell: the engine's own round-trip (B/S dates from the backtest
-// ledger) when one exists, otherwise the rule-mirror decision — BUY / SKIP /
-// WATCH / BOUGHT plus the date, so each ticker row reads "is it a buy, and
-// when" per strategy at a glance.
+// Per-strategy cell: the strategy's round-trip in the name. When the engine's
+// backtest ledger has a trade it wins; otherwise the rule-mirror legs. Entered
+// strategies show B <buy date> → S <sell date> and the P&L % once the exit
+// signal has triggered (◦ = still open, marked to current). SKIP = a rule
+// condition fails · WATCH = a required input is not published yet.
 const StratDecisionCell = ({ r, tr, strat }) => {
   if (tr) {
     const pnl = tr.pnl_pct != null ? tr.pnl_pct : tr.unrealized_pnl_pct;
-    const tip = `${strat.name}: engine bought ${tr.entry_date}${tr.exit_date ? ` · sold ${tr.exit_date}` : ' · position open'}${pnl != null ? ` · P&L ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(1)}%${tr.pnl_pct == null ? ' (unrealized)' : ''}` : ''}`;
+    const open = tr.exit_date == null;
+    const tip = `${strat.name}: engine bought ${tr.entry_date}${open ? ' · position open' : ` · sold ${tr.exit_date}`}${pnl != null ? ` · P&L ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(1)}%${tr.pnl_pct == null ? ' (unrealized)' : ''}` : ''}`;
     return (
       <td className="num" title={tip}>
-        <div style={{ fontWeight: 600 }}>B {mmdd(tr.entry_date)}</div>
-        <div style={{ fontSize: 9, color: '#565e6c' }}>{tr.exit_date ? `S ${mmdd(tr.exit_date)}` : 'open'}</div>
+        <div style={{ fontWeight: 600 }}>B {mmdd(tr.entry_date)} → {open ? 'open' : `S ${mmdd(tr.exit_date)}`}</div>
+        <div className={sgnCl(pnl != null ? pnl * 100 : null)} style={{ fontSize: 9 }}>
+          {pnl != null ? <>{pnl >= 0 ? '+' : ''}{(pnl * 100).toFixed(1)}%{tr.pnl_pct == null ? ' ◦' : ''}</> : '—'}
+        </div>
       </td>
     );
   }
   const d = stratDecision(strat.id, r);
-  const color = d.word === 'SKIP' ? '#565e6c' : d.word === 'WATCH' ? '#8b93a3' : '#e6e8eb';
+  if (d.trade) {
+    const t = d.trade;
+    return (
+      <td className="num" title={d.tip}>
+        <div style={{ fontWeight: 600 }}>B {mmdd(t.buy)} → S {mmdd(t.sell)}{t.sellEst ? ' ≈' : ''}</div>
+        <div className={sgnCl(t.pnl)} style={{ fontSize: 9 }}>
+          {t.pnl != null
+            ? <>{signed(t.pnl)}{t.pnlKind === 'open' ? ' ◦' : ''}</>
+            : <span style={{ color: '#565e6c' }}>{d.sub || (r.phase === 'ahead' || r.phase === 'pre_listing' ? 'awaiting entry' : '—')}</span>}
+        </div>
+      </td>
+    );
+  }
+  const color = d.word === 'SKIP' ? '#565e6c' : '#8b93a3';
   return (
     <td className="num" title={d.tip}>
       <div style={{ fontWeight: 600, color }}>{d.word}{d.date ? ` ${mmdd(d.date)}` : ''}</div>
@@ -434,12 +457,9 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
         <th className="ipo-stick">Ticker</th><th>Name</th><th className="num">Oversub</th>
         <th className="num" title="Offer price">IPO px</th>
         <th className="num" title="First-day close">D1 close</th>
-        <th className="num" title="Entry leg: close 20 trading days after listing (engine bar 20)">Entry +20td</th>
-        <th className="num" title="Exit leg: close 20 trading days after entry (engine bar 40)">Exit +40td</th>
         <th className="num">Current</th>
-        <th className="num" title="Rule-mirror round trip: exit vs entry (open trades marked to current)">Trade P&amp;L</th>
         {STRAT_COLS.map(c => (
-          <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: engine round-trip when the ledger has one, else the rule-mirror decision (BUY <date> = when to buy · SKIP = condition fails · WATCH = input not published yet).`}>{c.tag}</th>
+          <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: the strategy's round-trip — B <buy date> → S <sell date> plus P&L % once the exit has triggered (◦ = open, marked to current; engine ledger trade when one exists, else rule mirror) · SKIP = condition fails · WATCH = input not published yet.`}>{c.tag}</th>
         ))}
         <th>Phase</th>
       </tr>
@@ -465,17 +485,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
               : '—'}</td>
           <td className="num">{r.ipoPx != null ? num(r.ipoPx) : '—'}</td>
           <td className="num">{num(r.first_day_close)}</td>
-          <PxDate px={r.entryPx} date={r.entry} estimated={r.entryEstimated} faint={r.phase === 'ahead' || r.phase === 'pre_listing'}
-                  sub={r.d1Out ? (
-                    <div style={{ fontSize: 9, color: '#565e6c' }} title={`V3 also requires entry px within ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x the first-day close — the rule skips this row`}>
-                      entry/D1 {r.d1Ratio.toFixed(2)} · out of band
-                    </div>
-                  ) : null} />
-          <PxDate px={r.exitPx} date={r.exit} estimated={r.exitEstimated} faint={r.phase !== 'passed'} />
           <td className="num">{num(r.current_price)}</td>
-          <td className={`num ${sgnCl(r.pnl)}`} title={r.pnlKind === 'open' ? 'Open — marked to current price, exit day not reached yet' : r.pnlKind === 'realized' ? 'Realized — close-to-close, gross of transaction costs (engine nets ~0.3pp per round-trip)' : 'Not entered'}>
-            {r.pnl != null ? <>{signed(r.pnl)}{r.pnlKind === 'open' ? ' ◦' : ''}</> : '—'}
-          </td>
           {STRAT_COLS.map(c => (
             <StratDecisionCell key={c.id} r={r} tr={(stratTrades[c.id] || {})[r.ticker]} strat={c} />
           ))}
@@ -844,7 +854,7 @@ export function IpoTab({ onOpen }) {
         tag={<Tag kind="live">LIVE</Tag>}
         right={`window: ${activeWindowLabel}`}
         scroll
-        note={<span>Average returns vs offer price (D1 / D20 / latest). Click a sector to list its IPOs on the right.</span>}
+        note={<span>Average returns vs offer price (D1 / D20 / D40 / latest). Click a sector to list its IPOs on the right.</span>}
       >
         {sectorView.named.length === 0 ? (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>No classified sectors returned for this window.</div>
@@ -855,6 +865,7 @@ export function IpoTab({ onOpen }) {
                 <th>Sector</th><th className="num">IPOs</th>
                 <th className="num" title="Average first-day return vs offer price">D1 %</th>
                 <th className="num" title="Average 20th-trading-day return vs offer price">D20 %</th>
+                <th className="num" title="Average 40th-trading-day return vs offer price (post-listing drift exit leg)">D40 %</th>
                 <th className="num" title="Average current return vs offer price">Now %</th>
                 <th className="num" title="Share of IPOs with first-day return > 0">Win D1</th>
               </tr>
@@ -872,6 +883,9 @@ export function IpoTab({ onOpen }) {
                   <td className={`num ${sgnCl(s.avg_first_day_return)}`}>{s.avg_first_day_return == null ? '—' : fmtPct(s.avg_first_day_return)}</td>
                   <td className={`num ${sgnCl(s.avg_day20_return)}`} title={`measured on ${s.day20_n ?? '?'} of ${s.ipo_count}`}>
                     {s.avg_day20_return == null ? '—' : fmtPct(s.avg_day20_return)}
+                  </td>
+                  <td className={`num ${sgnCl(s.avg_day40_return)}`} title={`measured on ${s.day40_n ?? '?'} of ${s.ipo_count}`}>
+                    {s.avg_day40_return == null ? '—' : fmtPct(s.avg_day40_return)}
                   </td>
                   <td className={`num ${sgnCl(s.avg_current_return)}`} title={`measured on ${s.current_n ?? '?'} of ${s.ipo_count}`}>
                     {s.avg_current_return == null ? '—' : fmtPct(s.avg_current_return)}
