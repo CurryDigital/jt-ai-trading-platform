@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { fetchWithTimeout } from '../utils';
 
 // Visual Entry Signal Gauge - Shows why we bought/sold and current status
 const EntrySignalGauge = ({ position, strategyId }) => {
@@ -1195,7 +1196,7 @@ export const StrategyPerformance = () => {
 
   const fetchGlobalMode = async () => {
     try {
-      const res = await fetch('/api/execution/global-mode');
+      const res = await fetchWithTimeout('/api/execution/global-mode');
       if (res.ok) {
         const data = await res.json();
         setExecutionMode(data.execution_mode);
@@ -1211,7 +1212,7 @@ export const StrategyPerformance = () => {
 
   const fetchSignals = async () => {
     try {
-      const res = await fetch('/api/positions/signals');
+      const res = await fetchWithTimeout('/api/positions/signals');
       if (res.ok) {
         const data = await res.json();
         const signalMap = {};
@@ -1239,9 +1240,9 @@ export const StrategyPerformance = () => {
   const fetchData = async () => {
     try {
       const [paperRes, pnlRes, tradesRes] = await Promise.all([
-        fetch('/api/paper-strategies').then(r => r.json()).catch(() => null),
-        fetch('/api/performance/daily-pnl').then(r => r.json()).catch(() => null),
-        fetch('/api/velocity/trades').then(r => r.json()).catch(() => null)
+        fetchWithTimeout('/api/paper-strategies', {}, 12000).then(r => r.json()).catch(() => null),
+        fetchWithTimeout('/api/performance/daily-pnl', {}, 12000).then(r => r.json()).catch(() => null),
+        fetchWithTimeout('/api/velocity/trades', {}, 12000).then(r => r.json()).catch(() => null)
       ]);
       
       if (paperRes) setPaperStrategies(paperRes.strategies || []);
@@ -1261,7 +1262,7 @@ export const StrategyPerformance = () => {
     try {
       // Add cache-busting timestamp to get fresh data
       const timestamp = Date.now();
-      const res = await fetch(`/api/market-data?tickers=${uniqueTickers.join(',')}&t=${timestamp}`);
+      const res = await fetchWithTimeout(`/api/market-data?tickers=${uniqueTickers.join(',')}&t=${timestamp}`, {}, 15000);
       if (res.ok) {
         const data = await res.json();
         const prices = {};

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api } from '../utils';
+import { api, fetchWithTimeout } from '../utils';
 
 export const LoginPage = ({ onLogin }) => {
   const [user, setUser] = useState('');
@@ -12,11 +12,11 @@ export const LoginPage = ({ onLogin }) => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetchWithTimeout('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: user, password: pass }),
-      });
+      }, 15000);
       if (res.ok) {
         const data = await res.json();
         onLogin(data.token);

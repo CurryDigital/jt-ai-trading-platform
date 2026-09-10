@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchWithTimeout } from '../utils';
 
 // IBKR Gateway Test Component - Fixed Error Handling
 // Integrates into the Config tab for testing Gateway connectivity
@@ -24,7 +25,7 @@ export const IbkrGatewayTester = () => {
 
   const fetchExecutionMode = async () => {
     try {
-      const res = await fetch('/api/execution/global-mode');
+      const res = await fetchWithTimeout('/api/execution/global-mode');
       if (res.ok) {
         const data = await res.json();
         setExecutionMode(data.execution_mode);
@@ -66,9 +67,9 @@ export const IbkrGatewayTester = () => {
   // Test 1: Connection Test - Fixed with better error handling
   const testConnection = async () => {
     try {
-      const response = await fetch('/api/ib/tws/status', {
+      const response = await fetchWithTimeout('/api/ib/tws/status', {
         headers: { 'Accept': 'application/json' }
-      });
+      }, 15000);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Backend unavailable`);
@@ -102,9 +103,9 @@ export const IbkrGatewayTester = () => {
   // Test 2: Market Data Test
   const testMarketData = async () => {
     try {
-      const response = await fetch('/api/fx/pairs', {
+      const response = await fetchWithTimeout('/api/fx/pairs', {
         headers: { 'Accept': 'application/json' }
-      });
+      }, 15000);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -137,9 +138,9 @@ export const IbkrGatewayTester = () => {
   // Test 3: Historical Data Test
   const testHistoricalData = async () => {
     try {
-      const response = await fetch('/api/fx/bars/latest?ticker=EURUSD&limit=5', {
+      const response = await fetchWithTimeout('/api/fx/bars/latest?ticker=EURUSD&limit=5', {
         headers: { 'Accept': 'application/json' }
-      });
+      }, 15000);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -172,9 +173,9 @@ export const IbkrGatewayTester = () => {
   const testGatewayHealth = async () => {
     try {
       // Simple check if Gateway port is reachable
-      const response = await fetch('/api/ib/tws/status', {
+      const response = await fetchWithTimeout('/api/ib/tws/status', {
         headers: { 'Accept': 'application/json' }
-      });
+      }, 15000);
       
       if (!response.ok) {
         throw new Error(`Backend error: HTTP ${response.status}`);
@@ -199,7 +200,7 @@ export const IbkrGatewayTester = () => {
       const testTicker = 'AAPL';
       const testStrategy = 'araso_factor_model';
       
-      const createResponse = await fetch('/api/strategies/add-to-paper', {
+      const createResponse = await fetchWithTimeout('/api/strategies/add-to-paper', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -207,7 +208,7 @@ export const IbkrGatewayTester = () => {
           tickers: [testTicker],
           capital_per_position: 1000
         })
-      });
+      }, 20000);
       
       if (!createResponse.ok) {
         throw new Error(`Failed to create paper strategy: HTTP ${createResponse.status}`);
@@ -220,7 +221,7 @@ export const IbkrGatewayTester = () => {
       }
       
       // Step 2: Verify it was created by fetching paper strategies
-      const verifyResponse = await fetch('/api/paper-strategies');
+      const verifyResponse = await fetchWithTimeout('/api/paper-strategies');
       
       if (!verifyResponse.ok) {
         throw new Error(`Failed to verify: HTTP ${verifyResponse.status}`);
@@ -255,7 +256,7 @@ export const IbkrGatewayTester = () => {
   const testIBKROrder = async (action = 'BUY') => {
     try {
       // Check current execution mode
-      const modeResponse = await fetch('/api/execution/global-mode');
+      const modeResponse = await fetchWithTimeout('/api/execution/global-mode');
       if (!modeResponse.ok) {
         throw new Error('Failed to fetch execution mode');
       }

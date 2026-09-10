@@ -16,7 +16,7 @@ import {
   TradeHistoryTable,
 } from './paper';
 import { ExecScaffold, ExecStat, ExecTabs } from './execution/ExecScaffold';
-import { fmtK, pnlCl } from '../utils';
+import { fmtK, pnlCl, fetchWithTimeout } from '../utils';
 
 // Unified anatomy (2026-08-26): same tabbed surface as the Live book.
 // Tab bodies lazy-mount so their hooks only fire when the tab is selected —
@@ -52,11 +52,11 @@ export default function PaperStrategiesPage() {
     if (!window.confirm(`Close paper position ${p.ticker} (${p.direction} ${size}) at the latest mark?`)) return;
     setCloseState({ id: p.id, busy: true, msg: null });
     try {
-      const res = await fetch('/api/agents/paper/close-position', {
+      const res = await fetchWithTimeout('/api/agents/paper/close-position', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ position_id: p.id }),
-      });
+      }, 20000);
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
         setCloseState({ id: p.id, busy: false, msg: { type: 'success', text: `Closed @ ${body.closing_price ?? 'mark'}` } });

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { fetchWithTimeout } from '../../utils';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -19,7 +20,7 @@ function usePoll(endpoint, intervalMs = 60000) {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`);
+      const res = await fetchWithTimeout(`${API_BASE}${endpoint}`, {}, 12000);
       if (res.status === 503) {
         // DB unavailable — enter degraded mode with backoff
         const retryAfter = nextBackoff(backoffAttemptRef.current);

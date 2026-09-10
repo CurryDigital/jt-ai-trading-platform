@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
 import { AuditLog } from './AuditLog';
-import { marketClock, marketStatus } from '../utils';
+import { marketClock, marketStatus, fetchWithTimeout } from '../utils';
 import { useBarQuality, barQualityView } from '../freshness';
 
 // Enhanced Settings Tab with Configuration Management + System Health
@@ -43,7 +43,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch('/api/settings');
+      const res = await fetchWithTimeout('/api/settings');
       if (res.ok) {
         const data = await res.json();
         setPlatformSettings(prev => ({ ...prev, ...(data.trading_config || {}) }));
@@ -55,17 +55,17 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
 
   const putSettingsSection = async (section, payload) => {
     try {
-      await fetch(`/api/settings/${section}`, {
+      await fetchWithTimeout(`/api/settings/${section}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
+      }, 15000);
     } catch (e) { console.error(`Failed to save ${section}:`, e); }
   };
 
   const fetchSyncStatus = async () => {
     try {
-      const res = await fetch('/api/sync/status');
+      const res = await fetchWithTimeout('/api/sync/status');
       if (res.ok) {
         const data = await res.json();
         setSyncStatus(data);
@@ -76,7 +76,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   const fetchDataSources = async () => {
     setDataSourcesLoading(true);
     try {
-      const res = await fetch('/api/settings/data-sources');
+      const res = await fetchWithTimeout('/api/settings/data-sources');
       if (res.ok) {
         const data = await res.json();
         setDataSources(data);
@@ -99,10 +99,10 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
     setResetting(true);
     try {
       // Call API to reset all paper strategies and trades
-      const res = await fetch('/api/simulation/reset', {
+      const res = await fetchWithTimeout('/api/simulation/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
-      });
+      }, 30000);
       
       if (res.ok) {
         const data = await res.json();
@@ -458,7 +458,7 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
                     </div>
                     
                     <button
-                      onClick={() => fetch('/api/sync/' + comp.id, { method: 'POST' })}
+                      onClick={() => fetchWithTimeout('/api/sync/' + comp.id, { method: 'POST' }, 15000)}
                       className="mt-3 w-full py-1.5 text-xs bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded"
                     >
                       🔄 Sync Now

@@ -37,13 +37,15 @@ const EquityCurve = ({ points, height = 80 }) => {
 };
 
 // Monthly returns heatmap ------------------------------------------------
+// rows: [{year, month, return}] with return as DECIMAL FRACTION (0.037 = +3.7%).
+// Cells render percent; YTD compounds the fractions (never a naive sum).
 const MonthlyHeatmap = ({ rows }) => {
   // bucket into year -> {1..12 -> pct}
   const grid = useMemo(() => {
     const m = new Map();
     for (const r of rows || []) {
       if (!m.has(r.year)) m.set(r.year, {});
-      m.get(r.year)[r.month] = r.return;
+      m.get(r.year)[r.month] = (r.return || 0) * 100;
     }
     return Array.from(m.entries()).sort((a, b) => b[0] - a[0]);
   }, [rows]);
@@ -76,7 +78,9 @@ const MonthlyHeatmap = ({ rows }) => {
         </thead>
         <tbody>
           {grid.map(([year, mp]) => {
-            const ytd = Object.values(mp).reduce((s, v) => s + (v || 0), 0);
+            // compound the year's monthly fractions — a simple sum overstates
+            // chained returns and breaks reconciliation with the yearly figures
+            const ytd = (Object.values(mp).reduce((acc, v) => acc * (1 + (v || 0) / 100), 1) - 1) * 100;
             return (
               <tr key={year}>
                 <td className="qr-num text-[10px] text-slate-400 pl-1 py-0.5">{year}</td>
@@ -99,6 +103,40 @@ const MonthlyHeatmap = ({ rows }) => {
         </tbody>
       </table>
     </div>
+  );
+};
+
+// Yearly returns box -------------------------------------------------------
+// yearly: {YYYY: fraction}. Sits to the right of the monthly heatmap; the two
+// reconcile by construction (SIM: monthly compounds to the published annual;
+// paper: simple sum over fixed assigned capital).
+const YearlyReturns = ({ yearly, emptyNote }) => {
+  const years = Object.keys(yearly || {}).map(Number).sort((a, b) => b - a);
+  if (!years.length) {
+    return <div className="text-[10px] text-slate-600 text-center py-4">{emptyNote || 'No yearly return data'}</div>;
+  }
+  return (
+    <table className="w-full">
+      <thead>
+        <tr>
+          <th className="qr-label text-left py-1">YR</th>
+          <th className="qr-label text-right py-1">RETURN</th>
+        </tr>
+      </thead>
+      <tbody>
+        {years.map(y => {
+          const v = yearly[y] ?? yearly[String(y)];
+          return (
+            <tr key={y} className="border-t border-white/[0.04]">
+              <td className="qr-num text-[10px] text-slate-400 py-1">{y}</td>
+              <td className={`qr-num text-[11px] py-1 text-right font-bold ${pnlCl(v)}`}>
+                {v != null ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%` : '—'}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 };
 
@@ -244,6 +282,8 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
         divergence: d.divergence || { verdict: 'no_backtest_baseline', win_rate_delta_pp: null, profit_factor_delta: null },
         equity_curve: d.equity_curve || [],
         monthly_returns: d.monthly_returns || [],
+        monthly_returns_paper: d.monthly_returns_paper || [],
+        yearly_returns: d.yearly_returns || { sim: {}, paper: {} },
         uat_fills: (d.uat_fills || []).filter(f => f?.ticker?.toUpperCase?.() !== 'CASH'),
         // CASH is a cash-bucket placeholder, not a tradeable ticker; filter it defensively
         // so it never appears in the Universe, Trades, or Signals tables.
@@ -578,18 +618,29 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
               </div>
             </div>
 
+            {/* Monthly + yearly returns — SIM view: OOS backtest series
+                (consumption.strategy_monthly_returns, rebuilt t_d152898f; each
+                year compounds to the published annual_pnl beside it). */}
             <div className="qr-surface overflow-hidden">
               <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
-                <span className="qr-label" title="consumption.strategy_monthly_returns · OOS backtest trades">Monthly Returns (%) · OOS backtest</span>
-                <span className="qr-chip qr-chip-rose text-[9px] ml-auto" title="qr_etl t_d152898f">PENDING</span>
+                <span className="qr-label" title="consumption.strategy_monthly_returns · portfolio-level OOS monthly returns (decimal fractions, compounded YTD)">Monthly Returns (%) · OOS backtest</span>
+                <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.monthly_returns || []).length} mo</span>
               </div>
-              {/* gated 2026-09-07 (qr_etl t_d152898f): the view serves SUM of
-                  unweighted per-trade pnl_pct, not portfolio monthly returns —
-                  V3 compounds to +4877% vs true total_return +145.5%. Cells
-                  suppressed until the view is rebuilt; re-enable MonthlyHeatmap
-                  with fracToPct scaling + compounded YTD then. */}
-              <div className="p-3 text-[10px] text-slate-500 leading-relaxed">
-                Monthly grid suspended — source view sums unweighted per-trade returns and does not reconcile with the yearly backtest figures above. Rebuild tracked in qr_etl t_d152898f.
+              <div className="p-2 grid grid-cols-1 lg:grid-cols-[1fr_150px] gap-3">
+                <div>
+                  {(data.monthly_returns || []).length === 0 ? (
+                    <div className="text-[10px] text-slate-600 text-center py-4">No monthly return data — this backtest stored aggregate metrics only (t_c76796a2)</div>
+                  ) : (
+                    <MonthlyHeatmap rows={data.monthly_returns} />
+                  )}
+                </div>
+                <div className="lg:border-l lg:border-white/[0.05] lg:pl-3">
+                  <div className="qr-label pb-1" title="gold.strategy_backtest_runs annual_pnl_* · same run as the metrics above">Yearly (%)</div>
+                  <YearlyReturns
+                    yearly={(data.yearly_returns || {}).sim}
+                    emptyNote="No annual figures on the backtest run"
+                  />
+                </div>
               </div>
             </div>
 
@@ -774,6 +825,39 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                     <EquityCurve points={activeBookPayload.equity_curve} />
                   </div>
                 </div>
+
+                {/* Monthly + yearly returns — PAPER view: realized P&L by exit
+                    month from the same synthetic ledger, as a fraction of the
+                    strategy's assigned capital. Live has no round-trip ledger,
+                    so the panel is paper-only. */}
+                {sel === 'paper' && (
+                  <div className="qr-surface overflow-hidden">
+                    <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
+                      <span className="qr-label" title={`gold.paper_trades_synthetic closed rows by exit month · % of assigned capital${data.assigned_capital ? ` ($${Math.round(data.assigned_capital).toLocaleString()})` : ' (not set)'}`}>Monthly Returns (%) · paper realized</span>
+                      <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.monthly_returns_paper || []).length} mo</span>
+                    </div>
+                    <div className="p-2 grid grid-cols-1 lg:grid-cols-[1fr_150px] gap-3">
+                      <div>
+                        {(data.monthly_returns_paper || []).length === 0 ? (
+                          <div className="text-[10px] text-slate-600 text-center py-4">
+                            {!data.assigned_capital
+                              ? 'No assigned capital — set a capital pool before paper returns can be computed'
+                              : 'No closed paper trades yet — realized returns appear after the first exit'}
+                          </div>
+                        ) : (
+                          <MonthlyHeatmap rows={data.monthly_returns_paper} />
+                        )}
+                      </div>
+                      <div className="lg:border-l lg:border-white/[0.05] lg:pl-3">
+                        <div className="qr-label pb-1" title="Realized P&L per exit year · % of assigned capital (simple sum, fixed capital base)">Yearly (%)</div>
+                        <YearlyReturns
+                          yearly={(data.yearly_returns || {}).paper}
+                          emptyNote="No realized yearly returns yet"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Ledger panel — Rebalances / Allocation / raw trades */}
                 <div className="qr-surface overflow-hidden">

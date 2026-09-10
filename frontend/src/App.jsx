@@ -4,7 +4,7 @@ import { LoginPage } from './components/LoginPage';
 import { ExecScaffold, ExecStat, ExecTabs } from './components/execution/ExecScaffold';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
-import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, getToken, setToken, clearToken, onUnauthorized } from './utils';
+import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, getToken, setToken, clearToken, onUnauthorized, fetchWithTimeout } from './utils';
 import { FR, FR_NAME, classifySource, useFreshness, fmtAgeSec } from './freshness';
 
 // Tab-level code splitting: each view loads on first visit instead of shipping
@@ -627,7 +627,7 @@ export default function App() {
     onUnauthorized(() => { clearToken(); setAuthed(false); });
     (async () => {
       try {
-        const res = await fetch('/api/auth/me', {
+        const res = await fetchWithTimeout('/api/auth/me', {
           headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
         });
         const data = await res.json().catch(() => ({}));

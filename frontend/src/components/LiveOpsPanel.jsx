@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
-import { api, usePoll, fmt, fmtK, fmtAge, pnlCl } from '../utils';
+import { api, usePoll, fmt, fmtK, fmtAge, pnlCl, fetchWithTimeout } from '../utils';
 import { ExecScaffold, ExecStat, ExecTabs, CloseButton } from './execution/ExecScaffold';
 
 // Fire a real opposite-side IBKR market order to close one position row.
 // LONG -> SELL, SHORT -> BUY, qty = full position quantity.
 const fireCloseOrder = async (p) => {
   const action = p.side === 'LONG' ? 'SELL' : 'BUY';
-  const res = await fetch('/api/ib/place-order', {
+  const res = await fetchWithTimeout('/api/ib/place-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ symbol: p.ticker, action, quantity: Number(p.quantity), order_type: 'MKT' }),
-  });
+  }, 45000);
   const body = await res.json().catch(() => ({}));
   if (res.ok && body.success) return { ok: true, text: body.message || `${action} ${p.quantity} ${p.ticker} sent` };
   return { ok: false, text: body.detail || body.message || 'Order failed' };
@@ -133,11 +133,11 @@ const LiveFlattenCard = () => {
     setBusy(true);
     setMsg(null);
     try {
-      const res = await fetch('/api/ib/place-order', {
+      const res = await fetchWithTimeout('/api/ib/place-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol: sym, action, quantity: Number(f.qty), order_type: 'MKT' }),
-      });
+      }, 45000);
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.success) {
         setMsg({ type: 'success', text: body.message || `${action} ${f.qty} ${sym} sent` });

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
+import DbOutageBanner from './components/DbOutageBanner.jsx'
 
 // Redirect /:mode to /:mode/command
 function ModeRedirect() {
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <AppWrapper />
+      <DbOutageBanner />
     </BrowserRouter>
   </StrictMode>,
 )

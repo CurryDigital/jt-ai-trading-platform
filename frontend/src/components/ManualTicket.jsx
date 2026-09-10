@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { fetchWithTimeout } from '../utils';
 
 const ASSETS = ['STOCK', 'CRYPTO', 'FX'];
 const MARKETS = ['US', 'HK'];
@@ -72,7 +73,7 @@ export const ManualTicket = ({ book, prefill, onFilled }) => {
           setMsg({ type: 'error', text: body.detail || body.error || `Order failed (HTTP ${res.status})` });
         }
       } else {
-        const res = await fetch('/api/execution/manual-order', {
+        const res = await fetchWithTimeout('/api/execution/manual-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

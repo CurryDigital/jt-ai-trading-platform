@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { fetchWithTimeout } from '../utils';
 
 const REGIME_COLORS = {
   MEAN_REV: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
@@ -60,7 +61,7 @@ function usePoll(endpoint, intervalMs = 60000) {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const res = await fetch(endpoint);
+        const res = await fetchWithTimeout(endpoint, {}, 12000);
         if (!res.ok) throw new Error(`${res.status}`);
         const json = await res.json();
         if (!cancelled) {

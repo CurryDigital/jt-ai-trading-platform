@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { fetchWithTimeout } from '../utils';
 
 /**
  * Global Execution Mode Toggle
@@ -59,7 +60,7 @@ export const GlobalExecutionToggle = ({ mode: externalMode, onModeChange }) => {
 
   const fetchGlobalMode = async () => {
     try {
-      const res = await fetch('/api/execution/global-mode');
+      const res = await fetchWithTimeout('/api/execution/global-mode');
       if (res.ok) {
         const data = await res.json();
         setMode(data.execution_mode);
@@ -94,14 +95,14 @@ export const GlobalExecutionToggle = ({ mode: externalMode, onModeChange }) => {
     setMessage('Switching...');
     
     try {
-      const res = await fetch('/api/execution/global-mode', {
+      const res = await fetchWithTimeout('/api/execution/global-mode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           execution_mode: newMode,
           simulation_capital: simCapital
         })
-      });
+      }, 15000);
       
       if (res.ok) {
         const data = await res.json();
@@ -141,14 +142,14 @@ export const GlobalExecutionToggle = ({ mode: externalMode, onModeChange }) => {
   const updateSimCapital = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/execution/global-mode', {
+      const res = await fetchWithTimeout('/api/execution/global-mode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           execution_mode: mode,
           simulation_capital: parseFloat(simCapital)
         })
-      });
+      }, 15000);
       
       if (res.ok) {
         setShowConfig(false);

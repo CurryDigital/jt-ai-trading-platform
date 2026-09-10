@@ -4912,7 +4912,8 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
     # fall back to registry OOS columns.
     backtest_row = safe_query_one(db, """
         SELECT win_rate_oos, profit_factor_oos, sharpe_oos, max_drawdown_oos,
-               trade_count_oos, returns_oos
+               trade_count_oos, returns_oos,
+               annual_pnl_2024, annual_pnl_2025, annual_pnl_2026
         FROM gold.strategy_backtest_runs
         WHERE strategy_id = :sid
         ORDER BY run_number DESC, created_at DESC
@@ -5191,6 +5192,72 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
     monthly_returns = [{"year": int(r.year), "month": int(r.month),
                         "return": float(r.return_pct or 0)} for r in monthly_rows]
 
+    # ---- Yearly returns (SIM) + paper-book monthly/yearly realized returns ----
+    # SIM yearly must reconcile with the heatmap beside it, so prefer the
+    # annual_pnl_* of the SAME run the published monthly series was built from
+    # (gold.strategy_backtest_monthly_returns.run_id) — a newer backtest run can
+    # exist whose annuals differ from the published monthly series. Fallbacks:
+    # compound the monthly rows, then the latest run's annuals (aggregate-only
+    # strategies have no monthly rows at all).
+    yearly_sim = {}
+    _mr = safe_query_one(db, """
+        SELECT run_id FROM gold.strategy_backtest_monthly_returns
+        WHERE strategy_id = :sid
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, {"sid": strategy_id}, label="eval_monthly_run_id")
+    if _mr and _mr.run_id:
+        _ar = safe_query_one(db, """
+            SELECT annual_pnl_2024, annual_pnl_2025, annual_pnl_2026
+            FROM gold.strategy_backtest_runs
+            WHERE run_id = CAST(:rid AS uuid)
+        """, {"rid": str(_mr.run_id)}, label="eval_annual_same_run")
+        if _ar:
+            for _y in (2024, 2025, 2026):
+                _v = getattr(_ar, f"annual_pnl_{_y}", None)
+                if _v is not None:
+                    yearly_sim[_y] = float(_v)
+    if not yearly_sim and monthly_returns:
+        _by_year = {}
+        for _r in monthly_returns:
+            _by_year.setdefault(_r["year"], 1.0)
+            _by_year[_r["year"]] *= (1.0 + (_r["return"] or 0.0))
+        yearly_sim = {y: v - 1.0 for y, v in _by_year.items()}
+    if not yearly_sim and backtest_row:
+        for _y in (2024, 2025, 2026):
+            _v = getattr(backtest_row, f"annual_pnl_{_y}", None)
+            if _v is not None:
+                yearly_sim[_y] = float(_v)
+
+    # Paper monthly/yearly: realized P&L from the same ledger the Paper panel
+    # renders (gold.paper_trades_synthetic closed rows), normalized by the
+    # strategy's assigned capital. Simple sum (not compounded) — the capital
+    # base is fixed assigned capital, not a reinvested balance.
+    monthly_returns_paper = []
+    yearly_paper = {}
+    _capital_base = float(strategy.assigned_capital) if strategy.assigned_capital else None
+    if _capital_base and _capital_base > 0:
+        _p_rows = safe_query(db, """
+            SELECT EXTRACT(YEAR FROM exit_date)::int AS year,
+                   EXTRACT(MONTH FROM exit_date)::int AS month,
+                   SUM(pnl) AS month_pnl
+            FROM gold.paper_trades_synthetic
+            WHERE strategy_id = :sid
+              AND status = 'closed'
+              AND pnl IS NOT NULL
+              AND exit_date IS NOT NULL
+              AND (ticker IS NULL OR ticker != 'CASH')
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """, {"sid": strategy_id}, label="eval_monthly_returns_paper")
+        monthly_returns_paper = [{"year": int(r.year), "month": int(r.month),
+                                  "return": float(r.month_pnl or 0) / _capital_base}
+                                 for r in _p_rows]
+        _yp = {}
+        for r in _p_rows:
+            _yp[int(r.year)] = _yp.get(int(r.year), 0.0) + float(r.month_pnl or 0)
+        yearly_paper = {y: v / _capital_base for y, v in _yp.items()}
+
     # ---- Recent trades (last 50) ------------------------------------------
     # Exclude CASH placeholder trades from the ticker-level ledger.
     # For PAPER/SIMULATION strategies, gold.paper_trades_synthetic stores one row
@@ -5296,14 +5363,25 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
     # Per-trade OOS records from gold.strategy_backtest_trades. Not all
     # strategies have per-trade rows (portfolio-level backtests only store
     # aggregate metrics) — the UI shows an honest empty state in that case.
+    # Scoped to the SAME latest run the metrics header reads
+    # (run_number DESC, created_at DESC): without the run filter a re-run
+    # strategy renders its ledger twice (hk_ipo_day1_green_momentum_v1 showed
+    # 35 rows = 18 + 17 from two runs, with identical trades duplicated).
     bt_trade_rows = safe_query(db, """
-        SELECT entry_date, exit_date, ticker, entry_price, exit_price,
-               pnl_pct, holding_days, exit_reason
-        FROM gold.strategy_backtest_trades
-        WHERE strategy_id = :sid
-          AND period = 'OOS'
-          AND (ticker IS NULL OR ticker != 'CASH')
-        ORDER BY entry_date DESC
+        SELECT t.entry_date, t.exit_date, t.ticker, t.entry_price, t.exit_price,
+               t.pnl_pct, t.holding_days, t.exit_reason
+        FROM gold.strategy_backtest_trades t
+        JOIN (
+            SELECT run_id
+            FROM gold.strategy_backtest_runs
+            WHERE strategy_id = :sid
+            ORDER BY run_number DESC, created_at DESC
+            LIMIT 1
+        ) latest ON latest.run_id = t.run_id
+        WHERE t.strategy_id = :sid
+          AND t.period = 'OOS'
+          AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        ORDER BY t.entry_date DESC
         LIMIT :limit
     """, {"sid": strategy_id, "limit": trade_limit}, label="eval_bt_trades")
 
@@ -5441,6 +5519,11 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         },
         "equity_curve": equity_curve,
         "monthly_returns": monthly_returns,
+        "monthly_returns_paper": monthly_returns_paper,
+        "yearly_returns": {
+            "sim": {str(y): v for y, v in yearly_sim.items()},
+            "paper": {str(y): v for y, v in yearly_paper.items()},
+        },
         "recent_trades": recent_trades,
         "recent_signals": recent_signals,
         "backtest_trades": backtest_trades,

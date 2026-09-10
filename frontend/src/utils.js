@@ -79,6 +79,68 @@ const _authHeaders = () => {
 // API helpers with error handling and timeout
 const API_TIMEOUT_MS = 10000;
 
+// Drop-in fetch() replacement with a hard AbortController timeout. Returns the
+// raw Response (unlike api.get which returns parsed JSON) so existing
+// `res.ok` / `res.status` call-sites work unchanged. Throws on abort/network
+// error — callers already wrap in try/catch.
+export const fetchWithTimeout = async (url, opts = {}, ms = API_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+// DB health monitor: polls /api/system/health every 30s and exposes the last
+// known status app-wide, so an outage banner can render regardless of which
+// tab is mounted. Statuses: 'unknown' (no answer yet) | 'ok' | 'degraded'
+// (health answered but db != connected) | 'down' (health endpoint itself
+// unreachable/timed out — backend or edge dead).
+const DB_HEALTH_POLL_MS = 30000;
+const _dbHealth = { status: 'unknown', listeners: new Set() };
+let _dbHealthStarted = false;
+
+const _setDbHealth = (status) => {
+  if (_dbHealth.status === status) return;
+  _dbHealth.status = status;
+  _dbHealth.listeners.forEach(fn => { try { fn(status); } catch {} });
+};
+
+const _pollDbHealth = async () => {
+  try {
+    // 30s budget: on page load the browser's 6-per-origin connections are
+    // saturated by other hanging API calls, so the health poll can be queued
+    // behind ~10s of fail-fast aborts; the endpoint itself takes ~10s to
+    // answer 'degraded' when the DB pool is wedged. 30s lands the correct
+    // label (DATABASE vs BACKEND unreachable) on the first poll.
+    const res = await fetchWithTimeout('/api/system/health', {}, 30000);
+    if (!res.ok) { _setDbHealth('down'); return; }
+    const json = await res.json();
+    _setDbHealth(json && json.db === 'connected' && json.status === 'ok' ? 'ok' : 'degraded');
+  } catch {
+    _setDbHealth('down');
+  }
+};
+
+export const useDbHealth = () => {
+  const [status, setStatus] = useState(_dbHealth.status);
+  useEffect(() => {
+    if (!_dbHealthStarted) {
+      _dbHealthStarted = true;
+      _pollDbHealth();
+      setInterval(_pollDbHealth, DB_HEALTH_POLL_MS);
+    }
+    const fn = (s) => setStatus(s);
+    _dbHealth.listeners.add(fn);
+    // Re-sync in case status changed between render and subscribe
+    setStatus(_dbHealth.status);
+    return () => { _dbHealth.listeners.delete(fn); };
+  }, []);
+  return status;
+};
+
 // GET micro-cache + in-flight dedupe. Many components poll the same endpoints
 // (13 call-sites hit /api/execution/global-mode alone); sharing one request per
 // URL per 3s window collapses those duplicates without touching any component.
