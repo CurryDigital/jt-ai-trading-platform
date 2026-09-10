@@ -85,8 +85,6 @@ const CSS = `
 .ipo-btn-primary{background:#1b2230;color:#8b93a3;border-color:#1d2430;}
 .ipo-yr{font-size:11px;padding:4px 10px;border-radius:5px;border:1px solid #1d2430;color:#565e6c;cursor:pointer;background:transparent;}
 .ipo-yr.active{background:#12161f;color:#e6e8eb;border-color:#565e6c;}
-.ipo-note{font-size:11px;color:#565e6c;line-height:1.6;padding:12px 16px;border-top:1px solid #161b25;}
-.ipo-note code{font-family:ui-monospace,monospace;color:#8b93a3;background:#12161f;padding:1px 5px;border-radius:3px;}
 .ipo-sector-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #161b25;font-size:11px;}
 .ipo-sector-row:last-child{border-bottom:none;}
 .ipo-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px;}
@@ -166,14 +164,13 @@ const windowCutoff = (k) => {
   return d.toISOString().slice(0, 10);
 };
 
-const Panel = ({ title, tag, right, note, children, scroll }) => (
+const Panel = ({ title, tag, right, children, scroll }) => (
   <div className="ipo-panel">
     <div className="ipo-head">
       <div className="ipo-title">{title}{tag}</div>
       {right && <div style={{ fontSize: 10, color: '#565e6c' }}>{right}</div>}
     </div>
     {scroll ? <div style={{ overflowX: 'auto' }}>{children}</div> : children}
-    {note && <div className="ipo-note">{note}</div>}
   </div>
 );
 
@@ -891,7 +888,6 @@ export function IpoTab({ onOpen }) {
         tag={<Tag kind="live">LIVE</Tag>}
         right={`window: ${activeWindowLabel}`}
         scroll
-        note={<span>Average returns vs offer price (D1 / D20 / D40 / latest). Click a sector to list its IPOs on the right.</span>}
       >
         {sectorView.named.length === 0 ? (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>No classified sectors returned for this window.</div>
@@ -950,9 +946,6 @@ export function IpoTab({ onOpen }) {
             sector filter ×
           </span>
         ) : (watch ? `${watch.all.length} names` : '')}
-        note={sectorFilter
-          ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window — band not applied here. ◦ = open, marked to current.`
-          : `Rule mirror: oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td — the columns mirror the rule (P&L gross of costs); the strip stats above come from the P2 engine Simulation ledger (net, stop + weekly cap applied). All ${activeWindowLabel} IPOs shown; band flagged per row. ◦ = open, marked to current. D1/V3/P2 columns: per-strategy buy decision + when (engine round-trip when the ledger has one; hover a cell for the full rule).`}
       >
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
@@ -1014,7 +1007,6 @@ export function IpoTab({ onOpen }) {
         tag={<Tag kind="live">LIVE</Tag>}
         right={`${TODAY} UTC`}
         scroll
-        note={<span>Stages classified from application window vs listing date. ANNOUNCED = A1/PHIP filings (<code>qr_etl t_59228b1e</code>); open-window oversub pending (<code>qr_etl t_90585bf2</code>). Stage lists scroll — ANNOUNCED runs long. RECENT IPOs = listed ≤ 90d, newest first.</span>}
       >
         <div className="ipo-stages">
           {STAGES.map((st, i) => {
