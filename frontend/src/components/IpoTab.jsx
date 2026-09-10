@@ -90,12 +90,17 @@ const CSS = `
 .ipo-sector-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #161b25;font-size:11px;}
 .ipo-sector-row:last-child{border-bottom:none;}
 .ipo-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px;}
-.ipo-split{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px;align-items:start;}
+.ipo-split{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:16px;align-items:start;}
 .ipo-split>*{min-width:0;}
-@media (max-width:1200px){.ipo-split{grid-template-columns:minmax(0,1fr);}}
-/* ticker column stays put while the 13-col table scrolls horizontally */
+@media (max-width:1400px){.ipo-split{grid-template-columns:minmax(0,1fr);}}
+/* ticker column stays put if the table still overflows horizontally */
 .ipo-tbl .ipo-stick{position:sticky;left:0;background:#10141c;z-index:2;}
 .ipo-tbl thead .ipo-stick{z-index:3;}
+/* compact rule-mirror watch table — sized to fit the split column without scrolling */
+.ipo-tbl-compact th{padding:5px 6px;font-size:9px;}
+.ipo-tbl-compact td{padding:5px 6px;font-size:11px;}
+.ipo-tbl-compact .ipo-name,.ipo-tbl-compact .ipo-name-en{max-width:100px;overflow:hidden;text-overflow:ellipsis;}
+.ipo-tbl-compact .ipo-pill{padding:2px 6px;}
 .ipo-stage{border:1px solid #161b25;border-radius:8px;padding:10px 12px;cursor:pointer;background:#0d1118;text-align:left;}
 .ipo-stage:hover{border-color:#2a3242;}
 .ipo-stage.active{border-color:#565e6c;background:#12161f;}
@@ -183,7 +188,7 @@ const Stat = ({ label, value, sub, green }) => (
 );
 
 const NameCell = ({ zh, en }) => (
-  <td>
+  <td title={zh && en ? `${zh} · ${en}` : (zh || en || undefined)}>
     <div className="ipo-name">{zh || en || '—'}</div>
     {zh && en
       ? <div className="ipo-name-en">{en}</div>
@@ -429,10 +434,10 @@ const StratDecisionCell = ({ r, tr, strat }) => {
     const tip = `${strat.name}: engine bought ${tr.entry_date}${open ? ' · position open' : ` · sold ${tr.exit_date}`}${pnl != null ? ` · P&L ${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(1)}%${tr.pnl_pct == null ? ' (unrealized)' : ''}` : ''}`;
     return (
       <td className="num" title={tip}>
-        <div style={{ fontWeight: 600 }}>B {mmdd(tr.entry_date)} → {open ? 'open' : `S ${mmdd(tr.exit_date)}`}</div>
-        <div className={sgnCl(pnl != null ? pnl * 100 : null)} style={{ fontSize: 9 }}>
+        <div className={sgnCl(pnl != null ? pnl * 100 : null)} style={{ fontWeight: 600 }}>
           {pnl != null ? <>{pnl >= 0 ? '+' : ''}{(pnl * 100).toFixed(1)}%{tr.pnl_pct == null ? ' ◦' : ''}</> : '—'}
         </div>
+        <div style={{ fontSize: 9, color: '#565e6c' }}>B {mmdd(tr.entry_date)} → {open ? 'open' : `S ${mmdd(tr.exit_date)}`}</div>
       </td>
     );
   }
@@ -441,26 +446,26 @@ const StratDecisionCell = ({ r, tr, strat }) => {
     const t = d.trade;
     return (
       <td className="num" title={d.tip}>
-        <div style={{ fontWeight: 600 }}>B {mmdd(t.buy)} → S {mmdd(t.sell)}{t.sellEst ? ' ≈' : ''}</div>
-        <div className={sgnCl(t.pnl)} style={{ fontSize: 9 }}>
+        <div className={sgnCl(t.pnl)} style={{ fontWeight: 600 }}>
           {t.pnl != null
             ? <>{signed(t.pnl)}{t.pnlKind === 'open' ? ' ◦' : ''}</>
             : <span style={{ color: '#565e6c' }}>{d.sub || (r.phase === 'ahead' || r.phase === 'pre_listing' ? 'awaiting entry' : '—')}</span>}
         </div>
+        <div style={{ fontSize: 9, color: '#565e6c' }}>B {mmdd(t.buy)} → S {mmdd(t.sell)}{t.sellEst ? ' ≈' : ''}</div>
       </td>
     );
   }
   const color = d.word === 'SKIP' ? '#565e6c' : '#8b93a3';
   return (
     <td className="num" title={d.tip}>
-      <div style={{ fontWeight: 600, color }}>{d.word}{d.date ? ` ${mmdd(d.date)}` : ''}</div>
-      {d.sub ? <div style={{ fontSize: 9, color: '#565e6c' }}>{d.sub}</div> : null}
+      <div style={{ fontWeight: 600, color, fontSize: 10 }}>{d.word}{d.date ? ` ${mmdd(d.date)}` : ''}</div>
+      {d.sub ? <div style={{ fontSize: 9, color: '#565e6c', maxWidth: 92, whiteSpace: 'normal', lineHeight: 1.3, textAlign: 'right' }}>{d.sub}</div> : null}
     </td>
   );
 };
 
 const WatchTable = ({ rows, stratTrades = {} }) => (
-  <table className="ipo-tbl">
+  <table className="ipo-tbl ipo-tbl-compact">
     <thead>
       <tr>
         <th className="ipo-stick">Ticker</th><th>Name</th><th className="num">Oversub</th>
@@ -477,7 +482,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
       {rows.map(r => (
         <tr key={r.ticker}>
           <td className="ipo-ticker ipo-stick">{r.ticker}
-            <div style={{ fontSize: 9, color: '#565e6c', fontWeight: 400 }} title="Listing date — the list is ordered by this, newest first">listed {r.listing_date}</div>
+            <div style={{ fontSize: 9, color: '#565e6c', fontWeight: 400 }} title={`Listed ${r.listing_date} — the list is ordered by this, newest first`}>{r.listing_date}</div>
           </td>
           <NameCell zh={r.stock_name_zh} en={r.stock_name} />
           <td className="num">{r.oversubscription_retail != null
@@ -490,7 +495,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
                 )}
               </>
             : r.phase === 'pre_listing'
-              ? <span className="ipo-faint" title="Retail oversubscription is published at allotment (~1 trading day before listing) — the 100–500x band is undecidable until then (qr_etl t_90585bf2)">band at allotment</span>
+              ? <span className="ipo-faint" style={{ display: 'inline-block', maxWidth: 80, whiteSpace: 'normal', lineHeight: 1.3 }} title="Retail oversubscription is published at allotment (~1 trading day before listing) — the 100–500x band is undecidable until then (qr_etl t_90585bf2)">band at allotment</span>
               : '—'}</td>
           <td className="num">{r.ipoPx != null ? num(r.ipoPx) : '—'}</td>
           <td className="num">{num(r.first_day_close)}</td>
@@ -499,15 +504,15 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
             <StratDecisionCell key={c.id} r={r} tr={(stratTrades[c.id] || {})[r.ticker]} strat={c} />
           ))}
           <td>{r.phase === 'in_hold'
-            ? <span className="ipo-pill ipo-st-hold">IN HOLD WINDOW</span>
+            ? <span className="ipo-pill ipo-st-hold">IN HOLD</span>
             : r.phase === 'ahead'
-              ? <span className="ipo-pill ipo-st-open">ENTRY IN {r.daysToEntry}d</span>
+              ? <span className="ipo-pill ipo-st-open">ENTRY {r.daysToEntry}d</span>
               : r.phase === 'pre_listing'
                 ? <div>
-                    <span className="ipo-pill ipo-st-listing">{r.daysToListing === 0 ? 'LISTS TODAY' : `LISTS IN ${r.daysToListing}d`}</span>
-                    <div style={{ fontSize: 9, color: '#565e6c', marginTop: 3 }}>listing {r.listing_date}</div>
+                    <span className="ipo-pill ipo-st-listing">{r.daysToListing === 0 ? 'LISTS TODAY' : `LISTS ${r.daysToListing}d`}</span>
+                    <div style={{ fontSize: 9, color: '#565e6c', marginTop: 3 }}>{r.listing_date}</div>
                   </div>
-                : <span className="ipo-pill ipo-st-exit">CLOSED {r.exit}</span>}</td>
+                : <span className="ipo-pill ipo-st-exit">CLOSED {mmdd(r.exit)}</span>}</td>
         </tr>
       ))}
     </tbody>
@@ -786,6 +791,25 @@ export function IpoTab({ onOpen }) {
     return map;
   }, [evals]);
 
+  // Strip stats aligned with the P2 Simulation ledger: same source
+  // (gold.strategy_backtest_trades via the evaluation endpoint), same window
+  // filter (exits on/after the window cutoff). The mirror cohort below
+  // (watch.stats) is gross of costs and has no stop/weekly-cap, so its avg/sum
+  // can never reconcile with the ledger — the ledger is the truth, the mirror
+  // table stays for per-name rule mechanics.
+  const p2Stats = useMemo(() => {
+    const ts = evals['hk_ipo_postlisting_drift_p2']?.backtest_trades;
+    if (!ts) return null;
+    const cutoff = windowCutoff(ipoWindow);
+    const closed = ts.filter(t => t.exit_date && t.exit_date >= cutoff && t.pnl_pct != null);
+    if (!closed.length) return null;
+    const pnls = closed.map(t => t.pnl_pct * 100);
+    const wins = pnls.filter(p => p > 0).length;
+    const sum = pnls.reduce((a, b) => a + b, 0);
+    const open = ts.filter(t => !t.exit_date).length;
+    return { n: closed.length, wins, winRate: wins / closed.length * 100, avg: sum / closed.length, sum, open };
+  }, [evals, ipoWindow]);
+
   const adjustAllocation = async (s) => {
     const cur = s.assigned_capital != null ? Number(s.assigned_capital) : null;
     const input = window.prompt(`New total assigned capital for ${s.id} (current ${cur != null ? '$' + cur.toLocaleString() : 'unassigned'}):`, cur ?? '');
@@ -928,7 +952,7 @@ export function IpoTab({ onOpen }) {
         ) : (watch ? `${watch.all.length} names` : '')}
         note={sectorFilter
           ? `All ${sectorFilter} IPOs listed in the ${activeWindowLabel} window — band not applied here. ◦ = open, marked to current.`
-          : `Rule mirror: oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td — not the engine signal; P&L gross of costs (engine nets ~0.3pp). All ${activeWindowLabel} IPOs shown; band flagged per row. ◦ = open, marked to current. D1/V3/P2 columns: per-strategy buy decision + when (engine round-trip when the ledger has one; hover a cell for the full rule).`}
+          : `Rule mirror: oversub ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x · enter +${DRIFT_RULE.entryTd}td · hold ${DRIFT_RULE.holdTd}td — the columns mirror the rule (P&L gross of costs); the strip stats above come from the P2 engine Simulation ledger (net, stop + weekly cap applied). All ${activeWindowLabel} IPOs shown; band flagged per row. ◦ = open, marked to current. D1/V3/P2 columns: per-strategy buy decision + when (engine round-trip when the ledger has one; hover a cell for the full rule).`}
       >
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
@@ -939,15 +963,35 @@ export function IpoTab({ onOpen }) {
                 </span>
               </div>
             )}
-            {watch.stats && (
+            {!sectorFilter && p2Stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
-                <span title="Closed rule-mirror round-trips, in-band cohort only">{watch.stats.n} in-band closed round-trips</span>
+                <span title="Closed P2 engine round-trips from the Simulation ledger (gold.strategy_backtest_trades) with exit in the selected window — net of costs, −10% stop and 1-per-listing-week cap applied. Matches the P2 strategy tab's Simulation ledger.">{p2Stats.n} closed engine round-trips · P2 ledger</span>
+                <span>win {p2Stats.wins}/{p2Stats.n} ({p2Stats.winRate.toFixed(0)}%)</span>
+                <span>avg <span className={sgnCl(p2Stats.avg)}>{signed(p2Stats.avg)}</span></span>
+                <span>sum <span className={sgnCl(p2Stats.sum)}>{signed(p2Stats.sum)}</span></span>
+                {p2Stats.open > 0 && <span>{p2Stats.open} open (ledger, unrealized)</span>}
+                {watch.counts.inHold > 0 && <span>{watch.counts.inHold} mirror in hold window</span>}
+                {watch.counts.ahead > 0 && <span>{watch.counts.ahead} awaiting entry</span>}
+                {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
+              </div>
+            )}
+            {!sectorFilter && !p2Stats && watch.stats && (
+              <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
+                <span title="Closed rule-mirror round-trips, in-band cohort only (engine ledger unavailable — gross of costs, no stop/weekly-cap)">{watch.stats.n} in-band closed round-trips</span>
                 <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
                 <span>avg <span className={sgnCl(watch.stats.avg)}>{signed(watch.stats.avg)}</span></span>
                 <span>sum <span className={sgnCl(watch.stats.sum)}>{signed(watch.stats.sum)}</span></span>
                 {watch.counts.inHold > 0 && <span>{watch.counts.inHold} open (marked to current)</span>}
                 {watch.counts.ahead > 0 && <span>{watch.counts.ahead} awaiting entry</span>}
                 {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
+              </div>
+            )}
+            {sectorFilter && watch.stats && (
+              <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
+                <span title="Closed rule-mirror round-trips in this sector (band not applied in drill-down)">{watch.stats.n} closed round-trips</span>
+                <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
+                <span>avg <span className={sgnCl(watch.stats.avg)}>{signed(watch.stats.avg)}</span></span>
+                <span>sum <span className={sgnCl(watch.stats.sum)}>{signed(watch.stats.sum)}</span></span>
               </div>
             )}
             <div style={{ maxHeight: 560, overflow: 'auto' }}>
