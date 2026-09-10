@@ -455,7 +455,7 @@ const StratDecisionCell = ({ r, tr, strat }) => {
       </td>
     );
   }
-  const color = d.word === 'SKIP' ? '#565e6c' : '#8b93a3';
+  const color = d.word === 'SKIP' ? '#565e6c' : '#e6e8eb';
   return (
     <td className="num" title={d.tip}>
       <div style={{ fontWeight: 600, color, fontSize: 10 }}>{d.word}{d.date ? ` ${mmdd(d.date)}` : ''}</div>
