@@ -825,30 +825,6 @@ export function IpoTab({ onOpen }) {
     return 'announced';
   })();
 
-  // IPO KPIs — recomputed over the global window (client-side listing-date filter)
-  const stats = useMemo(() => {
-    if (!ipos || !ipos.length) return null;
-    const cutoff = windowCutoff(ipoWindow);
-    const win = ipos.filter(r => r.listing_date && r.listing_date >= cutoff);
-    const fd = win.map(r => r.first_day_return).filter(v => v != null);
-    const d30 = win.map(r => r.return_day30).filter(v => v != null);
-    return {
-      n: win.length,
-      window: `${cutoff} → ${TODAY}`,
-      fdN: fd.length,
-      fdAvg: fd.length ? fd.reduce((a, b) => a + b, 0) / fd.length : null,
-      fdMed: median(fd),
-      fdWin: fd.length ? (fd.filter(v => v > 0).length / fd.length) * 100 : null,
-      d30N: d30.length,
-      d30Avg: d30.length ? d30.reduce((a, b) => a + b, 0) / d30.length : null,
-    };
-  }, [ipos, ipoWindow]);
-
-  const sectorView = useMemo(() => ({
-    named: sectors.filter(s => s.sector),
-    unclassified: sectors.find(s => !s.sector),
-  }), [sectors]);
-
   const activeWindowLabel = WINDOWS.find(w => w.k === ipoWindow)?.label || ipoWindow;
 
   // ticker list (rule-mirror windows, or sector drill-down when a sector row is clicked)
@@ -871,6 +847,93 @@ export function IpoTab({ onOpen }) {
     }
     return map;
   }, [evals]);
+
+  // Global filter cohort — the CALL / STRATEGY TRADES chips in the top bar
+  // apply to ALL panels (ticker list, KPI strip, IPO SENTIMENT). A row's
+  // call needs the watchRow enrichment (entry/exit/phase + ipoPx), so the
+  // cohort is built once here; every panel derives from it.
+  const cohort = useMemo(() => {
+    if (!ipos) return null;
+    const cutoff = windowCutoff(ipoWindow);
+    const all = ipos
+      .filter(r => r.listing_date && r.listing_date >= cutoff)
+      .map(r => {
+        const w = watchRow(r) || {};
+        const row = { ...r, ...w };
+        return { r: row, call: rowConclusion(row, stratTrades).word };
+      });
+    const callCounts = {};
+    for (const x of all) callCounts[x.call] = (callCounts[x.call] || 0) + 1;
+    const stratCounts = {};
+    for (const c of STRAT_COLS)
+      stratCounts[c.id] = all.filter(x => stratTradeOf(c.id, x.r, (stratTrades[c.id] || {})[x.r.ticker])).length;
+    const active = callFilter !== 'ALL' || !!stratFilter;
+    const filtered = active
+      ? all.filter(x =>
+          (callFilter === 'ALL' || x.call === callFilter) &&
+          (!stratFilter || stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker])))
+      : all;
+    return { all, filtered, active, callCounts, stratCounts };
+  }, [ipos, ipoWindow, stratTrades, callFilter, stratFilter]);
+
+  // IPO KPIs — over the global window; the filtered cohort when the CALL /
+  // STRATEGY chips are engaged (same fields, smaller N).
+  const stats = useMemo(() => {
+    if (!cohort) return null;
+    const cutoff = windowCutoff(ipoWindow);
+    const win = cohort.filtered.map(x => x.r);
+    const fd = win.map(r => r.first_day_return).filter(v => v != null);
+    const d30 = win.map(r => r.return_day30).filter(v => v != null);
+    return {
+      n: win.length,
+      window: `${cutoff} → ${TODAY}`,
+      filtered: cohort.active,
+      fdN: fd.length,
+      fdAvg: fd.length ? fd.reduce((a, b) => a + b, 0) / fd.length : null,
+      fdMed: median(fd),
+      fdWin: fd.length ? (fd.filter(v => v > 0).length / fd.length) * 100 : null,
+      d30N: d30.length,
+      d30Avg: d30.length ? d30.reduce((a, b) => a + b, 0) / d30.length : null,
+    };
+  }, [cohort, ipoWindow]);
+
+  // IPO SENTIMENT — server-side aggregation normally; when the filters are
+  // engaged, re-aggregate the filtered cohort client-side by sector with the
+  // same column semantics (D40/Now via retCols — same basis as the server).
+  const filteredSectorView = useMemo(() => {
+    if (!cohort || !cohort.active) return null;
+    const bySector = {};
+    for (const { r } of cohort.filtered) {
+      const k = r.sector || '';
+      (bySector[k] = bySector[k] || []).push(r);
+    }
+    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+    const rows = Object.entries(bySector).map(([sector, rs]) => {
+      const fd = rs.map(r => r.first_day_return).filter(v => v != null);
+      const d20 = rs.map(r => r.return_day20).filter(v => v != null);
+      const rc = rs.map(retCols);
+      const d40 = rc.map(x => x.d40).filter(v => v != null);
+      const now = rc.map(x => x.now).filter(v => v != null);
+      return {
+        sector: sector || null,
+        ipo_count: rs.length,
+        avg_first_day_return: avg(fd),
+        avg_day20_return: avg(d20), day20_n: d20.length,
+        avg_day40_return: avg(d40), day40_n: d40.length,
+        avg_current_return: avg(now), current_n: now.length,
+        win_rate: fd.length ? fd.filter(v => v > 0).length / fd.length * 100 : null,
+      };
+    }).sort((a, b) => b.ipo_count - a.ipo_count);
+    return {
+      named: rows.filter(s => s.sector),
+      unclassified: rows.find(s => !s.sector) || null,
+    };
+  }, [cohort]);
+
+  const sectorView = useMemo(() => filteredSectorView || ({
+    named: sectors.filter(s => s.sector),
+    unclassified: sectors.find(s => !s.sector),
+  }), [filteredSectorView, sectors]);
 
   // Filtered ticker-list view: CALL filter (rowConclusion word per row) and
   // STRATEGY TRADES filter (only names that strategy entered — engine ledger
@@ -975,13 +1038,39 @@ export function IpoTab({ onOpen }) {
         </div>
       )}
 
-      {/* global window toggle — drives IPO SENTIMENT (server-side) and the IPO KPIs strip (client-side) */}
-      <div className="ipo-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', fontWeight: 600 }}>WINDOW — APPLIES TO ALL PANELS</div>
-        <span style={{ display: 'flex', gap: 6 }}>
+      {/* global filter bar — WINDOW drives IPO SENTIMENT (server-side) + KPIs (client-side);
+          CALL / STRATEGY TRADES additionally filter the ticker list, and re-aggregate the
+          KPI strip + IPO SENTIMENT over the filtered cohort */}
+      <div className="ipo-panel" style={{ display: 'flex', alignItems: 'center', padding: '10px 16px', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 10, color: '#565e6c', letterSpacing: '.4px', fontWeight: 600 }}>FILTERS — APPLY TO ALL PANELS</div>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>WINDOW</span>
           {WINDOWS.map(w => (
             <button key={w.k} className={`ipo-yr ${ipoWindow === w.k ? 'active' : ''}`} onClick={() => setIpoWindow(w.k)}>
               {w.label}
+            </button>
+          ))}
+        </span>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>CALL</span>
+          {[['ALL', 'Every name in scope'],
+            ['BUY', 'A strategy rule fires or the round-trip is still in its hold window'],
+            ['SELL', 'An exit leg has fired — the position should be out'],
+            ['WATCH', 'An input is not published yet (oversub at allotment, D1 close)'],
+            ['SKIP', 'Every strategy skips the name']].map(([k, tip]) => (
+            <button key={k} className={`ipo-yr ${callFilter === k ? 'active' : ''}`} onClick={() => setCallFilter(k)} title={tip}>
+              {k}{k !== 'ALL' && cohort ? ` ${cohort.callCounts[k] || 0}` : ''}
+            </button>
+          ))}
+        </span>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>STRATEGY TRADES</span>
+          <button className={`ipo-yr ${!stratFilter ? 'active' : ''}`} onClick={() => setStratFilter(null)} title="No strategy filter">ALL</button>
+          {STRAT_COLS.map(c => (
+            <button key={c.id} className={`ipo-yr ${stratFilter === c.id ? 'active' : ''}`}
+              onClick={() => setStratFilter(f => f === c.id ? null : c.id)}
+              title={`${c.name} — every panel shows only the names this strategy actually entered (engine ledger trade, else rule-mirror round-trip). The ticker list strip shows its closed round-trip performance on those names.`}>
+              {c.tag}{cohort ? ` ${cohort.stratCounts[c.id] || 0}` : ''}
             </button>
           ))}
         </span>
@@ -990,7 +1079,7 @@ export function IpoTab({ onOpen }) {
       {/* stats strip — IPO KPIs, filtered by the global window */}
       {stats && (
         <div className="ipo-kpi-grid">
-          <Stat label={`IPOS · ${activeWindowLabel}`} value={stats.n} sub={stats.window} />
+          <Stat label={`IPOS · ${activeWindowLabel}${stats.filtered ? ' · FILTERED' : ''}`} value={stats.n} sub={stats.window} />
           <Stat label="AVG FIRST-DAY" value={stats.fdAvg == null ? '—' : fmtPct(stats.fdAvg)} sub={`measured on ${stats.fdN} of ${stats.n}`} green={stats.fdAvg > 0} />
           <Stat label="MEDIAN FIRST-DAY" value={stats.fdMed == null ? '—' : fmtPct(stats.fdMed)} sub="median, measured rows" green={stats.fdMed > 0} />
           <Stat label="FIRST-DAY WIN RATE" value={stats.fdWin == null ? '—' : `${stats.fdWin.toFixed(0)}%`} sub={`${stats.fdN} priced`} />
@@ -1006,7 +1095,7 @@ export function IpoTab({ onOpen }) {
       <Panel
         title="IPO SENTIMENT · SECTOR BREAKDOWN"
         tag={<Tag kind="live">LIVE</Tag>}
-        right={`window: ${activeWindowLabel}`}
+        right={`window: ${activeWindowLabel}${cohort?.active ? ' · filtered cohort' : ''}`}
         scroll
       >
         {sectorView.named.length === 0 ? (
@@ -1069,32 +1158,6 @@ export function IpoTab({ onOpen }) {
       >
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
-            {/* CALL + STRATEGY TRADES filters — same ipo-yr chip style as the global window toggle */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, margin: '8px 16px 0', flexWrap: 'wrap' }}>
-              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>CALL</span>
-                {[['ALL', 'Every name in scope'],
-                  ['BUY', 'A strategy rule fires or the round-trip is still in its hold window'],
-                  ['SELL', 'An exit leg has fired — the position should be out'],
-                  ['WATCH', 'An input is not published yet (oversub at allotment, D1 close)'],
-                  ['SKIP', 'Every strategy skips the name']].map(([k, tip]) => (
-                  <button key={k} className={`ipo-yr ${callFilter === k ? 'active' : ''}`} onClick={() => setCallFilter(k)} title={tip}>
-                    {k}{k !== 'ALL' && watchView ? ` ${watchView.callCounts[k] || 0}` : ''}
-                  </button>
-                ))}
-              </span>
-              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>STRATEGY TRADES</span>
-                <button className={`ipo-yr ${!stratFilter ? 'active' : ''}`} onClick={() => setStratFilter(null)} title="No strategy filter">ALL</button>
-                {STRAT_COLS.map(c => (
-                  <button key={c.id} className={`ipo-yr ${stratFilter === c.id ? 'active' : ''}`}
-                    onClick={() => setStratFilter(f => f === c.id ? null : c.id)}
-                    title={`${c.name} — show only the names this strategy actually entered (engine ledger trade, else rule-mirror round-trip). The strip below shows its closed round-trip performance on those names.`}>
-                    {c.tag}
-                  </button>
-                ))}
-              </span>
-            </div>
             {stratFilter && watchView?.stratPerf && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Names the selected strategy entered, in the current window/sector scope. Closed round-trips: engine ledger trade when one exists (net of costs), else the rule-mirror legs (gross of costs, no stop/weekly-cap).">
