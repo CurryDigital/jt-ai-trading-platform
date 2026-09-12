@@ -456,26 +456,57 @@ const PctCell = ({ v, tip }) => (
 const rowConclusion = (r, stratTrades) => {
   const parts = STRAT_COLS.map(c => {
     const tr = (stratTrades[c.id] || {})[r.ticker];
-    if (tr) return { tag: c.tag, kind: tr.exit_date == null ? 'buy' : 'sell', why: `engine ledger ${tr.exit_date == null ? 'open' : 'closed'}` };
+    if (tr) {
+      const open = tr.exit_date == null;
+      return { tag: c.tag, kind: open ? 'buy' : 'sell', why: `engine ledger ${open ? 'open' : 'closed'}`,
+        dateKind: 'exit', date: open ? null : tr.exit_date, est: false };
+    }
     const d = stratDecision(c.id, r);
     if (d.trade) {
-      if (d.trade.pnlKind === 'realized' || d.word === 'BOUGHT' && r.phase === 'passed') return { tag: c.tag, kind: 'sell', why: 'exit leg fired' };
-      return { tag: c.tag, kind: 'buy', why: d.word === 'BOUGHT' ? 'in hold window' : `rule fires · entry ${mmdd(d.trade.buy)}` };
+      if (d.trade.pnlKind === 'realized' || d.word === 'BOUGHT' && r.phase === 'passed')
+        return { tag: c.tag, kind: 'sell', why: 'exit leg fired', dateKind: 'exit', date: d.trade.sell, est: d.trade.sellEst };
+      if (d.word === 'BOUGHT') // in hold — the key date is the upcoming exit
+        return { tag: c.tag, kind: 'buy', why: 'in hold window', dateKind: 'exit', date: d.trade.sell, est: d.trade.sellEst };
+      return { tag: c.tag, kind: 'buy', why: `rule fires · entry ${mmdd(d.trade.buy)}`, dateKind: 'buy', date: d.trade.buy, est: r.entryEstimated };
     }
-    if (d.word === 'WATCH') return { tag: c.tag, kind: 'watch', why: d.sub || 'input pending' };
+    if (d.word === 'WATCH') return { tag: c.tag, kind: 'watch', why: d.sub || 'input pending', dateKind: 'watch', date: d.date || null, est: false };
     return { tag: c.tag, kind: 'skip', why: d.sub || 'rule skips' };
   });
   const tip = parts.map(p => `${p.tag}: ${p.kind.toUpperCase()} — ${p.why}`).join(' · ');
   const pick = (kind) => parts.filter(p => p.kind === kind);
   const buyers = pick('buy'), sellers = pick('sell'), watchers = pick('watch');
-  if (buyers.length) return { word: 'BUY', sub: buyers.map(p => p.tag).join('+'), tip };
-  if (sellers.length) return { word: 'SELL', sub: `${sellers.map(p => p.tag).join('+')} exit`, tip };
-  if (watchers.length) return { word: 'WATCH', sub: watchers.map(p => p.tag).join('+'), tip };
-  return { word: 'SKIP', sub: null, tip };
+  // key date = the earliest dated action among the driving strategies:
+  // B = entry upcoming · S = exit (fired for SELL calls, upcoming for holds)
+  // · W = the date the pending input publishes and the call becomes decidable
+  const keyOf = (list) => {
+    const dated = list.filter(p => p.date).sort((a, b) => a.date.localeCompare(b.date));
+    if (!dated.length) return null;
+    const p = dated[0];
+    return { kind: p.dateKind, date: p.date, est: p.est };
+  };
+  if (buyers.length) return { word: 'BUY', sub: buyers.map(p => p.tag).join('+'), tip, key: keyOf(buyers) };
+  if (sellers.length) return { word: 'SELL', sub: `${sellers.map(p => p.tag).join('+')} exit`, tip, key: keyOf(sellers) };
+  if (watchers.length) return { word: 'WATCH', sub: watchers.map(p => p.tag).join('+'), tip, key: keyOf(watchers) };
+  return { word: 'SKIP', sub: null, tip, key: null };
 };
 
-const ConclusionCell = ({ r, stratTrades }) => {
-  const c = rowConclusion(r, stratTrades);
+const KEY_TIP = {
+  buy: 'Key date — BUY at this close (≈ = calendar estimate until the +20td close is measured)',
+  exit: 'Key date — SELL at this close. Fired already for SELL calls; upcoming for positions still in the hold window (≈ = estimate)',
+  watch: 'Key date — the pending input publishes around this date and the call becomes decidable',
+};
+
+const KeyDateCell = ({ c }) => (
+  <td className="num" title={c.key ? KEY_TIP[c.key.kind] : 'No actionable date — every strategy skips this name'}>
+    {c.key
+      ? <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 10, color: '#c8ced8', whiteSpace: 'nowrap' }}>
+          {c.key.kind === 'buy' ? 'B' : c.key.kind === 'exit' ? 'S' : 'W'} {mmdd(c.key.date)}{c.key.est ? ' ≈' : ''}
+        </span>
+      : <span className="ipo-faint">—</span>}
+  </td>
+);
+
+const ConclusionCell = ({ c }) => {
   const color = c.word === 'SKIP' ? '#565e6c' : c.word === 'WATCH' ? '#9aa3af' : '#e6e8eb';
   return (
     <td className="num" title={c.tip}>
@@ -557,11 +588,13 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
           <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: the strategy's round-trip — B <buy date> → S <sell date> plus P&L % once the exit has triggered (◦ = open, marked to current; engine ledger trade when one exists, else rule mirror) · SKIP = condition fails · WATCH = input not published yet.`}>{c.tag}</th>
         ))}
         <th className="num" title="Aggregate of the D1 / V3 / P2 decisions — BUY = a rule fires or the round-trip is still in its hold window · SELL = the exit leg has fired · WATCH = inputs not published yet · SKIP = every strategy skips. Hover for the per-strategy breakdown.">Call</th>
+        <th className="num" title="The next actionable date for this name — B = buy at that close · S = sell at that close (fired for SELL calls, upcoming for holds) · W = the date the pending input publishes. Earliest date across the driving strategies; ≈ = calendar estimate.">Key date</th>
       </tr>
     </thead>
     <tbody>
       {rows.map(r => {
         const rc = retCols(r);
+        const concl = rowConclusion(r, stratTrades);
         return (
         <tr key={r.ticker}>
           <td className="ipo-ticker ipo-stick">{r.ticker}
@@ -590,7 +623,8 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
           {STRAT_COLS.map(c => (
             <StratDecisionCell key={c.id} r={r} tr={(stratTrades[c.id] || {})[r.ticker]} strat={c} />
           ))}
-          <ConclusionCell r={r} stratTrades={stratTrades} />
+          <ConclusionCell c={concl} />
+          <KeyDateCell c={concl} />
         </tr>
         );
       })}
