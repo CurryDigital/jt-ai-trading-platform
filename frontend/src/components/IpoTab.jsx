@@ -485,6 +485,20 @@ const ConclusionCell = ({ r, stratTrades }) => {
   );
 };
 
+// The strategy's engagement with a row, for the STRATEGY TRADES filter and
+// its performance strip: engine ledger trade wins (pnl_pct is a fraction →
+// ×100), else the rule-mirror decision. Returns null when the strategy does
+// not enter the name (SKIP/WATCH) — those rows drop out of the filtered list.
+const stratTradeOf = (stratId, r, tr) => {
+  if (tr) {
+    const pnl = tr.pnl_pct != null ? tr.pnl_pct * 100 : (tr.unrealized_pnl_pct != null ? tr.unrealized_pnl_pct * 100 : null);
+    return { pnl, closed: tr.exit_date != null };
+  }
+  const d = stratDecision(stratId, r);
+  if (!d.trade) return null;
+  return { pnl: d.trade.pnl, closed: d.trade.pnlKind === 'realized' };
+};
+
 // Per-strategy cell: the strategy's round-trip in the name. When the engine's
 // backtest ledger has a trade it wins; otherwise the rule-mirror legs. Entered
 // strategies show B <buy date> → S <sell date> and the P&L % once the exit
@@ -745,6 +759,8 @@ export function IpoTab({ onOpen }) {
   const [book, setBook] = useState(null);
   const [stage, setStage] = useState(null); // null = auto-pick once data lands
   const [sectorFilter, setSectorFilter] = useState(null); // click a sector row → filters the strategy rule-mirror list
+  const [callFilter, setCallFilter] = useState('ALL'); // ALL | BUY | SELL | WATCH | SKIP — rowConclusion word
+  const [stratFilter, setStratFilter] = useState(null); // null | STRAT_COLS id — only names that strategy entered
   const [actionMsg, setActionMsg] = useState(null);
 
   const load = useCallback(async () => {
@@ -855,6 +871,42 @@ export function IpoTab({ onOpen }) {
     }
     return map;
   }, [evals]);
+
+  // Filtered ticker-list view: CALL filter (rowConclusion word per row) and
+  // STRATEGY TRADES filter (only names that strategy entered — engine ledger
+  // trade or rule-mirror round-trip). stratPerf = the selected strategy's
+  // closed round-trip performance across ALL in-scope rows it entered (not
+  // just the call-filtered subset), so the strip answers "how has D1/V3/P2
+  // actually done on these names" at a glance.
+  const watchView = useMemo(() => {
+    if (!watch) return null;
+    const withCall = watch.all.map(r => ({ r, call: rowConclusion(r, stratTrades).word }));
+    const callCounts = {};
+    for (const x of withCall) callCounts[x.call] = (callCounts[x.call] || 0) + 1;
+    const rows = withCall
+      .filter(x => callFilter === 'ALL' || x.call === callFilter)
+      .filter(x => !stratFilter || stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker]))
+      .map(x => x.r);
+    let stratPerf = null;
+    if (stratFilter) {
+      const engaged = withCall
+        .map(x => ({ t: stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker]) }))
+        .filter(e => e.t);
+      const closed = engaged.filter(e => e.t.closed && e.t.pnl != null);
+      const open = engaged.filter(e => !e.t.closed);
+      if (engaged.length) {
+        const wins = closed.filter(e => e.t.pnl > 0).length;
+        const sum = closed.reduce((a, e) => a + e.t.pnl, 0);
+        stratPerf = {
+          entered: engaged.length, n: closed.length, wins,
+          winRate: closed.length ? wins / closed.length * 100 : null,
+          avg: closed.length ? sum / closed.length : null,
+          sum, open: open.length,
+        };
+      }
+    }
+    return { rows, callCounts, stratPerf };
+  }, [watch, stratTrades, callFilter, stratFilter]);
 
   // Strip stats aligned with the P2 Simulation ledger: same source
   // (gold.strategy_backtest_trades via the evaluation endpoint), same window
@@ -1017,6 +1069,47 @@ export function IpoTab({ onOpen }) {
       >
         {watch && watch.all.length > 0 ? (
           <div style={{ marginBottom: 6 }}>
+            {/* CALL + STRATEGY TRADES filters — same ipo-yr chip style as the global window toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, margin: '8px 16px 0', flexWrap: 'wrap' }}>
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>CALL</span>
+                {[['ALL', 'Every name in scope'],
+                  ['BUY', 'A strategy rule fires or the round-trip is still in its hold window'],
+                  ['SELL', 'An exit leg has fired — the position should be out'],
+                  ['WATCH', 'An input is not published yet (oversub at allotment, D1 close)'],
+                  ['SKIP', 'Every strategy skips the name']].map(([k, tip]) => (
+                  <button key={k} className={`ipo-yr ${callFilter === k ? 'active' : ''}`} onClick={() => setCallFilter(k)} title={tip}>
+                    {k}{k !== 'ALL' && watchView ? ` ${watchView.callCounts[k] || 0}` : ''}
+                  </button>
+                ))}
+              </span>
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 9, color: '#565e6c', fontWeight: 600, letterSpacing: '.4px' }}>STRATEGY TRADES</span>
+                <button className={`ipo-yr ${!stratFilter ? 'active' : ''}`} onClick={() => setStratFilter(null)} title="No strategy filter">ALL</button>
+                {STRAT_COLS.map(c => (
+                  <button key={c.id} className={`ipo-yr ${stratFilter === c.id ? 'active' : ''}`}
+                    onClick={() => setStratFilter(f => f === c.id ? null : c.id)}
+                    title={`${c.name} — show only the names this strategy actually entered (engine ledger trade, else rule-mirror round-trip). The strip below shows its closed round-trip performance on those names.`}>
+                    {c.tag}
+                  </button>
+                ))}
+              </span>
+            </div>
+            {stratFilter && watchView?.stratPerf && (
+              <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
+                <span title="Names the selected strategy entered, in the current window/sector scope. Closed round-trips: engine ledger trade when one exists (net of costs), else the rule-mirror legs (gross of costs, no stop/weekly-cap).">
+                  {STRAT_COLS.find(c => c.id === stratFilter)?.tag} · {watchView.stratPerf.entered} entered · {watchView.stratPerf.n} closed round-trips
+                </span>
+                {watchView.stratPerf.n > 0 && (
+                  <>
+                    <span>win {watchView.stratPerf.wins}/{watchView.stratPerf.n} ({watchView.stratPerf.winRate.toFixed(0)}%)</span>
+                    <span>avg <span className={sgnCl(watchView.stratPerf.avg)}>{signed(watchView.stratPerf.avg)}</span></span>
+                    <span>sum <span className={sgnCl(watchView.stratPerf.sum)}>{signed(watchView.stratPerf.sum)}</span></span>
+                  </>
+                )}
+                {watchView.stratPerf.open > 0 && <span>{watchView.stratPerf.open} open / awaiting entry</span>}
+              </div>
+            )}
             {watch.bandCount != null && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px 0', flexWrap: 'wrap' }}>
                 <span title={`${watch.bandCount} of ${watch.rowCount} listed names pass the V3 rule filters (${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail oversub · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x)`}>
@@ -1024,7 +1117,7 @@ export function IpoTab({ onOpen }) {
                 </span>
               </div>
             )}
-            {!sectorFilter && p2Stats && (
+            {!sectorFilter && !stratFilter && p2Stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Closed P2 engine round-trips from the Simulation ledger (gold.strategy_backtest_trades) with exit in the selected window — net of costs, −10% stop and 1-per-listing-week cap applied. Matches the P2 strategy tab's Simulation ledger.">{p2Stats.n} closed engine round-trips · P2 ledger</span>
                 <span>win {p2Stats.wins}/{p2Stats.n} ({p2Stats.winRate.toFixed(0)}%)</span>
@@ -1036,7 +1129,7 @@ export function IpoTab({ onOpen }) {
                 {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
               </div>
             )}
-            {!sectorFilter && !p2Stats && watch.stats && (
+            {!sectorFilter && !stratFilter && !p2Stats && watch.stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Closed rule-mirror round-trips, in-band cohort only (engine ledger unavailable — gross of costs, no stop/weekly-cap)">{watch.stats.n} in-band closed round-trips</span>
                 <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
@@ -1047,7 +1140,7 @@ export function IpoTab({ onOpen }) {
                 {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
               </div>
             )}
-            {sectorFilter && watch.stats && (
+            {sectorFilter && !stratFilter && watch.stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Closed rule-mirror round-trips in this sector (band not applied in drill-down)">{watch.stats.n} closed round-trips</span>
                 <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
@@ -1055,9 +1148,15 @@ export function IpoTab({ onOpen }) {
                 <span>sum <span className={sgnCl(watch.stats.sum)}>{signed(watch.stats.sum)}</span></span>
               </div>
             )}
-            <div style={{ maxHeight: 560, overflow: 'auto' }}>
-              <WatchTable rows={watch.all} stratTrades={stratTrades} />
-            </div>
+            {watchView && watchView.rows.length > 0 ? (
+              <div style={{ maxHeight: 560, overflow: 'auto' }}>
+                <WatchTable rows={watchView.rows} stratTrades={stratTrades} />
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>
+                No names match the current filters.
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px' }}>
