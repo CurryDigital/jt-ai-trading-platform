@@ -419,6 +419,70 @@ const stratDecision = (stratId, r) => {
     trade };
 };
 
+// Return columns for the ticker list — same semantics as the IPO SENTIMENT
+// sector table: D1/D20 come from the API's own percent-scaled return fields,
+// D40 is derived from the measured day-40 lateral close vs the offer basis,
+// Now = gold total_return ?? derived current-vs-offer. The offer basis is
+// offer_price; when it is missing but the first-day return is known, the
+// basis gold used is reconstructed from first_day_close / (1 + d1ret)
+// (offer_price_high is NOT a return basis — never use it here). '—' when a
+// leg is not measured yet.
+const retCols = (r) => {
+  const offer = r.offer_price ?? (r.first_day_return != null && r.first_day_close
+    ? r.first_day_close / (1 + r.first_day_return / 100)
+    : null);
+  const d40 = r.day40_price != null && offer ? (r.day40_price / offer - 1) * 100 : null;
+  const now = r.total_return ?? (r.current_price != null && offer ? (r.current_price / offer - 1) * 100 : null);
+  return { d1: r.first_day_return ?? null, d20: r.return_day20 ?? null, d40, now };
+};
+
+const PctCell = ({ v, tip }) => (
+  <td className="num" title={tip}>
+    <span className={sgnCl(v)} style={{ fontWeight: 600 }}>{v != null ? signed(v) : '—'}</span>
+  </td>
+);
+
+// Aggregate the three strategy decisions into one row conclusion:
+// BUY  = a rule fires (entry still ahead) or the round-trip is still inside
+//        its hold window — engine ledger open position counts too
+// SELL = the exit leg has fired (realized mirror round-trip or a closed
+//        engine ledger trade) — the position should be out
+// WATCH = an input is not published yet (oversub at allotment, D1 close)
+// SKIP = every strategy's rule skips the name
+// Precedence BUY > SELL > WATCH > SKIP; the sub-line names the driving
+// strategies. Full tooltip lists each strategy's decision.
+const rowConclusion = (r, stratTrades) => {
+  const parts = STRAT_COLS.map(c => {
+    const tr = (stratTrades[c.id] || {})[r.ticker];
+    if (tr) return { tag: c.tag, kind: tr.exit_date == null ? 'buy' : 'sell', why: `engine ledger ${tr.exit_date == null ? 'open' : 'closed'}` };
+    const d = stratDecision(c.id, r);
+    if (d.trade) {
+      if (d.trade.pnlKind === 'realized' || d.word === 'BOUGHT' && r.phase === 'passed') return { tag: c.tag, kind: 'sell', why: 'exit leg fired' };
+      return { tag: c.tag, kind: 'buy', why: d.word === 'BOUGHT' ? 'in hold window' : `rule fires · entry ${mmdd(d.trade.buy)}` };
+    }
+    if (d.word === 'WATCH') return { tag: c.tag, kind: 'watch', why: d.sub || 'input pending' };
+    return { tag: c.tag, kind: 'skip', why: d.sub || 'rule skips' };
+  });
+  const tip = parts.map(p => `${p.tag}: ${p.kind.toUpperCase()} — ${p.why}`).join(' · ');
+  const pick = (kind) => parts.filter(p => p.kind === kind);
+  const buyers = pick('buy'), sellers = pick('sell'), watchers = pick('watch');
+  if (buyers.length) return { word: 'BUY', sub: buyers.map(p => p.tag).join('+'), tip };
+  if (sellers.length) return { word: 'SELL', sub: `${sellers.map(p => p.tag).join('+')} exit`, tip };
+  if (watchers.length) return { word: 'WATCH', sub: watchers.map(p => p.tag).join('+'), tip };
+  return { word: 'SKIP', sub: null, tip };
+};
+
+const ConclusionCell = ({ r, stratTrades }) => {
+  const c = rowConclusion(r, stratTrades);
+  const color = c.word === 'SKIP' ? '#565e6c' : c.word === 'WATCH' ? '#9aa3af' : '#e6e8eb';
+  return (
+    <td className="num" title={c.tip}>
+      <div style={{ fontWeight: 700, color, fontSize: 10 }}>{c.word}</div>
+      {c.sub ? <div style={{ fontSize: 9, color: '#565e6c' }}>{c.sub}</div> : null}
+    </td>
+  );
+};
+
 // Per-strategy cell: the strategy's round-trip in the name. When the engine's
 // backtest ledger has a trade it wins; otherwise the rule-mirror legs. Entered
 // strategies show B <buy date> → S <sell date> and the P&L % once the exit
@@ -467,16 +531,23 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
       <tr>
         <th className="ipo-stick">Ticker</th><th>Name</th><th className="num">Oversub</th>
         <th className="num" title="Offer price">IPO px</th>
-        <th className="num" title="First-day close">D1 close</th>
+        <th className="num" title="First-day close">D1 px</th>
         <th className="num">Current</th>
+        <th className="num" title="First-day close vs offer (API first_day_return)">D1 %</th>
+        <th className="num" title="Listing +20 trading days close vs offer (API return_day20)">D20 %</th>
+        <th className="num" title="Listing +40 trading days close vs offer — derived from the measured day-40 close">D40 %</th>
+        <th className="num" title="Current vs offer — gold total_return, else derived from the current price">Now %</th>
         {STRAT_COLS.map(c => (
           <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: the strategy's round-trip — B <buy date> → S <sell date> plus P&L % once the exit has triggered (◦ = open, marked to current; engine ledger trade when one exists, else rule mirror) · SKIP = condition fails · WATCH = input not published yet.`}>{c.tag}</th>
         ))}
+        <th className="num" title="Aggregate of the D1 / V3 / P2 decisions — BUY = a rule fires or the round-trip is still in its hold window · SELL = the exit leg has fired · WATCH = inputs not published yet · SKIP = every strategy skips. Hover for the per-strategy breakdown.">Call</th>
         <th>Phase</th>
       </tr>
     </thead>
     <tbody>
-      {rows.map(r => (
+      {rows.map(r => {
+        const rc = retCols(r);
+        return (
         <tr key={r.ticker}>
           <td className="ipo-ticker ipo-stick">{r.ticker}
             <div style={{ fontSize: 9, color: '#565e6c', fontWeight: 400 }} title={`Listed ${r.listing_date} — the list is ordered by this, newest first`}>{r.listing_date}</div>
@@ -497,9 +568,14 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
           <td className="num">{r.ipoPx != null ? num(r.ipoPx) : '—'}</td>
           <td className="num">{num(r.first_day_close)}</td>
           <td className="num">{num(r.current_price)}</td>
+          <PctCell v={rc.d1} tip="First-day close vs offer" />
+          <PctCell v={rc.d20} tip="Listing +20td close vs offer" />
+          <PctCell v={rc.d40} tip={rc.d40 != null ? `Day-40 close ${num(r.day40_price)} vs offer` : 'Day-40 leg not measured yet'} />
+          <PctCell v={rc.now} tip="Current vs offer" />
           {STRAT_COLS.map(c => (
             <StratDecisionCell key={c.id} r={r} tr={(stratTrades[c.id] || {})[r.ticker]} strat={c} />
           ))}
+          <ConclusionCell r={r} stratTrades={stratTrades} />
           <td>{r.phase === 'in_hold'
             ? <span className="ipo-pill ipo-st-hold">IN HOLD</span>
             : r.phase === 'ahead'
@@ -511,7 +587,8 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
                   </div>
                 : <span className="ipo-pill ipo-st-exit">CLOSED {mmdd(r.exit)}</span>}</td>
         </tr>
-      ))}
+        );
+      })}
     </tbody>
   </table>
 );
