@@ -412,9 +412,11 @@ const stratDecision = (stratId, r) => {
     return { word: 'BOUGHT', date: r.entry, tip: legsTip, trade };
   if (r.phase === 'passed')
     return { word: 'BOUGHT', date: r.entry, tip: legsTip, trade };
-  // ahead / pre_listing with the band already known to pass — the date is the buy
+  // ahead / pre_listing with the band already known to pass — the date is the buy.
+  // No sub-line: the entry conditions (band, entry/D1 window, stop) ride in the
+  // cell tooltip; repeating them in every cell wastes the column width.
   return { word: 'BUY', date: r.entry,
-    sub: !isP2 && r.entryPx == null ? `if entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}×` : (isP2 ? 'stop −10% · +40td exit' : ''),
+    sub: null,
     tip: `${legsTip} Entry decision at the ${r.entry} close${r.entryEstimated ? ' (calendar estimate)' : ''}.`,
     trade };
 };
@@ -512,7 +514,7 @@ const StratDecisionCell = ({ r, tr, strat }) => {
             ? <>{signed(t.pnl)}{t.pnlKind === 'open' ? ' ◦' : ''}</>
             : <span style={{ color: '#565e6c' }}>{d.sub || (r.phase === 'ahead' || r.phase === 'pre_listing' ? 'awaiting entry' : '—')}</span>}
         </div>
-        <div style={{ fontSize: 9, color: '#565e6c' }}>B {mmdd(t.buy)} → S {mmdd(t.sell)}{t.sellEst ? ' ≈' : ''}</div>
+        <div style={{ fontSize: 9, color: '#565e6c', whiteSpace: 'nowrap' }}>B {mmdd(t.buy)} → S {mmdd(t.sell)}{t.sellEst ? ' ≈' : ''}</div>
       </td>
     );
   }
@@ -520,7 +522,7 @@ const StratDecisionCell = ({ r, tr, strat }) => {
   return (
     <td className="num" title={d.tip}>
       <div style={{ fontWeight: 600, color, fontSize: 10 }}>{d.word}{d.date ? ` ${mmdd(d.date)}` : ''}</div>
-      {d.sub ? <div style={{ fontSize: 9, color: '#565e6c', maxWidth: 92, whiteSpace: 'normal', lineHeight: 1.3, textAlign: 'right' }}>{d.sub}</div> : null}
+      {d.sub ? <div style={{ fontSize: 9, color: '#565e6c', maxWidth: 72, whiteSpace: 'normal', lineHeight: 1.3, textAlign: 'right' }}>{d.sub}</div> : null}
     </td>
   );
 };
@@ -541,7 +543,6 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
           <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: the strategy's round-trip — B <buy date> → S <sell date> plus P&L % once the exit has triggered (◦ = open, marked to current; engine ledger trade when one exists, else rule mirror) · SKIP = condition fails · WATCH = input not published yet.`}>{c.tag}</th>
         ))}
         <th className="num" title="Aggregate of the D1 / V3 / P2 decisions — BUY = a rule fires or the round-trip is still in its hold window · SELL = the exit leg has fired · WATCH = inputs not published yet · SKIP = every strategy skips. Hover for the per-strategy breakdown.">Call</th>
-        <th>Phase</th>
       </tr>
     </thead>
     <tbody>
@@ -576,16 +577,6 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
             <StratDecisionCell key={c.id} r={r} tr={(stratTrades[c.id] || {})[r.ticker]} strat={c} />
           ))}
           <ConclusionCell r={r} stratTrades={stratTrades} />
-          <td>{r.phase === 'in_hold'
-            ? <span className="ipo-pill ipo-st-hold">IN HOLD</span>
-            : r.phase === 'ahead'
-              ? <span className="ipo-pill ipo-st-open">ENTRY {r.daysToEntry}d</span>
-              : r.phase === 'pre_listing'
-                ? <div>
-                    <span className="ipo-pill ipo-st-listing">{r.daysToListing === 0 ? 'LISTS TODAY' : `LISTS ${r.daysToListing}d`}</span>
-                    <div style={{ fontSize: 9, color: '#565e6c', marginTop: 3 }}>{r.listing_date}</div>
-                  </div>
-                : <span className="ipo-pill ipo-st-exit">CLOSED {mmdd(r.exit)}</span>}</td>
         </tr>
         );
       })}
