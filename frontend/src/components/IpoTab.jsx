@@ -204,11 +204,15 @@ const OfferRangeCell = ({ r }) => (
   <td className="num">
     {r.fixed_price
       ? `${num(r.offer_price)} (fixed)`
-      : r.offer_price_low != null
+      : r.offer_price_low != null && r.offer_price_high != null
         ? `${num(r.offer_price_low)}–${num(r.offer_price_high)}`
-        : r.offer_price != null
-          ? num(r.offer_price)
-          : <span className="ipo-faint" title="Offer range not published upstream — qr_etl t_90585bf2">—</span>}
+        : r.offer_price_high != null
+          ? `Max ${num(r.offer_price_high)}`
+          : r.offer_price_low != null
+            ? `Min ${num(r.offer_price_low)}`
+            : r.offer_price != null
+              ? num(r.offer_price)
+              : <span className="ipo-faint" title="Offer range not published upstream — qr_etl t_90585bf2">—</span>}
   </td>
 );
 
