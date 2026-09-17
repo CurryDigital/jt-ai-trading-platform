@@ -140,7 +140,9 @@ const bucketOf = (oversub) => {
   return null; // 50-100x — ambiguous zone, no strategy trades it
 };
 const bucketAgg = (rs, id) => {
-  if (!rs.length) return { bucket: id, n: 0, med_p_win: null, d1_win_rate: null, med_day1: null, med_ev_lot_pct: null, gross_ev_sum_hkd: null, net_ev_sum_hkd: null };
+  const empty = { bucket: id, n: 0, med_p_win: null, d1_win_rate: null, avg_d1: null, med_day1: null, avg_d20: null, d20_n: 0, avg_d40: null, d40_n: 0, avg_now: null, now_n: 0, med_ev_lot_pct: null, gross_ev_sum_hkd: null, net_ev_sum_hkd: null };
+  if (!rs.length) return empty;
+  const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   const pw = rs.map(r => Number(r.one_lot_win_rate));
   const d1 = rs.map(r => Number(r.first_day_return));
   const evp = rs.map(r => Number(r.one_lot_win_rate) * Number(r.first_day_return) / 100);
@@ -151,11 +153,20 @@ const bucketAgg = (rs, id) => {
     const g = p * (Number(r.first_day_return) / 100) * stake;
     gross += g; net += g - stake * BUCKET_COST_RATE * p;
   }
+  // Return columns mirror the IPO SENTIMENT sector table exactly (avg, D40/Now
+  // via retCols on the same offer basis) so the two tables compare 1:1.
+  const rc = rs.map(retCols);
+  const d20 = rc.map(x => x.d20).filter(v => v != null).map(Number);
+  const d40 = rc.map(x => x.d40).filter(v => v != null);
+  const now = rc.map(x => x.now).filter(v => v != null);
   return {
     bucket: id, n: rs.length,
     med_p_win: median(pw),
     d1_win_rate: d1.filter(v => v > 0).length / rs.length * 100,
-    med_day1: median(d1),
+    avg_d1: avg(d1), med_day1: median(d1),
+    avg_d20: avg(d20), d20_n: d20.length,
+    avg_d40: avg(d40), d40_n: d40.length,
+    avg_now: avg(now), now_n: now.length,
     med_ev_lot_pct: median(evp),
     gross_ev_sum_hkd: Math.round(gross), net_ev_sum_hkd: Math.round(net),
   };
@@ -1290,12 +1301,13 @@ export function IpoTab({ onOpen }) {
             <table className="ipo-tbl">
               <thead>
                 <tr>
-                  <th>Bucket</th><th className="num">n</th>
-                  <th className="num" title="Median one-lot allotment win rate (HKEX allotment results, gold.hk_ipo_allotment)">Med p_win</th>
-                  <th className="num" title="Share of the bucket's IPOs with day-1 return > 0">D1 win</th>
-                  <th className="num" title="Median first-day return vs offer price">Med D1</th>
-                  <th className="num" title="Median expected day-1 P&L as % of one-lot stake: p_win × day-1 return">Med EV/lot</th>
-                  <th className="num" title="Sum of per-IPO net expected value in HKD — gross EV minus statutory round-trip costs (1.0077% levies + 0.1% stamp) charged on allotted lots only; cash application, no margin financing">Net EV Σ HKD</th>
+                  <th>Bucket</th><th className="num">IPOs</th>
+                  <th className="num" title="Median one-lot allotment win rate (HKEX allotment results, gold.hk_ipo_allotment)">p_win</th>
+                  <th className="num" title="Average first-day return vs offer price — median rides in the cell tooltip">D1 %</th>
+                  <th className="num" title="Average 20th-trading-day return vs offer price">D20 %</th>
+                  <th className="num" title="Average 40th-trading-day return vs offer price (post-listing drift exit leg)">D40 %</th>
+                  <th className="num" title="Average current return vs offer price">Now %</th>
+                  <th className="num" title="Share of the bucket's IPOs with first-day return > 0">Win D1</th>
                 </tr>
               </thead>
               <tbody>
@@ -1314,12 +1326,19 @@ export function IpoTab({ onOpen }) {
                       </td>
                       <td className="num">{b.n ?? '—'}</td>
                       <td className="num" style={{ color: '#8b93a3' }}>{b.med_p_win == null ? '—' : `${Number(b.med_p_win).toFixed(1)}%`}</td>
-                      <td className="num" style={{ color: '#8b93a3' }}>{b.d1_win_rate == null ? '—' : `${Number(b.d1_win_rate).toFixed(0)}%`}</td>
-                      <td className={`num ${sgnCl(b.med_day1)}`}>{b.med_day1 == null ? '—' : signed(b.med_day1, 2)}</td>
-                      <td className={`num ${sgnCl(b.med_ev_lot_pct)}`}>{b.med_ev_lot_pct == null ? '—' : signed(b.med_ev_lot_pct, 2)}</td>
-                      <td className={`num ${sgnCl(b.net_ev_sum_hkd)}`} title={b.gross_ev_sum_hkd != null ? `gross EV Σ ${signedHkd(b.gross_ev_sum_hkd)} HKD before statutory costs` : undefined}>
-                        {signedHkd(b.net_ev_sum_hkd)}
+                      <td className={`num ${sgnCl(b.avg_d1)}`} title={b.med_day1 != null ? `median ${signed(b.med_day1, 2)}` : undefined}>
+                        {b.avg_d1 == null ? '—' : fmtPct(b.avg_d1)}
                       </td>
+                      <td className={`num ${sgnCl(b.avg_d20)}`} title={b.n ? `measured on ${b.d20_n} of ${b.n}` : undefined}>
+                        {b.avg_d20 == null ? '—' : fmtPct(b.avg_d20)}
+                      </td>
+                      <td className={`num ${sgnCl(b.avg_d40)}`} title={b.n ? `measured on ${b.d40_n} of ${b.n}` : undefined}>
+                        {b.avg_d40 == null ? '—' : fmtPct(b.avg_d40)}
+                      </td>
+                      <td className={`num ${sgnCl(b.avg_now)}`} title={b.n ? `measured on ${b.now_n} of ${b.n}` : undefined}>
+                        {b.avg_now == null ? '—' : fmtPct(b.avg_now)}
+                      </td>
+                      <td className="num" style={{ color: '#8b93a3' }}>{b.d1_win_rate == null ? '—' : `${Number(b.d1_win_rate).toFixed(0)}%`}</td>
                     </tr>
                   );
                 })}
@@ -1338,11 +1357,21 @@ export function IpoTab({ onOpen }) {
                       <td className="num" style={{ color: '#3a4150' }}>—</td>
                       <td className="num" style={{ color: '#3a4150' }}>—</td>
                       <td className="num" style={{ color: '#3a4150' }}>—</td>
+                      <td className="num" style={{ color: '#3a4150' }}>—</td>
                     </tr>
                   );
                 })()}
               </tbody>
             </table>
+            <div style={{ display: 'flex', gap: 14, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px 0', flexWrap: 'wrap' }}>
+              <span title={bucketView.cost_model}>Net EV Σ HKD:</span>
+              {bucketView.buckets.map(b => (
+                <span key={b.bucket}
+                      title={b.n ? `${b.bucket} — med EV/lot ${signed(b.med_ev_lot_pct, 2)} of stake · gross EV Σ ${signedHkd(b.gross_ev_sum_hkd)} HKD · net = gross − 1.11% statutory round-trip costs on allotted lots` : `${b.bucket} — no IPOs in scope`}>
+                  {b.bucket}&nbsp;<span className={sgnCl(b.n ? b.net_ev_sum_hkd : null)}>{b.n ? signedHkd(b.net_ev_sum_hkd) : '—'}</span>
+                </span>
+              ))}
+            </div>
             <div style={{ fontSize: 9, color: '#565e6c', padding: '8px 16px 12px', lineHeight: 1.5 }}>
               {bucketView.cost_model}.{' '}
               {bucketView.covered_n != null && bucketView.listed_total != null && (
