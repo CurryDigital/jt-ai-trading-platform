@@ -575,6 +575,17 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           </div>
         </div>
 
+        {/* Research notes & disclosures — the registry description verbatim
+            (research-owned text). For EXPERIMENTAL rows this carries the audit
+            trail and caveats (e.g. C1: post-hoc filter family, n=21 suspicious-
+            perfect WR/PF, 9903.HK concentration, paper-flat observer). */}
+        {data.description && (
+          <div className="qr-surface px-3 py-2">
+            <div className="qr-label mb-1">Research notes &amp; disclosures</div>
+            <p className="text-[10px] text-slate-400 leading-relaxed whitespace-pre-line">{data.description}</p>
+          </div>
+        )}
+
         {/* 4-mode strip — always on screen; everything below follows the toggle.
             Win rate + P&L per book; SIM shows OOS return (backtests store pnl_pct,
             not dollars); PAPER UAT shows fills only until a round-trip ledger exists. */}

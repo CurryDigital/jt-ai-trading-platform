@@ -799,14 +799,16 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
 
       {/* BUY / SELL signal rules — verbatim from the strategy registry's
           entry_logic / exit_logic fields (research-owned text, never
-          synthesized); the long audit/caveat description prose is NOT shown
-          here per user request (2026-09-15) */}
+          synthesized); entryRuleText() substitutes the research-owned prose
+          when the registry field holds a JSON signal-file config (C1); the
+          long audit/caveat description prose is NOT shown here per user
+          request (2026-09-15) */}
       {(s.entry_logic || s.exit_logic) && (
         <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.55 }}>
           {s.entry_logic && (
-            <div title={s.entry_logic}>
+            <div title={entryRuleText(s)}>
               <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Buy — </span>
-              {s.entry_logic}
+              {entryRuleText(s)}
             </div>
           )}
           {s.exit_logic && (
@@ -818,9 +820,8 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
         </div>
       )}
 
-      {/* engine-convention flag — only for strategies whose engine bar
-          indexing differs from the rule-mirror ticker list's OFFSET legs
-          (currently P2: engine 20/40 vs mirror 19/39) */}
+      {/* engine-convention flag — bar-index / mechanics conventions worth
+          stating on the card (P2 stop+weekly cap; C1 observer, no capital) */}
       {ENGINE_NOTES[s.id] && (
         <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.55 }}>
           <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Engine convention — </span>
@@ -880,7 +881,7 @@ export function IpoTab({ onOpen }) {
     const ipoStrats = bookRows.filter(s =>
       (s.asset_class || '').toLowerCase().includes('ipo') || (s.id || '').toLowerCase().startsWith('hk_ipo')
     );
-    // deterministic card order — day-1 momentum, V3 baseline, P2 variant,
+    // deterministic card order — C1 observer, V3 baseline, P2 variant,
     // unknown HK IPO strategies trailing by id (API row order is not stable)
     ipoStrats.sort((a, b) =>
       (STRATEGY_ORDER[a.id] ?? 99) - (STRATEGY_ORDER[b.id] ?? 99) || (a.id || '').localeCompare(b.id || '')
