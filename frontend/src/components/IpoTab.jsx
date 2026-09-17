@@ -296,11 +296,12 @@ const OfferRangeCell = ({ r }) => (
 const DRIFT_RULE = { bandLo: 100, bandHi: 500, entryTd: 20, holdTd: 20, d1Lo: 0.9, d1Hi: 1.3 };
 
 // Card display order in HK IPO STRATEGIES — deterministic regardless of the
-// researcher book's row order: day-1 momentum first, then the post-listing
-// drift lineage (V3 frozen baseline, then the P2 deal-health variant).
+// researcher book's row order: the post-listing drift lineage (C1 deal-health
+// cohort, V3 frozen baseline, then the P2 stop/weekly-cap variant). The old
+// day-1 momentum slot is gone from the registry (2026-09-17) — replaced by C1.
 // Unknown HK IPO strategies trail, sorted by id.
 const STRATEGY_ORDER = {
-  hk_ipo_day1_green_momentum_v1: 0,
+  hk_ipo_postlisting_drift_c1: 0,
   hk_ipo_postlisting_drift_p1_v3: 1,
   hk_ipo_postlisting_drift_p2: 2,
 };
@@ -309,8 +310,8 @@ const STRATEGY_ORDER = {
 // one column per HK IPO strategy, in card order. Full name + rule ride in
 // tooltips; the cell itself answers "is it a buy, and when".
 const STRAT_COLS = [
-  { id: 'hk_ipo_day1_green_momentum_v1',     tag: 'D1', name: 'HK IPO Day-1 Green Momentum V1',
-    rule: 'buy at day-1 close if Main-board · oversub ≥500x · green day-1 · no-chase ≤1.5× offer — exit listing+5td' },
+  { id: 'hk_ipo_postlisting_drift_c1',       tag: 'C1', name: 'HK IPO Post-Listing Drift C1',
+    rule: 'buy at listing+20td close if oversub 100–500x · day-1 close ≥ offer · entry px within 0.9–1.3× day-1 close — exit +40td' },
   { id: 'hk_ipo_postlisting_drift_p1_v3',    tag: 'V3', name: 'HK IPO Post-Listing Drift V3',
     rule: 'buy at listing+20td close if oversub 100–500x · entry px within 0.9–1.3× day-1 close — exit +40td' },
   { id: 'hk_ipo_postlisting_drift_p2',       tag: 'P2', name: 'HK IPO Post-Listing Drift P2',
@@ -325,6 +326,29 @@ const STRAT_COLS = [
 const ENGINE_NOTES = {
   hk_ipo_postlisting_drift_p2:
     'Engine legs match the mirror columns (bar 20 entry / bar 40 exit). −10% stop can exit earlier; max 1 per listing-week.',
+  hk_ipo_postlisting_drift_c1:
+    'Engine legs match the mirror columns (bar 20 entry / bar 40 exit — same convention as P2). No stop, no weekly cap. Paper-flat observer: assigned_capital=0 by design, not enrolled in paper_strategies.',
+};
+
+// Some registry rows store a machine signal-file config (JSON blob) in
+// entry_logic instead of the human rule prose V3/P2 carry. Research-owned
+// prose fallback, keyed by strategy id, rendered ONLY when entry_logic parses
+// as JSON — the durable fix is a registry prose update (qr_etl ticket).
+const ENTRY_LOGIC_PROSE = {
+  hk_ipo_postlisting_drift_c1:
+    'Buy at close on listing day +20 if Main-board AND retail oversubscription in [100,500) AND first_day_close >= offer_price AND entry px within [0.90,1.30] x first-day close AND a slot is free; 15bps cost each way',
+};
+// Resolve the buy-rule text for the card: registry prose verbatim, or the
+// research-owned fallback when the registry field is a JSON config blob.
+const entryRuleText = (s) => {
+  const raw = s.entry_logic;
+  if (!raw) return null;
+  const t = String(raw).trim();
+  if (t.startsWith('{')) {
+    try { JSON.parse(t); } catch { return raw; }
+    return ENTRY_LOGIC_PROSE[s.id] || 'Signal-file driven — rule prose pending registry update';
+  }
+  return raw;
 };
 
 const watchRow = (r) => {
@@ -428,11 +452,9 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
 // t_90585bf2). Where the engine's own backtest ledger has a round-trip in the
 // name, the cell shows the engine trade instead (see StratDecisionCell) —
 // engine truth beats the mirror.
-const D1_RULE = { bandLo: 500, chaseHi: 1.5, holdTd: 5 };
-
 const mmdd = (d) => (d || '').slice(5).replace('-', '/');
-// HK GEM board codes are 8xxx; all three IPO strategies are Main-board only
-// (D1/P2 say so verbatim in the registry).
+// HK GEM board codes are 8xxx; the drift strategies are Main-board only where
+// the registry says so verbatim (P2).
 const isGem = (t) => /^8\d{3}\./.test(t || '');
 
 const stratDecision = (stratId, r) => {
@@ -443,37 +465,22 @@ const stratDecision = (stratId, r) => {
     ? (r.phase === 'pre_listing' ? 'band at allotment' : 'oversub pending (t_90585bf2)')
     : null;
 
-  if (stratId === 'hk_ipo_day1_green_momentum_v1') {
-    const tip = `Day-1 Green Momentum V1 — ${STRAT_COLS[0].rule}`;
-    if (isGem(r.ticker)) return { word: 'SKIP', sub: 'GEM · main-board only', tip };
-    if (oversubPending) return { word: 'WATCH', date: r.listing_date, sub: oversubPending, tip: `${tip}. Decision is the day-1 close on ${r.listing_date}.` };
-    if (oversub < D1_RULE.bandLo) return { word: 'SKIP', sub: `${num(oversub, 0)}x <500x`, tip };
-    if (d1c == null || offer == null) return { word: 'WATCH', date: r.listing_date, sub: 'awaiting D1 close', tip };
-    if (d1c <= offer) return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} ≤ offer ${num(offer)}.` };
-    if (d1c > offer * D1_RULE.chaseHi) return { word: 'SKIP', sub: 'chase >1.5×', tip: `${tip}. Day-1 close ${num(d1c)} > 1.5× offer ${num(offer)}.` };
-    // enter at the day-1 close, exit at the bar-5 close (hold 5td). Exit leg is
-    // the measured day5_price when available, else a calendar estimate.
-    const sellD = r.day5_date || addDays(r.listing_date, D1_RULE.holdTd + 2); // ≈ listing+5td
-    let pnl = null, pnlKind = null;
-    if (r.day5_price != null && d1c) { pnl = (r.day5_price / d1c - 1) * 100; pnlKind = 'realized'; }
-    else if (r.current_price != null && r.listing_date <= TODAY && TODAY <= addDays(sellD, 10)) { pnl = (r.current_price / d1c - 1) * 100; pnlKind = 'open'; }
-    return { word: 'BUY', date: r.listing_date,
-      tip: `${tip}. All conditions met — buy the ${r.listing_date} close @ ${num(d1c)}, exit the bar-5 close${r.day5_price != null ? ` @ ${num(r.day5_price)}` : ''} (${sellD}). Close-to-close, gross of costs.`,
-      trade: { buy: r.listing_date, sell: sellD, sellEst: !r.day5_date, pnl, pnlKind } };
-  }
-
   const isP2 = stratId === 'hk_ipo_postlisting_drift_p2';
-  const tip = `${isP2 ? 'Post-Listing Drift P2' : 'Post-Listing Drift V3'} — ${(STRAT_COLS.find(c => c.id === stratId) || {}).rule}`;
+  const isC1 = stratId === 'hk_ipo_postlisting_drift_c1';
+  const tip = `${isP2 ? 'Post-Listing Drift P2' : isC1 ? 'Post-Listing Drift C1' : 'Post-Listing Drift V3'} — ${(STRAT_COLS.find(c => c.id === stratId) || {}).rule}`;
   if (isP2 && isGem(r.ticker)) return { word: 'SKIP', sub: 'GEM · main-board only', tip };
   if (oversubPending) return { word: 'WATCH', date: r.entry, sub: oversubPending, tip: `${tip}. Entry decision at the ${r.entry} close.` };
   if (oversub < DRIFT_RULE.bandLo || oversub > DRIFT_RULE.bandHi)
     return { word: 'SKIP', sub: oversub > DRIFT_RULE.bandHi ? `${num(oversub, 0)}x >${DRIFT_RULE.bandHi}x` : `${num(oversub, 0)}x <${DRIFT_RULE.bandLo}x`, tip };
-  if (isP2) {
+  if (isP2 || isC1) {
+    // C1 + P2 share the deal-health gate: day-1 close must hold the offer.
     if (d1c != null && offer != null && d1c < offer)
       return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} < offer ${num(offer)}.` };
     if (d1c == null && r.phase !== 'pre_listing')
       return { word: 'WATCH', date: r.entry, sub: 'awaiting D1 close', tip };
-  } else if (r.entryPx != null && r.d1Out) {
+  }
+  if (!isP2 && r.entryPx != null && r.d1Out) {
+    // C1 + V3 share the entry/D1-close band.
     return { word: 'SKIP', sub: `entry/D1 ${r.d1Ratio.toFixed(2)} out`, tip: `${tip}. Entry/D1 ${r.d1Ratio.toFixed(2)} outside ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}.` };
   }
   // Rule fires (or fired): enter at the +20td close, exit at the +40td close.
