@@ -117,6 +117,57 @@ const median = (arr) => {
   const m = s.length >> 1;
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
+// Subscription-economics oversubscription buckets — computed client-side over
+// the filter cohort so every global filter (WINDOW / CALL / STRATEGY TRADES,
+// plus a sector drill-down) applies, and a bucket-row click filters the other
+// panels back. p_win = one_lot_win_rate from the HKEX allotment-results
+// scrape (gold.hk_ipo_allotment; per-row on /api/hkex/ipos since qr_etl
+// t_df31ed15). 50-100x stays excluded per user spec. Same cost model and
+// output shape as GET /api/hkex/ipos/oversub-buckets (t_128d1ec3), which
+// remains the window-only fallback while the per-row field is absent.
+const BUCKET_DEFS = [
+  { id: '<15x', lo: 0, hi: 15 },
+  { id: '15-50x', lo: 15, hi: 50 },
+  { id: '100-500x', lo: 100, hi: 500 },
+  { id: '500x+', lo: 500, hi: Infinity },
+];
+const BUCKET_COST_RATE = 0.0111; // 1.0077% levies + 0.1% stamp, round trip, allotted lots only
+const BUCKET_COST_MODEL = 'Cash one-lot application — net = gross EV − 1.11% statutory round-trip costs (1.0077% levies + 0.1% stamp) on allotted lots only, excludes margin financing';
+const bucketOf = (oversub) => {
+  if (oversub == null) return null;
+  const x = Number(oversub);
+  for (const b of BUCKET_DEFS) if (x >= b.lo && x < b.hi) return b.id;
+  return null; // 50-100x — ambiguous zone, no strategy trades it
+};
+const bucketAgg = (rs, id) => {
+  if (!rs.length) return { bucket: id, n: 0, med_p_win: null, d1_win_rate: null, med_day1: null, med_ev_lot_pct: null, gross_ev_sum_hkd: null, net_ev_sum_hkd: null };
+  const pw = rs.map(r => Number(r.one_lot_win_rate));
+  const d1 = rs.map(r => Number(r.first_day_return));
+  const evp = rs.map(r => Number(r.one_lot_win_rate) * Number(r.first_day_return) / 100);
+  let gross = 0, net = 0;
+  for (const r of rs) {
+    const stake = Number(r.offer_price) * Number(r.lot_size);
+    const p = Number(r.one_lot_win_rate) / 100;
+    const g = p * (Number(r.first_day_return) / 100) * stake;
+    gross += g; net += g - stake * BUCKET_COST_RATE * p;
+  }
+  return {
+    bucket: id, n: rs.length,
+    med_p_win: median(pw),
+    d1_win_rate: d1.filter(v => v > 0).length / rs.length * 100,
+    med_day1: median(d1),
+    med_ev_lot_pct: median(evp),
+    gross_ev_sum_hkd: Math.round(gross), net_ev_sum_hkd: Math.round(net),
+  };
+};
+const aggregateBuckets = (rows) => {
+  const full = rows.filter(r =>
+    r.oversubscription_retail != null && r.one_lot_win_rate != null &&
+    r.first_day_return != null && r.offer_price != null && r.lot_size != null);
+  const buckets = BUCKET_DEFS.map(d => bucketAgg(full.filter(r => bucketOf(r.oversubscription_retail) === d.id), d.id));
+  const excluded = bucketAgg(full.filter(r => { const x = Number(r.oversubscription_retail); return x >= 50 && x < 100; }), '50-100x');
+  return { buckets, excluded_50_100x: excluded, covered_n: full.length, listed_total: rows.length, cost_model: BUCKET_COST_MODEL };
+};
 const daysSince = (dateStr) => {
   if (!dateStr) return null;
   return Math.floor((Date.now() - new Date(dateStr + 'T00:00:00Z').getTime()) / 86400000);
@@ -788,6 +839,7 @@ export function IpoTab({ onOpen }) {
   const [sectorFilter, setSectorFilter] = useState(null); // click a sector row → filters the strategy rule-mirror list
   const [callFilter, setCallFilter] = useState('ALL'); // ALL | BUY | SELL | WATCH | SKIP — rowConclusion word
   const [stratFilter, setStratFilter] = useState(null); // null | STRAT_COLS id — only names that strategy entered
+  const [bucketFilter, setBucketFilter] = useState(null); // null | BUCKET_DEFS id — click a bucket row → filters SENTIMENT + ticker list
   const [actionMsg, setActionMsg] = useState(null);
 
   const load = useCallback(async () => {
@@ -907,14 +959,34 @@ export function IpoTab({ onOpen }) {
     const stratCounts = {};
     for (const c of STRAT_COLS)
       stratCounts[c.id] = all.filter(x => stratTradeOf(c.id, x.r, (stratTrades[c.id] || {})[x.r.ticker])).length;
-    const active = callFilter !== 'ALL' || !!stratFilter;
-    const filtered = active
-      ? all.filter(x =>
+    const active = callFilter !== 'ALL' || !!stratFilter || !!bucketFilter;
+    // Facet pattern: the bucket table aggregates over the cohort filtered by
+    // everything EXCEPT the bucket filter itself (noBucket), so the table
+    // stays a usable switcher while the CALL / STRATEGY chips still apply.
+    const noBucket = (callFilter === 'ALL' && !stratFilter)
+      ? all
+      : all.filter(x =>
           (callFilter === 'ALL' || x.call === callFilter) &&
-          (!stratFilter || stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker])))
-      : all;
-    return { all, filtered, active, callCounts, stratCounts };
-  }, [ipos, ipoWindow, stratTrades, callFilter, stratFilter]);
+          (!stratFilter || stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker])));
+    const filtered = bucketFilter
+      ? noBucket.filter(x => bucketOf(x.r.oversubscription_retail) === bucketFilter)
+      : noBucket;
+    return { all, filtered, noBucket, active, callCounts, stratCounts };
+  }, [ipos, ipoWindow, stratTrades, callFilter, stratFilter, bucketFilter]);
+
+  // Bucket table view — client-side over noBucket (+ sector drill-down) once
+  // the per-row allotment win rate is served; falls back to the window-only
+  // server aggregate (t_128d1ec3) while qr_etl t_df31ed15 is pending.
+  const bucketView = useMemo(() => {
+    if (!cohort) return undefined;
+    const hasPwin = cohort.all.some(x => x.r.one_lot_win_rate != null);
+    if (!hasPwin) return buckets ? { ...buckets, server: true } : null;
+    const scope = cohort.noBucket
+      .map(x => x.r)
+      .filter(r => r.listing_date <= TODAY)
+      .filter(r => !sectorFilter || r.sector === sectorFilter);
+    return { ...aggregateBuckets(scope), server: false };
+  }, [cohort, sectorFilter, buckets]);
 
   // IPO KPIs — over the global window; the filtered cohort when the CALL /
   // STRATEGY chips are engaged (same fields, smaller N).
@@ -989,10 +1061,12 @@ export function IpoTab({ onOpen }) {
     const rows = withCall
       .filter(x => callFilter === 'ALL' || x.call === callFilter)
       .filter(x => !stratFilter || stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker]))
+      .filter(x => !bucketFilter || bucketOf(x.r.oversubscription_retail) === bucketFilter)
       .map(x => x.r);
     let stratPerf = null;
     if (stratFilter) {
       const engaged = withCall
+        .filter(x => !bucketFilter || bucketOf(x.r.oversubscription_retail) === bucketFilter)
         .map(x => ({ t: stratTradeOf(stratFilter, x.r, (stratTrades[stratFilter] || {})[x.r.ticker]) }))
         .filter(e => e.t);
       const closed = engaged.filter(e => e.t.closed && e.t.pnl != null);
@@ -1009,7 +1083,7 @@ export function IpoTab({ onOpen }) {
       }
     }
     return { rows, callCounts, stratPerf };
-  }, [watch, stratTrades, callFilter, stratFilter]);
+  }, [watch, stratTrades, callFilter, stratFilter, bucketFilter]);
 
   // Strip stats aligned with the P2 Simulation ledger: same source
   // (gold.strategy_backtest_trades via the evaluation endpoint), same window
@@ -1189,17 +1263,19 @@ export function IpoTab({ onOpen }) {
       </Panel>
 
       {/* subscription economics — oversubscription buckets (allotment odds × day-1 EV).
-          Server-side aggregation: p_win comes from gold.hk_ipo_allotment, so the
-          CALL / STRATEGY TRADES filters cannot re-aggregate this panel — window only. */}
+          Client-side over the filter cohort (facet): CALL / STRATEGY / sector /
+          window filters all apply, and clicking a bucket row filters the sector
+          breakdown + ticker list back. Server aggregate stays as fallback while
+          the per-row p_win field is pending (qr_etl t_df31ed15). */}
       <Panel
         title="SUBSCRIPTION ECONOMICS · OVERSUB BUCKETS"
-        tag={buckets ? <Tag kind="live">LIVE</Tag> : <Tag kind="pending">PENDING</Tag>}
-        right={`window: ${activeWindowLabel}${cohort?.active ? ' · window-only (filters n/a)' : ''}`}
+        tag={bucketView ? <Tag kind="live">LIVE</Tag> : <Tag kind="pending">PENDING</Tag>}
+        right={`window: ${activeWindowLabel}${bucketView?.server ? ' · window-only (server aggregate)' : (cohort?.active || sectorFilter) ? ' · filtered cohort' : ''}`}
         scroll
       >
-        {buckets == null ? (
+        {bucketView == null ? (
           <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px', lineHeight: 1.6 }}>
-            {buckets === undefined
+            {bucketView === undefined
               ? 'Loading…'
               : <>Endpoint <span style={{ fontFamily: 'ui-monospace,monospace' }}>/api/hkex/ipos/oversub-buckets</span> pending — qr_etl task t_128d1ec3. Allotment win rates (one_lot_win_rate) are not served by any current API; no client-side substitute is rendered.</>}
           </div>
@@ -1217,30 +1293,44 @@ export function IpoTab({ onOpen }) {
                 </tr>
               </thead>
               <tbody>
-                {buckets.buckets.map(b => (
-                  <tr key={b.bucket}>
-                    <td style={{ color: '#8b93a3', whiteSpace: 'nowrap' }}>{b.bucket}</td>
-                    <td className="num">{b.n ?? '—'}</td>
-                    <td className="num" style={{ color: '#8b93a3' }}>{b.med_p_win == null ? '—' : `${Number(b.med_p_win).toFixed(1)}%`}</td>
-                    <td className="num" style={{ color: '#8b93a3' }}>{b.d1_win_rate == null ? '—' : `${Number(b.d1_win_rate).toFixed(0)}%`}</td>
-                    <td className={`num ${sgnCl(b.med_day1)}`}>{b.med_day1 == null ? '—' : signed(b.med_day1, 2)}</td>
-                    <td className={`num ${sgnCl(b.med_ev_lot_pct)}`}>{b.med_ev_lot_pct == null ? '—' : signed(b.med_ev_lot_pct, 2)}</td>
-                    <td className={`num ${sgnCl(b.net_ev_sum_hkd)}`} title={b.gross_ev_sum_hkd != null ? `gross EV Σ ${signedHkd(b.gross_ev_sum_hkd)} HKD before statutory costs` : undefined}>
-                      {signedHkd(b.net_ev_sum_hkd)}
-                    </td>
-                  </tr>
-                ))}
+                {bucketView.buckets.map(b => {
+                  const clickable = !bucketView.server;
+                  const activeB = bucketFilter === b.bucket;
+                  return (
+                    <tr key={b.bucket}
+                        onClick={clickable ? () => setBucketFilter(f => f === b.bucket ? null : b.bucket) : undefined}
+                        title={clickable
+                          ? (activeB ? 'Clear bucket filter' : 'Filter IPO SENTIMENT + ticker list to this oversubscription bucket')
+                          : 'Window-only server aggregate — per-row p_win pending qr_etl t_df31ed15, filtering not yet available'}
+                        style={clickable ? { cursor: 'pointer', background: activeB ? '#12161f' : undefined } : undefined}>
+                      <td style={{ color: activeB ? '#e6e8eb' : '#8b93a3', whiteSpace: 'nowrap' }}>
+                        {clickable && <span style={{ marginRight: 6, color: '#565e6c' }}>{activeB ? '▾' : '▸'}</span>}{b.bucket}
+                      </td>
+                      <td className="num">{b.n ?? '—'}</td>
+                      <td className="num" style={{ color: '#8b93a3' }}>{b.med_p_win == null ? '—' : `${Number(b.med_p_win).toFixed(1)}%`}</td>
+                      <td className="num" style={{ color: '#8b93a3' }}>{b.d1_win_rate == null ? '—' : `${Number(b.d1_win_rate).toFixed(0)}%`}</td>
+                      <td className={`num ${sgnCl(b.med_day1)}`}>{b.med_day1 == null ? '—' : signed(b.med_day1, 2)}</td>
+                      <td className={`num ${sgnCl(b.med_ev_lot_pct)}`}>{b.med_ev_lot_pct == null ? '—' : signed(b.med_ev_lot_pct, 2)}</td>
+                      <td className={`num ${sgnCl(b.net_ev_sum_hkd)}`} title={b.gross_ev_sum_hkd != null ? `gross EV Σ ${signedHkd(b.gross_ev_sum_hkd)} HKD before statutory costs` : undefined}>
+                        {signedHkd(b.net_ev_sum_hkd)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div style={{ fontSize: 9, color: '#565e6c', padding: '8px 16px 12px', lineHeight: 1.5 }}>
-              {buckets.cost_model}.{' '}
-              {buckets.covered_n != null && buckets.listed_total != null && (
-                <>Allotment results cover {buckets.covered_n} of {buckets.listed_total} listed IPOs in this window (coverage begins 2024-01 — the allotment-results scrape). </>
+              {bucketView.cost_model}.{' '}
+              {bucketView.covered_n != null && bucketView.listed_total != null && (
+                <>Allotment results cover {bucketView.covered_n} of {bucketView.listed_total} listed IPOs in this scope (coverage begins 2024-01 — the allotment-results scrape). </>
               )}
-              {buckets.excluded_50_100x && buckets.excluded_50_100x.n > 0 && (
-                <span title={`med p_win ${Number(buckets.excluded_50_100x.med_p_win).toFixed(1)}% · D1 win ${Number(buckets.excluded_50_100x.d1_win_rate).toFixed(0)}% · med D1 ${signed(buckets.excluded_50_100x.med_day1, 2)} · med EV/lot ${signed(buckets.excluded_50_100x.med_ev_lot_pct, 2)} · net EV Σ ${signedHkd(buckets.excluded_50_100x.net_ev_sum_hkd)} HKD`}>
-                  50–100x bucket ({buckets.excluded_50_100x.n} IPOs) excluded — ambiguous zone, no strategy trades it.
+              {bucketView.excluded_50_100x && bucketView.excluded_50_100x.n > 0 && (
+                <span title={`med p_win ${Number(bucketView.excluded_50_100x.med_p_win).toFixed(1)}% · D1 win ${Number(bucketView.excluded_50_100x.d1_win_rate).toFixed(0)}% · med D1 ${signed(bucketView.excluded_50_100x.med_day1, 2)} · med EV/lot ${signed(bucketView.excluded_50_100x.med_ev_lot_pct, 2)} · net EV Σ ${signedHkd(bucketView.excluded_50_100x.net_ev_sum_hkd)} HKD`}>
+                  50–100x bucket ({bucketView.excluded_50_100x.n} IPOs) excluded — ambiguous zone, no strategy trades it.
                 </span>
+              )}
+              {bucketView.server && (
+                <span> Per-row allotment win rate pending qr_etl t_df31ed15 — until then this table is a window-only server aggregate and does not react to the global filters.</span>
               )}
             </div>
           </>
@@ -1248,13 +1338,25 @@ export function IpoTab({ onOpen }) {
       </Panel>
       </div>
 
-      {/* ticker list — rule-mirror windows; sector drill-down when a sector row is clicked */}
+      {/* ticker list — rule-mirror windows; sector drill-down when a sector row is clicked,
+          oversub-bucket drill-down when a bucket row is clicked */}
       <Panel
-        title={sectorFilter ? `IPO TICKER LIST · ${sectorFilter}` : 'IPO TICKER LIST · RULE-MIRROR WINDOWS'}
+        title={sectorFilter || bucketFilter
+          ? `IPO TICKER LIST · ${[sectorFilter, bucketFilter && `${bucketFilter} bucket`].filter(Boolean).join(' · ')}`
+          : 'IPO TICKER LIST · RULE-MIRROR WINDOWS'}
         tag={<Tag kind="live">LIVE</Tag>}
-        right={sectorFilter ? (
-          <span className="ipo-pill" style={{ background: '#12161f', color: '#8b93a3', cursor: 'pointer' }} onClick={() => setSectorFilter(null)} title="Clear sector filter">
-            sector filter ×
+        right={(sectorFilter || bucketFilter) ? (
+          <span style={{ display: 'flex', gap: 6 }}>
+            {sectorFilter && (
+              <span className="ipo-pill" style={{ background: '#12161f', color: '#8b93a3', cursor: 'pointer' }} onClick={() => setSectorFilter(null)} title="Clear sector filter">
+                sector filter ×
+              </span>
+            )}
+            {bucketFilter && (
+              <span className="ipo-pill" style={{ background: '#12161f', color: '#8b93a3', cursor: 'pointer' }} onClick={() => setBucketFilter(null)} title="Clear oversubscription-bucket filter">
+                bucket {bucketFilter} ×
+              </span>
+            )}
           </span>
         ) : (watch ? `${watch.all.length} names` : '')}
       >
@@ -1275,14 +1377,14 @@ export function IpoTab({ onOpen }) {
                 {watchView.stratPerf.open > 0 && <span>{watchView.stratPerf.open} open / awaiting entry</span>}
               </div>
             )}
-            {watch.bandCount != null && (
+            {!bucketFilter && watch.bandCount != null && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px 0', flexWrap: 'wrap' }}>
                 <span title={`${watch.bandCount} of ${watch.rowCount} listed names pass the V3 rule filters (${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail oversub · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x)`}>
                   {watch.bandCount} of {watch.rowCount} listed in band ({DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x · entry/D1 {DRIFT_RULE.d1Lo}–{DRIFT_RULE.d1Hi})
                 </span>
               </div>
             )}
-            {!sectorFilter && !stratFilter && p2Stats && (
+            {!sectorFilter && !stratFilter && !bucketFilter && p2Stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Closed P2 engine round-trips from the Simulation ledger (gold.strategy_backtest_trades) with exit in the selected window — net of costs, −10% stop and 1-per-listing-week cap applied. Matches the P2 strategy tab's Simulation ledger.">{p2Stats.n} closed engine round-trips · P2 ledger</span>
                 <span>win {p2Stats.wins}/{p2Stats.n} ({p2Stats.winRate.toFixed(0)}%)</span>
@@ -1294,7 +1396,7 @@ export function IpoTab({ onOpen }) {
                 {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
               </div>
             )}
-            {!sectorFilter && !stratFilter && !p2Stats && watch.stats && (
+            {!sectorFilter && !stratFilter && !p2Stats && !bucketFilter && watch.stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Closed rule-mirror round-trips, in-band cohort only (engine ledger unavailable — gross of costs, no stop/weekly-cap)">{watch.stats.n} in-band closed round-trips</span>
                 <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
