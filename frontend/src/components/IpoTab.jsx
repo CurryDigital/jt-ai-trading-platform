@@ -87,7 +87,7 @@ const CSS = `
 .ipo-yr.active{background:#12161f;color:#e6e8eb;border-color:#565e6c;}
 .ipo-sector-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #161b25;font-size:11px;}
 .ipo-sector-row:last-child{border-bottom:none;}
-.ipo-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px;}
+.ipo-stages{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:8px 16px 10px;}
 .ipo-split{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:16px;align-items:start;}
 .ipo-split>*{min-width:0;}
 @media (max-width:1400px){.ipo-split{grid-template-columns:minmax(0,1fr);}}
@@ -99,17 +99,18 @@ const CSS = `
 .ipo-tbl-compact td{padding:5px 6px;font-size:11px;}
 .ipo-tbl-compact .ipo-name,.ipo-tbl-compact .ipo-name-en{max-width:100px;overflow:hidden;text-overflow:ellipsis;}
 .ipo-tbl-compact .ipo-pill{padding:2px 6px;}
-.ipo-stage{border:1px solid #161b25;border-radius:8px;padding:10px 12px;cursor:pointer;background:#0d1118;text-align:left;}
+.ipo-stage{border:1px solid #161b25;border-radius:8px;padding:6px 10px;cursor:pointer;background:#0d1118;text-align:left;min-width:0;}
 .ipo-stage:hover{border-color:#2a3242;}
 .ipo-stage.active{border-color:#565e6c;background:#12161f;}
-.ipo-stage .step{font-size:9px;color:#565e6c;letter-spacing:.5px;font-weight:700;}
-.ipo-stage .n{font-size:20px;font-weight:600;font-family:ui-monospace,monospace;color:#e6e8eb;margin:2px 0;}
-.ipo-stage .sub{font-size:10px;color:#565e6c;line-height:1.5;}
+.ipo-stage .step{font-size:9px;color:#565e6c;letter-spacing:.5px;font-weight:700;white-space:nowrap;}
+.ipo-stage .n{font-size:14px;font-weight:600;font-family:ui-monospace,monospace;color:#e6e8eb;}
+.ipo-stage .sub{font-size:9px;color:#565e6c;line-height:1.4;margin-top:1px;}
 `;
 
 const num = (v, d = 2) => v == null || isNaN(v) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 const signed = (v, d = 1) => v == null ? '—' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(d)}%`;
 const sgnCl = (v) => v == null ? 'ipo-faint' : v >= 0 ? 'ipo-green' : 'ipo-red';
+const signedHkd = (v) => v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString()}`;
 const median = (arr) => {
   if (!arr.length) return null;
   const s = [...arr].sort((a, b) => a - b);
@@ -512,10 +513,11 @@ const KeyDateCell = ({ c }) => (
 
 const ConclusionCell = ({ c }) => {
   const color = c.word === 'SKIP' ? '#565e6c' : c.word === 'WATCH' ? '#9aa3af' : '#e6e8eb';
+  // word only — the driving-strategy concat (D1+V3+P2) was removed per user
+  // 2026-09-15; the full per-strategy breakdown stays in the cell tooltip
   return (
     <td className="num" title={c.tip}>
       <div style={{ fontWeight: 700, color, fontSize: 10 }}>{c.word}</div>
-      {c.sub ? <div style={{ fontSize: 9, color: '#565e6c' }}>{c.sub}</div> : null}
     </td>
   );
 };
@@ -561,7 +563,7 @@ const StratDecisionCell = ({ r, tr, strat }) => {
         <div className={sgnCl(t.pnl)} style={{ fontWeight: 600 }}>
           {t.pnl != null
             ? <>{signed(t.pnl)}{t.pnlKind === 'open' ? ' ◦' : ''}</>
-            : <span style={{ color: '#565e6c' }}>{d.sub || (r.phase === 'ahead' || r.phase === 'pre_listing' ? 'awaiting entry' : '—')}</span>}
+            : <span style={{ color: '#e6e8eb' }}>{d.sub || (r.phase === 'ahead' || r.phase === 'pre_listing' ? 'awaiting entry' : '—')}</span>}
         </div>
         <div style={{ fontSize: 9, color: '#565e6c', whiteSpace: 'nowrap' }}>B {mmdd(t.buy)} → S {mmdd(t.sell)}{t.sellEst ? ' ≈' : ''}</div>
       </td>
@@ -580,9 +582,8 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
   <table className="ipo-tbl ipo-tbl-compact">
     <thead>
       <tr>
-        <th className="ipo-stick">Ticker</th><th>Name</th><th className="num">Oversub</th>
+        <th className="ipo-stick">Ticker</th><th>Name</th>
         <th className="num" title="Offer price">IPO px</th>
-        <th className="num" title="First-day close">D1 px</th>
         <th className="num">Current</th>
         <th className="num" title="First-day close vs offer (API first_day_return)">D1 %</th>
         <th className="num" title="Listing +20 trading days close vs offer (API return_day20)">D20 %</th>
@@ -605,20 +606,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
             <div style={{ fontSize: 9, color: '#565e6c', fontWeight: 400 }} title={`Listed ${r.listing_date} — the list is ordered by this, newest first`}>{r.listing_date}</div>
           </td>
           <NameCell zh={r.stock_name_zh} en={r.stock_name} />
-          <td className="num">{r.oversubscription_retail != null
-            ? <>
-                {num(r.oversubscription_retail, 1)}x
-                {r.inBand === false && (
-                  <div style={{ fontSize: 9, color: '#565e6c' }} title={`The V3 drift strategy only trades the ${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail-oversub band — this row is shown for reference, the rule skips it`}>
-                    {r.oversubscription_retail > DRIFT_RULE.bandHi ? `>${DRIFT_RULE.bandHi}x · out of band` : `<${DRIFT_RULE.bandLo}x · out of band`}
-                  </div>
-                )}
-              </>
-            : r.phase === 'pre_listing'
-              ? <span className="ipo-faint" style={{ display: 'inline-block', maxWidth: 80, whiteSpace: 'normal', lineHeight: 1.3 }} title="Retail oversubscription is published at allotment (~1 trading day before listing) — the 100–500x band is undecidable until then (qr_etl t_90585bf2)">band at allotment</span>
-              : '—'}</td>
           <td className="num">{r.ipoPx != null ? num(r.ipoPx) : '—'}</td>
-          <td className="num">{num(r.first_day_close)}</td>
           <td className="num">{num(r.current_price)}</td>
           <PctCell v={rc.d1} tip="First-day close vs offer" />
           <PctCell v={rc.d20} tip="Listing +20td close vs offer" />
@@ -734,21 +722,21 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
         ))}
       </div>
 
-      {/* entry mechanics — verbatim from the strategy registry so the entry
-          venue (subscription vs grey market vs on-exchange) is never ambiguous;
-          text is research-owned, clamped to 3 lines with the full text on hover */}
-      {(s.description || s.exit_logic) && (
+      {/* BUY / SELL signal rules — verbatim from the strategy registry's
+          entry_logic / exit_logic fields (research-owned text, never
+          synthesized); the long audit/caveat description prose is NOT shown
+          here per user request (2026-09-15) */}
+      {(s.entry_logic || s.exit_logic) && (
         <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-          {s.description && (
-            <div title={s.description}
-                 style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-              <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>How it trades — </span>
-              {s.description}
+          {s.entry_logic && (
+            <div title={s.entry_logic}>
+              <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Buy — </span>
+              {s.entry_logic}
             </div>
           )}
           {s.exit_logic && (
             <div style={{ marginTop: 3 }} title={s.exit_logic}>
-              <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Exit — </span>
+              <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Sell — </span>
               {s.exit_logic}
             </div>
           )}
@@ -793,6 +781,7 @@ export function IpoTab({ onOpen }) {
   const [evals, setEvals] = useState({});
   const [sectors, setSectors] = useState([]);
   const [ipoWindow, setIpoWindow] = useState('3m'); // global: sentiment + KPIs
+  const [buckets, setBuckets] = useState(undefined); // undefined=loading, null=endpoint pending t_128d1ec3
   const [subs, setSubs] = useState(null);
   const [book, setBook] = useState(null);
   const [stage, setStage] = useState(null); // null = auto-pick once data lands
@@ -838,6 +827,19 @@ export function IpoTab({ onOpen }) {
     let dead = false;
     api.get(`/api/hkex/ipos/sectors?window=${ipoWindow}`).then(sec => {
       if (!dead) setSectors(Array.isArray(sec?.sectors) ? sec.sectors : []);
+    });
+    return () => { dead = true; };
+  }, [ipoWindow]);
+
+  // oversubscription-bucket subscription economics — same window contract as
+  // sectors (server-side aggregation; needs gold.hk_ipo_allotment p_win, so
+  // it cannot be re-aggregated client-side — CALL/STRATEGY filters do NOT
+  // apply to this panel). null = endpoint not live yet (qr_etl t_128d1ec3).
+  useEffect(() => {
+    let dead = false;
+    api.get(`/api/hkex/ipos/oversub-buckets?window=${ipoWindow}`).then(res => {
+      if (dead) return;
+      setBuckets(res && Array.isArray(res.buckets) ? res : null);
     });
     return () => { dead = true; };
   }, [ipoWindow]);
@@ -1129,6 +1131,8 @@ export function IpoTab({ onOpen }) {
 
       {/* side-by-side analysis: sentiment sectors (left) + ticker list (right) */}
       <div className="ipo-split">
+      {/* left column — sector breakdown + subscription-economics buckets */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
       {/* IPO sentiment — sector breakdown */}
       <Panel
         title="IPO SENTIMENT · SECTOR BREAKDOWN"
@@ -1183,6 +1187,66 @@ export function IpoTab({ onOpen }) {
           </div>
         )}
       </Panel>
+
+      {/* subscription economics — oversubscription buckets (allotment odds × day-1 EV).
+          Server-side aggregation: p_win comes from gold.hk_ipo_allotment, so the
+          CALL / STRATEGY TRADES filters cannot re-aggregate this panel — window only. */}
+      <Panel
+        title="SUBSCRIPTION ECONOMICS · OVERSUB BUCKETS"
+        tag={buckets ? <Tag kind="live">LIVE</Tag> : <Tag kind="pending">PENDING</Tag>}
+        right={`window: ${activeWindowLabel}${cohort?.active ? ' · window-only (filters n/a)' : ''}`}
+        scroll
+      >
+        {buckets == null ? (
+          <div style={{ fontSize: 11, color: '#565e6c', padding: '14px 16px', lineHeight: 1.6 }}>
+            {buckets === undefined
+              ? 'Loading…'
+              : <>Endpoint <span style={{ fontFamily: 'ui-monospace,monospace' }}>/api/hkex/ipos/oversub-buckets</span> pending — qr_etl task t_128d1ec3. Allotment win rates (one_lot_win_rate) are not served by any current API; no client-side substitute is rendered.</>}
+          </div>
+        ) : (
+          <>
+            <table className="ipo-tbl">
+              <thead>
+                <tr>
+                  <th>Bucket</th><th className="num">n</th>
+                  <th className="num" title="Median one-lot allotment win rate (HKEX allotment results, gold.hk_ipo_allotment)">Med p_win</th>
+                  <th className="num" title="Share of the bucket's IPOs with day-1 return > 0">D1 win</th>
+                  <th className="num" title="Median first-day return vs offer price">Med D1</th>
+                  <th className="num" title="Median expected day-1 P&L as % of one-lot stake: p_win × day-1 return">Med EV/lot</th>
+                  <th className="num" title="Sum of per-IPO net expected value in HKD — gross EV minus statutory round-trip costs (1.0077% levies + 0.1% stamp) charged on allotted lots only; cash application, no margin financing">Net EV Σ HKD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {buckets.buckets.map(b => (
+                  <tr key={b.bucket}>
+                    <td style={{ color: '#8b93a3', whiteSpace: 'nowrap' }}>{b.bucket}</td>
+                    <td className="num">{b.n ?? '—'}</td>
+                    <td className="num" style={{ color: '#8b93a3' }}>{b.med_p_win == null ? '—' : `${Number(b.med_p_win).toFixed(1)}%`}</td>
+                    <td className="num" style={{ color: '#8b93a3' }}>{b.d1_win_rate == null ? '—' : `${Number(b.d1_win_rate).toFixed(0)}%`}</td>
+                    <td className={`num ${sgnCl(b.med_day1)}`}>{b.med_day1 == null ? '—' : signed(b.med_day1, 2)}</td>
+                    <td className={`num ${sgnCl(b.med_ev_lot_pct)}`}>{b.med_ev_lot_pct == null ? '—' : signed(b.med_ev_lot_pct, 2)}</td>
+                    <td className={`num ${sgnCl(b.net_ev_sum_hkd)}`} title={b.gross_ev_sum_hkd != null ? `gross EV Σ ${signedHkd(b.gross_ev_sum_hkd)} HKD before statutory costs` : undefined}>
+                      {signedHkd(b.net_ev_sum_hkd)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 9, color: '#565e6c', padding: '8px 16px 12px', lineHeight: 1.5 }}>
+              {buckets.cost_model}.{' '}
+              {buckets.covered_n != null && buckets.listed_total != null && (
+                <>Allotment results cover {buckets.covered_n} of {buckets.listed_total} listed IPOs in this window (coverage begins 2024-01 — the allotment-results scrape). </>
+              )}
+              {buckets.excluded_50_100x && buckets.excluded_50_100x.n > 0 && (
+                <span title={`med p_win ${Number(buckets.excluded_50_100x.med_p_win).toFixed(1)}% · D1 win ${Number(buckets.excluded_50_100x.d1_win_rate).toFixed(0)}% · med D1 ${signed(buckets.excluded_50_100x.med_day1, 2)} · med EV/lot ${signed(buckets.excluded_50_100x.med_ev_lot_pct, 2)} · net EV Σ ${signedHkd(buckets.excluded_50_100x.net_ev_sum_hkd)} HKD`}>
+                  50–100x bucket ({buckets.excluded_50_100x.n} IPOs) excluded — ambiguous zone, no strategy trades it.
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </Panel>
+      </div>
 
       {/* ticker list — rule-mirror windows; sector drill-down when a sector row is clicked */}
       <Panel
@@ -1282,10 +1346,15 @@ export function IpoTab({ onOpen }) {
             const tickers = rows.slice(0, 3).map(r => r.ticker).join(' · ');
             return (
               <button key={st.key} className={`ipo-stage ${activeStage === st.key ? 'active' : ''}`} onClick={() => setStage(st.key)}>
-                <div className="step">{st.step}{i < STAGES.length - 1 ? ' →' : ''}</div>
-                <div className="n">{rows.length}</div>
-                <div style={{ fontSize: 11, color: '#8b93a3', fontWeight: 600 }}>{st.label}</div>
-                <div className="sub">{st.hint}{tickers ? <><br />{tickers}{rows.length > 3 ? ` +${rows.length - 3}` : ''}</> : ''}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                  <span className="step">{st.step}{i < STAGES.length - 1 ? ' →' : ''}</span>
+                  <span className="n">{rows.length}</span>
+                  <span style={{ fontSize: 10, color: '#8b93a3', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{st.label}</span>
+                </div>
+                <div className="sub" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                     title={`${st.hint}${tickers ? ` · ${tickers}${rows.length > 3 ? ` +${rows.length - 3}` : ''}` : ''}`}>
+                  {st.hint}{tickers ? ` · ${tickers}${rows.length > 3 ? ` +${rows.length - 3}` : ''}` : ''}
+                </div>
               </button>
             );
           })}
