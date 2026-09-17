@@ -166,7 +166,13 @@ const aggregateBuckets = (rows) => {
     r.first_day_return != null && r.offer_price != null && r.lot_size != null);
   const buckets = BUCKET_DEFS.map(d => bucketAgg(full.filter(r => bucketOf(r.oversubscription_retail) === d.id), d.id));
   const excluded = bucketAgg(full.filter(r => { const x = Number(r.oversubscription_retail); return x >= 50 && x < 100; }), '50-100x');
-  return { buckets, excluded_50_100x: excluded, covered_n: full.length, listed_total: rows.length, cost_model: BUCKET_COST_MODEL };
+  // Reconciliation: listed-in-scope rows that land in NO bucket (source
+  // publishes no subscription data — non-public-offer listing like 3774.HK
+  // FAMEGLOW, or allotment not yet scraped) — surfaced as a muted row so
+  // bucket n's + excluded + no-data visibly add up to the sector count.
+  const fullSet = new Set(full.map(r => r.ticker));
+  const noData = rows.filter(r => !fullSet.has(r.ticker)).map(r => r.ticker);
+  return { buckets, excluded_50_100x: excluded, covered_n: full.length, listed_total: rows.length, no_data_n: noData.length, no_data_tickers: noData, cost_model: BUCKET_COST_MODEL };
 };
 const daysSince = (dateStr) => {
   if (!dateStr) return null;
@@ -1317,6 +1323,24 @@ export function IpoTab({ onOpen }) {
                     </tr>
                   );
                 })}
+                {(() => {
+                  const noDataN = bucketView.no_data_n
+                    ?? ((bucketView.listed_total != null && bucketView.covered_n != null) ? bucketView.listed_total - bucketView.covered_n : 0);
+                  if (!noDataN) return null;
+                  const tickers = bucketView.no_data_tickers || [];
+                  const names = tickers.slice(0, 8).join(', ') + (tickers.length > 8 ? ', …' : '');
+                  return (
+                    <tr title={`${names ? names + ' — ' : ''}source publishes no subscription data (non-public-offer listing, e.g. introduction/placing) or allotment not yet scraped — in no bucket by construction`}>
+                      <td style={{ color: '#565e6c', whiteSpace: 'nowrap', fontStyle: 'italic' }}>no subscription data</td>
+                      <td className="num" style={{ color: '#565e6c' }}>{noDataN}</td>
+                      <td className="num" style={{ color: '#3a4150' }}>—</td>
+                      <td className="num" style={{ color: '#3a4150' }}>—</td>
+                      <td className="num" style={{ color: '#3a4150' }}>—</td>
+                      <td className="num" style={{ color: '#3a4150' }}>—</td>
+                      <td className="num" style={{ color: '#3a4150' }}>—</td>
+                    </tr>
+                  );
+                })()}
               </tbody>
             </table>
             <div style={{ fontSize: 9, color: '#565e6c', padding: '8px 16px 12px', lineHeight: 1.5 }}>
