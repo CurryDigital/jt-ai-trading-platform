@@ -715,7 +715,7 @@ const money0 = (v) => v == null ? '—' : `${v >= 0 ? '+' : '−'}$${Math.abs(Nu
 // heavy tables (open positions, past trades) live on the ACTIVE IPO BOOK
 // panel and the Strategy Detail page; the card carries one-line engine /
 // ledger summaries instead.
-const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) => {
+const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause, mirror, windowLabel }) => {
   const bt = ev?.metrics?.backtest || {};
   const modes = ev?.metrics_by_mode || {};
   const latestSignal = (ev?.recent_signals || []).slice().sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))[0];
@@ -768,14 +768,47 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause }) =
         <ModeBadge mode={s.execution_mode} />
       </div>
 
-      {/* backtest metrics — RealMetrics-style grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
-        <Metric label="Sharpe" value={s.sharpe_ratio == null ? '—' : Number(s.sharpe_ratio).toFixed(2)} big />
-        <Metric label="OOS ret" value={ret == null ? '—' : fmtPct(ret)} color={ret == null ? undefined : pnlColor(ret)} big />
-        <Metric label="Win" value={wr == null ? '—' : `${wr.toFixed(0)}%`} color={wr == null ? undefined : wr >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
-        <Metric label="MDD" value={mdd == null ? '—' : fmtPct(mdd)} color={mdd == null ? undefined : pnlColor(mdd)} />
-        <Metric label="Profit factor" value={bt.profit_factor == null ? '—' : Number(bt.profit_factor).toFixed(2)} />
-        <Metric label="OOS trades" value={bt.total_trades ?? s.backtest_trades ?? s.trade_count_oos ?? '—'} />
+      {/* backtest metrics — registry multi-year OOS backtest (research-owned);
+          a different, much larger cohort than the rule-mirror window below */}
+      <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)', marginBottom: 5 }}
+          title="Multi-year out-of-sample backtest from the strategy registry (net of costs, engine mechanics) — NOT the same cohort as the rule-mirror window below">
+          Backtest · multi-year OOS
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px' }}>
+          <Metric label="Sharpe" value={s.sharpe_ratio == null ? '—' : Number(s.sharpe_ratio).toFixed(2)} big />
+          <Metric label="OOS ret" value={ret == null ? '—' : fmtPct(ret)} color={ret == null ? undefined : pnlColor(ret)} big />
+          <Metric label="Win" value={wr == null ? '—' : `${wr.toFixed(0)}%`} color={wr == null ? undefined : wr >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
+          <Metric label="MDD" value={mdd == null ? '—' : fmtPct(mdd)} color={mdd == null ? undefined : pnlColor(mdd)} />
+          <Metric label="Profit factor" value={bt.profit_factor == null ? '—' : Number(bt.profit_factor).toFixed(2)} />
+          <Metric label="OOS trades" value={bt.total_trades ?? s.backtest_trades ?? s.trade_count_oos ?? '—'} />
+        </div>
+      </div>
+
+      {/* rule-mirror performance — computed over the SAME rows, window and
+          legs as the IPO TICKER LIST panel, so the card and the list always
+          agree (engine ledger trade wins when one exists, else rule-mirror
+          legs; close-to-close, gross of costs) */}
+      <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: 4 }}
+        title="The strategy's round-trips over the IPO TICKER LIST cohort in the selected window — same rows, same legs, same engine-ledger-wins rule as the ticker list. Close-to-close, gross of costs.">
+        <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+          Rule-mirror · {windowLabel} · ticker-list cohort
+        </span>
+        {mirror && mirror.entered > 0 ? (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 10, color: '#8b93a3' }}>
+            <span>{mirror.entered} entered · {mirror.n} closed round-trips</span>
+            {mirror.n > 0 && (
+              <>
+                <span>win {mirror.wins}/{mirror.n} ({mirror.winRate.toFixed(0)}%)</span>
+                <span>avg <span className={sgnCl(mirror.avg)}>{signed(mirror.avg)}</span></span>
+                <span>sum <span className={sgnCl(mirror.sum)}>{signed(mirror.sum)}</span></span>
+              </>
+            )}
+            {mirror.open > 0 && <span>{mirror.open} open / awaiting entry</span>}
+          </div>
+        ) : (
+          <div style={{ fontSize: 10, color: '#565e6c' }}>{mirror ? 'no entries in this window' : '—'}</div>
+        )}
       </div>
 
       {/* annual backtest bars — the exact Performance subtab component */}
@@ -1109,6 +1142,37 @@ export function IpoTab({ onOpen }) {
     }
     return { rows, callCounts, stratPerf };
   }, [watch, stratTrades, callFilter, stratFilter, bucketFilter]);
+
+  // Per-strategy rule-mirror performance over the SAME rows as the IPO TICKER
+  // LIST (watch.all — the window cohort, sector drill-down included, bucket
+  // filter respected; CALL / STRATEGY chips ignored — a card summarizes its
+  // own strategy). Feeds each strategy card so the card numbers always follow
+  // from the list: same cohort, same stratTradeOf legs (engine ledger trade
+  // wins, else rule-mirror), same units. Gross of costs.
+  const mirrorPerf = useMemo(() => {
+    if (!watch) return {};
+    const out = {};
+    for (const c of STRAT_COLS) {
+      const engaged = watch.all
+        .filter(r => !bucketFilter || bucketOf(r.oversubscription_retail) === bucketFilter)
+        .map(r => stratTradeOf(c.id, r, (stratTrades[c.id] || {})[r.ticker]))
+        .filter(Boolean);
+      const closed = engaged.filter(t => t.closed && t.pnl != null);
+      const open = engaged.filter(t => !t.closed);
+      const wins = closed.filter(t => t.pnl > 0).length;
+      const sum = closed.reduce((a, t) => a + t.pnl, 0);
+      out[c.id] = {
+        entered: engaged.length,
+        n: closed.length,
+        wins,
+        winRate: closed.length ? wins / closed.length * 100 : null,
+        avg: closed.length ? sum / closed.length : null,
+        sum,
+        open: open.length,
+      };
+    }
+    return out;
+  }, [watch, stratTrades, bucketFilter]);
 
   // Strip stats aligned with the P2 Simulation ledger: same source
   // (gold.strategy_backtest_trades via the evaluation endpoint), same window
@@ -1707,6 +1771,8 @@ export function IpoTab({ onOpen }) {
               onOpen={onOpen}
               onAdjust={adjustAllocation}
               onPause={pauseStrategy}
+              mirror={mirrorPerf[s.id]}
+              windowLabel={activeWindowLabel}
             />
           ))}
         </div>
