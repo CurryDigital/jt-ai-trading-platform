@@ -158,9 +158,18 @@ const SectionCard = ({ title, rows, renderAction }) => {
 // renderAction(row): optional per-row action cell (book-specific close wiring
 // stays in the book panel — safeguards are not shared UI).
 // strip: optional thin book-level line above the sections (source/stale notes).
+// Sections are ordered by P&L % return: winners best-first, losers
+// worst-first; rows with no derivable % sink to the bottom of their section.
 export const PositionsByReturn = ({ rows, renderAction, strip }) => {
-  const winners = rows.filter(r => r.pnl != null && r.pnl >= 0);
-  const losers = rows.filter(r => r.pnl != null && r.pnl < 0);
+  const byPct = (dir) => (a, b) => {
+    const pa = pnlPctOf(a), pb = pnlPctOf(b);
+    if (pa == null && pb == null) return 0;
+    if (pa == null) return 1;
+    if (pb == null) return -1;
+    return dir === 'desc' ? pb - pa : pa - pb;
+  };
+  const winners = rows.filter(r => r.pnl != null && r.pnl >= 0).sort(byPct('desc'));
+  const losers = rows.filter(r => r.pnl != null && r.pnl < 0).sort(byPct('asc'));
   const unscored = rows.length - winners.length - losers.length;
   return (
     <>
