@@ -296,42 +296,42 @@ const OfferRangeCell = ({ r }) => (
 const DRIFT_RULE = { bandLo: 100, bandHi: 500, entryTd: 20, holdTd: 20, d1Lo: 0.9, d1Hi: 1.3 };
 
 // Card display order in HK IPO STRATEGIES — deterministic regardless of the
-// researcher book's row order: the post-listing drift lineage (C1 deal-health
-// cohort, V3 frozen baseline, then the P2 stop/weekly-cap variant). The old
-// day-1 momentum slot is gone from the registry (2026-09-17) — replaced by C1.
-// Unknown HK IPO strategies trail, sorted by id.
+// researcher book's row order. Only C1 remains live: V3 (frozen baseline) and
+// P2 (stop/weekly-cap variant) are retired (2026-09-18) and excluded from the
+// tab entirely via RETIRED_IPO_STRATS. Unknown HK IPO strategies trail,
+// sorted by id.
 const STRATEGY_ORDER = {
   hk_ipo_postlisting_drift_c1: 0,
-  hk_ipo_postlisting_drift_p1_v3: 1,
-  hk_ipo_postlisting_drift_p2: 2,
 };
 
+// Retired HK IPO strategies — still in the registry for the audit trail, but
+// removed from this tab per user 2026-09-18: no card, no ticker-list column,
+// no filter chip. Drop ids from this set (and re-add to STRATEGY_ORDER /
+// STRAT_COLS) to restore one.
+const RETIRED_IPO_STRATS = new Set([
+  'hk_ipo_postlisting_drift_p1_v3',
+  'hk_ipo_postlisting_drift_p2',
+]);
+
 // Short column tags for the per-strategy decision columns in the ticker list —
-// one column per HK IPO strategy, in card order. Full name + rule ride in
+// one column per live HK IPO strategy, in card order. Full name + rule ride in
 // tooltips; the cell itself answers "is it a buy, and when".
 const STRAT_COLS = [
   { id: 'hk_ipo_postlisting_drift_c1',       tag: 'C1', name: 'HK IPO Post-Listing Drift C1',
     rule: 'buy at listing+20td close if oversub 100–500x · day-1 close ≥ offer · entry px within 0.9–1.3× day-1 close — exit +40td' },
-  { id: 'hk_ipo_postlisting_drift_p1_v3',    tag: 'V3', name: 'HK IPO Post-Listing Drift V3',
-    rule: 'buy at listing+20td close if oversub 100–500x · entry px within 0.9–1.3× day-1 close — exit +40td' },
-  { id: 'hk_ipo_postlisting_drift_p2',       tag: 'P2', name: 'HK IPO Post-Listing Drift P2',
-    rule: 'buy at listing+20td close if Main-board · oversub 100–500x · day-1 close ≥ offer — exit −10% stop or +40td · max 1 per listing-week' },
 ];
 
 // Per-strategy engine-convention notes, rendered on the card. The mirror legs
 // ARE the engine bar convention since 2026-09-07 (OFFSET 20/40 after the
-// offset-19/39 off-by-one was fixed in hkex.py); remaining divergence is
-// mechanics only (stop, weekly cap). Signal text stays research-owned
-// (registry description/exit_logic, rendered verbatim).
+// offset-19/39 off-by-one was fixed in hkex.py). Signal text stays
+// research-owned (registry description/exit_logic, rendered verbatim).
 const ENGINE_NOTES = {
-  hk_ipo_postlisting_drift_p2:
-    'Engine legs match the mirror columns (bar 20 entry / bar 40 exit). −10% stop can exit earlier; max 1 per listing-week.',
   hk_ipo_postlisting_drift_c1:
-    'Engine legs match the mirror columns (bar 20 entry / bar 40 exit — same convention as P2). No stop, no weekly cap. Paper-flat observer: assigned_capital=0 by design, not enrolled in paper_strategies.',
+    'Engine legs match the mirror columns (bar 20 entry / bar 40 exit). No stop, no weekly cap. Paper-flat observer: assigned_capital=0 by design, not enrolled in paper_strategies.',
 };
 
 // Some registry rows store a machine signal-file config (JSON blob) in
-// entry_logic instead of the human rule prose V3/P2 carry. Research-owned
+// entry_logic instead of human rule prose. Research-owned
 // prose fallback, keyed by strategy id, rendered ONLY when entry_logic parses
 // as JSON — the durable fix is a registry prose update (qr_etl ticket).
 const ENTRY_LOGIC_PROSE = {
@@ -375,7 +375,7 @@ const watchRow = (r) => {
   let pnl = null, pnlKind = null;
   if (phase === 'passed' && entryPx && exitPx) { pnl = (exitPx / entryPx - 1) * 100; pnlKind = 'realized'; }
   else if (phase === 'in_hold' && entryPx && r.current_price) { pnl = (r.current_price / entryPx - 1) * 100; pnlKind = 'open'; }
-  // V3 D1-close band: entry px must sit within [0.90, 1.30]x the first-day close
+  // C1 entry/D1-close band: entry px must sit within [0.90, 1.30]x the first-day close
   // (registry description, verified against engine fills 2026-09-07). Decidable only
   // once the entry leg is measured — ahead/pre-listing rows stay d1Out=false.
   const d1Ratio = entryPx != null && r.first_day_close ? entryPx / r.first_day_close : null;
@@ -419,7 +419,7 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
   const inHold = rows.filter(r => r.phase === 'in_hold').sort((a, b) => a.exit.localeCompare(b.exit));
   const ahead = rows.filter(r => r.phase === 'ahead').sort((a, b) => a.entry.localeCompare(b.entry));
   const passed = rows.filter(r => r.phase === 'passed').sort((a, b) => b.exit.localeCompare(a.exit));
-  // Strategy-cohort stats: in-band names only (the band is what V3 trades);
+  // Strategy-cohort stats: in-band names only (the band is what C1 trades);
   // in sector drill-down the band is not applied, so stats cover all rows.
   const cohort = sectorFilter ? passed : passed.filter(r => r.inBand);
   const closed = cohort.filter(r => r.pnl != null);
@@ -453,9 +453,6 @@ const computeWatch = (ipos, sectorFilter, ipoWindow) => {
 // name, the cell shows the engine trade instead (see StratDecisionCell) —
 // engine truth beats the mirror.
 const mmdd = (d) => (d || '').slice(5).replace('-', '/');
-// HK GEM board codes are 8xxx; the drift strategies are Main-board only where
-// the registry says so verbatim (P2).
-const isGem = (t) => /^8\d{3}\./.test(t || '');
 
 const stratDecision = (stratId, r) => {
   const oversub = r.oversubscription_retail;
@@ -465,28 +462,24 @@ const stratDecision = (stratId, r) => {
     ? (r.phase === 'pre_listing' ? 'band at allotment' : 'oversub pending (t_90585bf2)')
     : null;
 
-  const isP2 = stratId === 'hk_ipo_postlisting_drift_p2';
-  const isC1 = stratId === 'hk_ipo_postlisting_drift_c1';
-  const tip = `${isP2 ? 'Post-Listing Drift P2' : isC1 ? 'Post-Listing Drift C1' : 'Post-Listing Drift V3'} — ${(STRAT_COLS.find(c => c.id === stratId) || {}).rule}`;
-  if (isP2 && isGem(r.ticker)) return { word: 'SKIP', sub: 'GEM · main-board only', tip };
+  const col = STRAT_COLS.find(c => c.id === stratId) || {};
+  const tip = `${col.name || 'HK IPO strategy'} — ${col.rule}`;
   if (oversubPending) return { word: 'WATCH', date: r.entry, sub: oversubPending, tip: `${tip}. Entry decision at the ${r.entry} close.` };
   if (oversub < DRIFT_RULE.bandLo || oversub > DRIFT_RULE.bandHi)
     return { word: 'SKIP', sub: oversub > DRIFT_RULE.bandHi ? `${num(oversub, 0)}x >${DRIFT_RULE.bandHi}x` : `${num(oversub, 0)}x <${DRIFT_RULE.bandLo}x`, tip };
-  if (isP2 || isC1) {
-    // C1 + P2 share the deal-health gate: day-1 close must hold the offer.
-    if (d1c != null && offer != null && d1c < offer)
-      return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} < offer ${num(offer)}.` };
-    if (d1c == null && r.phase !== 'pre_listing')
-      return { word: 'WATCH', date: r.entry, sub: 'awaiting D1 close', tip };
-  }
-  if (!isP2 && r.entryPx != null && r.d1Out) {
-    // C1 + V3 share the entry/D1-close band.
+  // C1 deal-health gate: day-1 close must hold the offer.
+  if (d1c != null && offer != null && d1c < offer)
+    return { word: 'SKIP', sub: 'D1 red', tip: `${tip}. Day-1 close ${num(d1c)} < offer ${num(offer)}.` };
+  if (d1c == null && r.phase !== 'pre_listing')
+    return { word: 'WATCH', date: r.entry, sub: 'awaiting D1 close', tip };
+  if (r.entryPx != null && r.d1Out) {
+    // C1 entry/D1-close band.
     return { word: 'SKIP', sub: `entry/D1 ${r.d1Ratio.toFixed(2)} out`, tip: `${tip}. Entry/D1 ${r.d1Ratio.toFixed(2)} outside ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}.` };
   }
   // Rule fires (or fired): enter at the +20td close, exit at the +40td close.
   // r.pnl / r.pnlKind already carry the mirror round-trip — realized once the
   // exit leg has traded, marked-to-current (◦) inside the hold window.
-  const legsTip = `${tip}. Entry ${num(r.entryPx)} @ ${r.entry} · exit ${num(r.exitPx)} @ ${r.exit} — close-to-close, gross of costs (engine nets ~0.3pp).${isP2 ? ' −10% stop can exit before the mirror sell date; max 1 per listing-week.' : ''}`;
+  const legsTip = `${tip}. Entry ${num(r.entryPx)} @ ${r.entry} · exit ${num(r.exitPx)} @ ${r.exit} — close-to-close, gross of costs (engine nets ~0.3pp).`;
   const trade = { buy: r.entry, sell: r.exit, sellEst: r.exitEstimated, pnl: r.pnl, pnlKind: r.pnlKind };
   if (r.phase === 'in_hold')
     return { word: 'BOUGHT', date: r.entry, tip: legsTip, trade };
@@ -588,7 +581,7 @@ const KeyDateCell = ({ c }) => (
 
 const ConclusionCell = ({ c }) => {
   const color = c.word === 'SKIP' ? '#565e6c' : c.word === 'WATCH' ? '#9aa3af' : '#e6e8eb';
-  // word only — the driving-strategy concat (D1+V3+P2) was removed per user
+  // word only — the driving-strategy tag concat was removed per user
   // 2026-09-15; the full per-strategy breakdown stays in the cell tooltip
   return (
     <td className="num" title={c.tip}>
@@ -667,7 +660,7 @@ const WatchTable = ({ rows, stratTrades = {} }) => (
         {STRAT_COLS.map(c => (
           <th key={c.id} className="num" title={`${c.name} — ${c.rule}. Cell: the strategy's round-trip — B <buy date> → S <sell date> plus P&L % once the exit has triggered (◦ = open, marked to current; engine ledger trade when one exists, else rule mirror) · SKIP = condition fails · WATCH = input not published yet.`}>{c.tag}</th>
         ))}
-        <th className="num" title="Aggregate of the D1 / V3 / P2 decisions — BUY = a rule fires or the round-trip is still in its hold window · SELL = the exit leg has fired · WATCH = inputs not published yet · SKIP = every strategy skips. Hover for the per-strategy breakdown.">Call</th>
+        <th className="num" title="Aggregate of the per-strategy decisions (C1 is the only live strategy) — BUY = a rule fires or the round-trip is still in its hold window · SELL = the exit leg has fired · WATCH = inputs not published yet · SKIP = every strategy skips. Hover for the per-strategy breakdown.">Call</th>
         <th className="num" title="The next actionable date for this name — B = buy at that close · S = sell at that close (fired for SELL calls, upcoming for holds) · W = the date the pending input publishes. Earliest date across the driving strategies; ≈ = calendar estimate.">Key date</th>
       </tr>
     </thead>
@@ -854,7 +847,7 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause, mir
       )}
 
       {/* engine-convention flag — bar-index / mechanics conventions worth
-          stating on the card (P2 stop+weekly cap; C1 observer, no capital) */}
+          stating on the card (C1: paper-flat observer, no capital) */}
       {ENGINE_NOTES[s.id] && (
         <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.55 }}>
           <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)' }}>Engine convention — </span>
@@ -912,10 +905,11 @@ export function IpoTab({ onOpen }) {
     setIpos(Array.isArray(lst?.ipos) ? lst.ipos : []);
     const bookRows = Array.isArray(strat?.strategies) ? strat.strategies : (Array.isArray(strat?.data) ? strat.data : []);
     const ipoStrats = bookRows.filter(s =>
-      (s.asset_class || '').toLowerCase().includes('ipo') || (s.id || '').toLowerCase().startsWith('hk_ipo')
+      ((s.asset_class || '').toLowerCase().includes('ipo') || (s.id || '').toLowerCase().startsWith('hk_ipo'))
+      && !RETIRED_IPO_STRATS.has(s.id)
     );
-    // deterministic card order — C1 observer, V3 baseline, P2 variant,
-    // unknown HK IPO strategies trailing by id (API row order is not stable)
+    // deterministic card order — C1, then unknown HK IPO strategies trailing
+    // by id (API row order is not stable); retired V3/P2 filtered out above
     ipoStrats.sort((a, b) =>
       (STRATEGY_ORDER[a.id] ?? 99) - (STRATEGY_ORDER[b.id] ?? 99) || (a.id || '').localeCompare(b.id || '')
     );
@@ -982,7 +976,7 @@ export function IpoTab({ onOpen }) {
 
   // Per-strategy engine round-trips keyed by ticker, from each strategy's OOS
   // backtest ledger (gold.strategy_backtest_trades via the evaluation
-  // endpoint). Feeds the D1 / V3 / P2 columns of the ticker list. If a ticker
+  // endpoint). Feeds the C1 column of the ticker list. If a ticker
   // was traded more than once, the latest round-trip wins.
   const stratTrades = useMemo(() => {
     const map = {};
@@ -1109,7 +1103,7 @@ export function IpoTab({ onOpen }) {
   // STRATEGY TRADES filter (only names that strategy entered — engine ledger
   // trade or rule-mirror round-trip). stratPerf = the selected strategy's
   // closed round-trip performance across ALL in-scope rows it entered (not
-  // just the call-filtered subset), so the strip answers "how has D1/V3/P2
+  // just the call-filtered subset), so the strip answers "how has the strategy
   // actually done on these names" at a glance.
   const watchView = useMemo(() => {
     if (!watch) return null;
@@ -1174,14 +1168,14 @@ export function IpoTab({ onOpen }) {
     return out;
   }, [watch, stratTrades, bucketFilter]);
 
-  // Strip stats aligned with the P2 Simulation ledger: same source
+  // Strip stats aligned with the C1 Simulation ledger: same source
   // (gold.strategy_backtest_trades via the evaluation endpoint), same window
   // filter (exits on/after the window cutoff). The mirror cohort below
-  // (watch.stats) is gross of costs and has no stop/weekly-cap, so its avg/sum
-  // can never reconcile with the ledger — the ledger is the truth, the mirror
+  // (watch.stats) is gross of costs, so its avg/sum can never reconcile with
+  // the ledger — the ledger is the truth, the mirror
   // table stays for per-name rule mechanics.
-  const p2Stats = useMemo(() => {
-    const ts = evals['hk_ipo_postlisting_drift_p2']?.backtest_trades;
+  const c1Stats = useMemo(() => {
+    const ts = evals['hk_ipo_postlisting_drift_c1']?.backtest_trades;
     if (!ts) return null;
     const cutoff = windowCutoff(ipoWindow);
     const closed = ts.filter(t => t.exit_date && t.exit_date >= cutoff && t.pnl_pct != null);
@@ -1504,24 +1498,24 @@ export function IpoTab({ onOpen }) {
             )}
             {!bucketFilter && watch.bandCount != null && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px 0', flexWrap: 'wrap' }}>
-                <span title={`${watch.bandCount} of ${watch.rowCount} listed names pass the V3 rule filters (${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail oversub · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x)`}>
+                <span title={`${watch.bandCount} of ${watch.rowCount} listed names pass the C1 rule filters (${DRIFT_RULE.bandLo}–${DRIFT_RULE.bandHi}x retail oversub · entry/D1 ${DRIFT_RULE.d1Lo}–${DRIFT_RULE.d1Hi}x)`}>
                   {watch.bandCount} of {watch.rowCount} listed in band ({DRIFT_RULE.bandLo}–{DRIFT_RULE.bandHi}x · entry/D1 {DRIFT_RULE.d1Lo}–{DRIFT_RULE.d1Hi})
                 </span>
               </div>
             )}
-            {!sectorFilter && !stratFilter && !bucketFilter && p2Stats && (
+            {!sectorFilter && !stratFilter && !bucketFilter && c1Stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
-                <span title="Closed P2 engine round-trips from the Simulation ledger (gold.strategy_backtest_trades) with exit in the selected window — net of costs, −10% stop and 1-per-listing-week cap applied. Matches the P2 strategy tab's Simulation ledger.">{p2Stats.n} closed engine round-trips · P2 ledger</span>
-                <span>win {p2Stats.wins}/{p2Stats.n} ({p2Stats.winRate.toFixed(0)}%)</span>
-                <span>avg <span className={sgnCl(p2Stats.avg)}>{signed(p2Stats.avg)}</span></span>
-                <span>sum <span className={sgnCl(p2Stats.sum)}>{signed(p2Stats.sum)}</span></span>
-                {p2Stats.open > 0 && <span>{p2Stats.open} open (ledger, unrealized)</span>}
+                <span title="Closed C1 engine round-trips from the Simulation ledger (gold.strategy_backtest_trades) with exit in the selected window — net of costs, no stop/weekly cap. Matches the C1 strategy tab's Simulation ledger.">{c1Stats.n} closed engine round-trips · C1 ledger</span>
+                <span>win {c1Stats.wins}/{c1Stats.n} ({c1Stats.winRate.toFixed(0)}%)</span>
+                <span>avg <span className={sgnCl(c1Stats.avg)}>{signed(c1Stats.avg)}</span></span>
+                <span>sum <span className={sgnCl(c1Stats.sum)}>{signed(c1Stats.sum)}</span></span>
+                {c1Stats.open > 0 && <span>{c1Stats.open} open (ledger, unrealized)</span>}
                 {watch.counts.inHold > 0 && <span>{watch.counts.inHold} mirror in hold window</span>}
                 {watch.counts.ahead > 0 && <span>{watch.counts.ahead} awaiting entry</span>}
                 {watch.counts.preListing > 0 && <span>{watch.counts.preListing} not yet listed</span>}
               </div>
             )}
-            {!sectorFilter && !stratFilter && !p2Stats && !bucketFilter && watch.stats && (
+            {!sectorFilter && !stratFilter && !c1Stats && !bucketFilter && watch.stats && (
               <div style={{ display: 'flex', gap: 18, fontSize: 10, color: '#8b93a3', fontFamily: 'ui-monospace,monospace', margin: '8px 16px', flexWrap: 'wrap' }}>
                 <span title="Closed rule-mirror round-trips, in-band cohort only (engine ledger unavailable — gross of costs, no stop/weekly-cap)">{watch.stats.n} in-band closed round-trips</span>
                 <span>win {watch.stats.wins}/{watch.stats.n} ({watch.stats.winRate.toFixed(0)}%)</span>
