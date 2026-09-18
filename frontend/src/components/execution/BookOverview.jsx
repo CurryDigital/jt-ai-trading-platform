@@ -178,7 +178,7 @@ export const BookOverview = ({ book }) => {
   const stats = data?.stats;
   const isFills = data?.strategy_metric === 'fills';
   const best = [...(data?.top_strategies || [])].sort(byCumDesc);
-  const worstRaw = data?.worst_strategies; // qr_etl t_5ee7db98 — pending
+  const worstRaw = data?.worst_strategies; // backend t_5ee7db98 — live on sim/paper books
   const worst = Array.isArray(worstRaw) ? [...worstRaw].sort(byCumAsc) : null;
 
   const livePending = 'Book overview is not served for the live book';
