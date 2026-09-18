@@ -4,13 +4,15 @@ import { FR, FR_NAME, PANEL_SOURCES, panelFreshness, useFreshness, fmtAgeSec, us
 
 // Command home — 2026-08-20 redesign. Priority: what am I making/losing,
 // where's my cash, what's working, what to buy next.
-//   1) P&L by Mode (hero)          2) My Book (equity + 2x2 KPI)
+//   1) P&L by Mode (hero; 4 clickable book selectors SIM/PAPER/UAT/LIVE)
+//   2) Selected Book (per-mode stats + curve, follows the card clicked above)
 //   3) Regime Forecast + Top Opportunities
 //   4) Order Book                  5) Market Status (compact strip)
 //   6) Action Center (attention queue)
 // Cut vs. previous layout: Strategy Pipeline funnel + Deployed Health table
 // (redundant with P&L by Mode; they live on the Strategies tab), the monthly
-// P&L panel, and the paper-book-by-asset strip.
+// P&L panel, and the paper-book-by-asset strip. 2026-09-18: strategy-name
+// chips removed from the mode cards (front-page clutter).
 
 // Restrained palette: colour carries meaning only.
 //   rose  = critical severity   emerald/rose text = signed P&L (via pnlCl)
@@ -22,9 +24,9 @@ const SEV_STYLE = {
 };
 const SEV_RANK = { critical: 0, warning: 1, info: 2 };
 
-function EquityCurve({ data, color }) {
+function EquityCurve({ data, color, emptyLabel = 'No equity history yet' }) {
   if (!data || data.length < 2) {
-    return <div className="h-32 flex items-center justify-center text-[11px] text-slate-600">No equity history yet</div>;
+    return <div className="h-32 flex items-center justify-center text-[11px] text-slate-600">{emptyLabel}</div>;
   }
   const margin = { left: 42, right: 8, top: 8, bottom: 22 };
   const values = data.map(d => d.equity);
@@ -151,6 +153,15 @@ const LinkBtn = ({ children, onClick }) => (
   <button onClick={onClick} className="text-[10px] font-semibold text-blue-400 hover:text-blue-300">{children}</button>
 );
 
+// Compact KPI tile used by the mode-scoped book grid (Zone 2).
+const KpiTile = ({ label, value, valueCl = 'text-white', sub, tip }) => (
+  <div className="qr-surface p-2.5 flex flex-col justify-center" title={tip}>
+    <div className="qr-label">{label}</div>
+    <div className={`font-mono text-lg font-bold mt-0.5 ${valueCl}`}>{value}</div>
+    {sub != null && <div className="text-[9px] text-slate-500 mt-0.5">{sub}</div>}
+  </div>
+);
+
 // Freshness wrapper for surfaces that are not Panel components (KPI grids,
 // asset-class boxes). Same contract: STALE = desaturate + hatch,
 // DISCONNECTED = masked numbers + muted last-known footer.
@@ -175,22 +186,51 @@ const FreshWrap = ({ fresh, lastKnown, className = '', children }) => {
 };
 
 // ---------------------------------------------------------------------------
-// ZONE 1 — P&L by Mode
+// ZONE 1 — P&L by Mode (4 clickable book selectors: the card you click
+// drives every figure in the zone below it)
 // ---------------------------------------------------------------------------
 const MODE_DEFS = [
-  { key: 'sim', label: 'Simulation' },
-  { key: 'paper', label: 'Paper' },
-  { key: 'live', label: 'Live' },
+  { key: 'sim', label: 'Sim', title: 'Simulation' },
+  { key: 'paper', label: 'Paper', title: 'Paper' },
+  { key: 'uat', label: 'UAT', title: 'UAT' },
+  { key: 'live', label: 'Live', title: 'Live' },
 ];
 
-const ModePanel = ({ label, m, fresh }) => {
-  const empty = m == null || (m.closed_trades === 0 && m.open_trades === 0 && m.cum_pnl == null);
+const ModePanel = ({ label, modeKey, m, fresh, selected, onSelect }) => {
+  const isUat = modeKey === 'uat';
+  const empty = m == null || (isUat ? !m.fills : (m.closed_trades === 0 && m.open_trades === 0 && m.cum_pnl == null));
   return (
+    <div role="button" tabIndex={0} onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
+      className={`rounded-lg cursor-pointer transition-shadow ${selected ? 'ring-1 ring-slate-300/50 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' : 'ring-1 ring-transparent hover:ring-white/[0.15]'}`}
+      title={selected ? `${label} book selected — the figures below follow this mode` : `Show the ${label} book below`}>
     <Panel title={label} fresh={fresh} action={
-      m?.win_rate != null
-        ? <span className="font-mono text-[10px] text-slate-400" title="Win rate over closed trades">WR {m.win_rate}%</span>
-        : null
+      isUat
+        ? <span className="text-[8px] font-bold uppercase tracking-wide text-slate-500" title="gold.paper_uat_fills is a fills ledger — round-trip P&L / win rate stay pending until qr_etl builds the UAT round-trip ledger">fills only</span>
+        : m?.win_rate != null
+          ? <span className="font-mono text-[10px] text-slate-400" title="Win rate over closed trades">WR {m.win_rate}%</span>
+          : null
     }>
+      {isUat ? (
+        <div className="px-3 pt-2.5 pb-2">
+          <div className="flex items-end justify-between">
+            <div>
+              <div className="font-mono text-[22px] font-black leading-none text-slate-600">—</div>
+              <div className="text-[9px] text-slate-500 mt-1">round-trip P&amp;L pending</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[9px] uppercase tracking-wide text-slate-500">Fills today</div>
+              <div className="font-mono text-[13px] font-bold text-slate-200">{m?.fills_today ?? 0}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 mt-2 text-[10px] font-mono text-slate-400">
+            <span title="Broker-rehearsal fills (gold.paper_uat_fills)">{m?.fills ?? 0} fills</span>
+            <span title="Distinct strategies with fills">{m?.strategies_active ?? 0} strateg{(m?.strategies_active ?? 0) === 1 ? 'y' : 'ies'}</span>
+            {m?.last_fill_at && <span title={`Last fill ${m.last_fill_at}`}>last {fmtAge(m.last_fill_at)}</span>}
+          </div>
+          <div className="mt-1.5 h-[36px] flex items-center justify-center text-[9px] text-slate-700">no round-trip history — fills only</div>
+        </div>
+      ) : (
       <div className="px-3 pt-2.5 pb-2">
         <div className="flex items-end justify-between">
           <div>
@@ -213,26 +253,17 @@ const ModePanel = ({ label, m, fresh }) => {
           <span title="Open positions">{m?.open_trades ?? 0} open</span>
         </div>
 
-        {m && m.strategies && m.strategies.length > 0 ? (
-          <div className="flex flex-wrap gap-1 mt-2" title="Strategies with open trades in this mode">
-            {m.strategies.map(s => (
-              <span key={s.strategy_id} className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.05] text-slate-300 truncate max-w-[130px]" title={`${s.name} · ${s.open_trades} open`}>
-                {s.name}
-              </span>
-            ))}
-            {m.strategies_overflow > 0 && (
-              <span className="text-[9px] px-1 py-0.5 text-slate-500">+{m.strategies_overflow} more</span>
-            )}
-          </div>
-        ) : (
-          <div className="text-[9px] text-slate-600 mt-2 h-[18px]">{empty ? 'no trades in this mode yet' : 'no open positions'}</div>
-        )}
+        <div className="text-[9px] text-slate-600 mt-2 h-[18px] flex items-center">
+          {empty ? 'no trades in this mode yet' : (m?.open_trades ? '' : 'no open positions')}
+        </div>
 
         <div className="mt-1.5">
           <Sparkline data={m?.spark} />
         </div>
       </div>
+      )}
     </Panel>
+    </div>
   );
 };
 
@@ -505,6 +536,13 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   const [orders, setOrders] = useState(null);
   const [regimeFc, setRegimeFc] = useState(null);
   const [oppPicks, setOppPicks] = useState([]);
+  // Selected book (Zone 1 cards drive Zone 2). Default Paper — the book with
+  // live signal flow; Live starts empty and Sim is a pure backtest replay.
+  const [selMode, setSelMode] = useState('paper');
+  // Per-book overview for the selected mode (sim/paper/uat only — the live
+  // book reads from overview.account.books.live instead). Tagged with the
+  // book it was fetched for so a stale payload never shows under a new mode.
+  const [bookOv, setBookOv] = useState(null);
   const registry = useFreshness();
   const barQ = useBarQuality();
   const bqView = barQualityView(barQ.loaded, barQ.bq);
@@ -517,6 +555,20 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   usePoll(async () => {
     const res = await api.get('/api/command/pnl-by-mode');
     if (res) setPnlMode(res);
+  }, 60000);
+
+  useEffect(() => {
+    if (selMode === 'live') return;
+    let cancelled = false;
+    api.get(`/api/execution/book-overview?book=${selMode}`).then(res => {
+      if (res && !cancelled) setBookOv({ book: selMode, payload: res });
+    });
+    return () => { cancelled = true; };
+  }, [selMode]);
+  usePoll(async () => {
+    if (selMode === 'live') return;
+    const res = await api.get(`/api/execution/book-overview?book=${selMode}`);
+    if (res) setBookOv({ book: selMode, payload: res });
   }, 60000);
 
   usePoll(async () => {
@@ -565,11 +617,8 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   const openPnl = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
 
   const account = overview?.account;
-  const equity = account?.equity;
   const eqCurve = overview?.equity_curve || [];
   const ret30 = eqCurve.length > 1 ? ((eqCurve[eqCurve.length - 1].equity - eqCurve[0].equity) / eqCurve[0].equity) * 100 : null;
-  const gross = account?.gross_exp_pct;
-  const net = account?.net_exp_pct;
 
   const strategyRisks = useMemo(() => overview?.strategy_risks || [], [overview]);
   const monitoringGap = overview?.monitoring_gap || 0;
@@ -697,36 +746,51 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
         </div>
       </div>
 
-      {/* ZONE 1 — P&L by Mode: the most important information on the page */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* ZONE 1 — P&L by Mode: the most important information on the page.
+          Cards are selectors — clicking one re-scopes the book zone below. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {MODE_DEFS.map(md => (
-          <ModePanel key={md.key} label={md.label} m={pnlMode?.modes?.[md.key]} fresh={fPnlMode} />
+          <ModePanel key={md.key} label={md.label} modeKey={md.key} m={pnlMode?.modes?.[md.key]}
+            fresh={fPnlMode} selected={selMode === md.key} onSelect={() => setSelMode(md.key)} />
         ))}
       </div>
 
-      {/* ZONE 2 — My Book */}
+      {/* ZONE 2 — selected Book: every figure follows the card clicked above */}
+      {(() => {
+        const modeTitle = MODE_DEFS.find(md => md.key === selMode)?.title || selMode;
+        const isLive = selMode === 'live';
+        const isUat = selMode === 'uat';
+        // Live book: canonical consumption.account_summary row (verbatim),
+        // falling back to the combined aggregate when the live row is absent.
+        const acctLive = account?.books?.live || account;
+        // Sim/Paper/UAT: per-book overview (stats + YTD realized curve).
+        const bo = bookOv && bookOv.book === selMode ? bookOv.payload : null;
+        const st = bo?.stats;
+        const boCurve = (bo?.ytd_curve || []).map(p => ({ d: p.d, equity: p.cum }));
+        return (
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <span className="qr-label flex items-center gap-2">My Book <FreshTag fresh={fBook} /></span>
+          <span className="qr-label flex items-center gap-2">{modeTitle} Book <FreshTag fresh={fBook} /></span>
           <LinkBtn onClick={() => navigateToTab('execution')}>Portfolio →</LinkBtn>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-3">
-          <Panel title="Last 30 Sessions" fresh={{ ...fBook, lastKnown: equity != null ? fmtK(equity) : '—' }} action={
+          {isLive ? (
+          <Panel title="Last 30 Sessions" fresh={{ ...fBook, lastKnown: acctLive?.equity != null ? fmtK(acctLive.equity) : '—' }} action={
             ret30 != null ? <span className={`qr-num text-[11px] font-bold ${pnlCl(ret30)}`}>{fmtPct(ret30)}</span> : null
           }>
             <div className="px-3.5 pt-2.5 pb-1 flex items-end justify-between">
               <div>
-                <div className="font-mono text-2xl font-black text-white leading-none">{equity != null ? fmtK(equity) : '—'}</div>
-                <div className="text-[10px] text-slate-500 mt-1">{positions.length} open positions{account?.cash_pct != null ? ` · ${Math.round(account.cash_pct)}% cash` : ''}</div>
+                <div className="font-mono text-2xl font-black text-white leading-none">{acctLive?.equity != null ? fmtK(acctLive.equity) : '—'}</div>
+                <div className="text-[10px] text-slate-500 mt-1">{acctLive?.positions ?? positions.length} open positions{acctLive?.cash_pct != null ? ` · ${Math.round(acctLive.cash_pct)}% cash` : ''}</div>
               </div>
               <div className="text-right">
                 <div className="text-[9px] uppercase tracking-wide text-slate-500">Day P&L</div>
                 <div className="flex items-baseline gap-1.5 justify-end">
-                  <span className={`font-mono text-[17px] font-black ${pnlCl(account?.day_pnl)}`}>{account?.day_pnl != null ? fmtK(account.day_pnl) : '—'}</span>
+                  <span className={`font-mono text-[17px] font-black ${pnlCl(acctLive?.day_pnl)}`}>{acctLive?.day_pnl != null ? fmtK(acctLive.day_pnl) : '—'}</span>
                   {/* bps, not %: 1dp percent is below the resolution of a multi-$M book */}
-                  {account?.day_pnl != null && equity ? (
-                    <span className={`font-mono text-[11px] ${pnlCl(account.day_pnl)}`} title="Day P&L as basis points of equity">
-                      {(account.day_pnl / equity * 1e4) >= 0 ? '+' : ''}{(account.day_pnl / equity * 1e4).toFixed(1)} bps
+                  {acctLive?.day_pnl != null && acctLive?.equity ? (
+                    <span className={`font-mono text-[11px] ${pnlCl(acctLive.day_pnl)}`} title="Day P&L as basis points of equity">
+                      {(acctLive.day_pnl / acctLive.equity * 1e4) >= 0 ? '+' : ''}{(acctLive.day_pnl / acctLive.equity * 1e4).toFixed(1)} bps
                     </span>
                   ) : null}
                 </div>
@@ -734,16 +798,60 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
             </div>
             <EquityCurve data={eqCurve} color="#60a5fa" />
           </Panel>
+          ) : (
+          <Panel title={isUat ? 'UAT Fills' : 'Cumulative Realized · YTD'} fresh={fBook} action={
+            !isUat && st?.win_rate != null
+              ? <span className="font-mono text-[10px] text-slate-400" title="Win rate over closed trades">WR {st.win_rate}%</span>
+              : null
+          }>
+            <div className="px-3.5 pt-2.5 pb-1 flex items-end justify-between">
+              <div>
+                {isUat ? (
+                  <>
+                    <div className="font-mono text-2xl font-black text-slate-600 leading-none">—</div>
+                    <div className="text-[10px] text-slate-500 mt-1"
+                      title="gold.paper_uat_fills is a fills ledger, not round-trips — a per-strategy UAT P&L ledger is qr_etl's domain">
+                      fills-only ledger · round-trip P&amp;L pending
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className={`font-mono text-2xl font-black leading-none ${st?.ytd_pnl != null ? pnlCl(st.ytd_pnl) : 'text-slate-600'}`}>
+                      {st?.ytd_pnl != null ? `${st.ytd_pnl >= 0 ? '+' : ''}${fmtK(st.ytd_pnl)}` : '—'}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      YTD realized{st?.cum_pnl != null ? ` · all-time ${st.cum_pnl >= 0 ? '+' : ''}${fmtK(st.cum_pnl)}` : ''}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="text-right">
+                <div className="text-[9px] uppercase tracking-wide text-slate-500">Today</div>
+                {isUat ? (
+                  <div className="font-mono text-[17px] font-black text-slate-200" title="Fills today">{st?.today?.trades ?? 0} fills</div>
+                ) : (
+                  <div className={`font-mono text-[17px] font-black ${st?.today ? pnlCl(st.today.pnl) : 'text-slate-600'}`}
+                    title={st?.today ? `${st.today.trades} closed trade${st.today.trades === 1 ? '' : 's'} today` : 'no exits today'}>
+                    {st?.today ? `${st.today.pnl >= 0 ? '+' : ''}${fmtK(st.today.pnl)}` : '—'}
+                  </div>
+                )}
+              </div>
+            </div>
+            <EquityCurve data={boCurve} color="#60a5fa"
+              emptyLabel={isUat ? 'no round-trip history — fills only' : bo == null ? 'Loading book…' : 'No realized P&L this year'} />
+          </Panel>
+          )}
 
-          {/* 2x2 KPI grid: Open P&L · Net Cash Flow · Buying Power · Net Exposure */}
-          <FreshWrap fresh={fBook} lastKnown={account?.open_pnl != null ? fmtK(account.open_pnl) : fmtK(openPnl)} className="grid grid-cols-2 gap-2">
+          {isLive ? (
+          /* 2x2 KPI grid: Open P&L · Net Cash Flow · Buying Power · Net Exposure */
+          <FreshWrap fresh={fBook} lastKnown={acctLive?.open_pnl != null ? fmtK(acctLive.open_pnl) : fmtK(openPnl)} className="grid grid-cols-2 gap-2">
             <div className="qr-surface p-2.5 flex flex-col justify-center">
               <div className="qr-label">Open P&amp;L</div>
-              <div className={`font-mono text-lg font-bold mt-0.5 ${pnlCl(account?.open_pnl ?? openPnl)}`}>
-                {account?.open_pnl != null ? fmtK(account.open_pnl) : fmtK(openPnl)}
+              <div className={`font-mono text-lg font-bold mt-0.5 ${pnlCl(acctLive?.open_pnl ?? openPnl)}`}>
+                {acctLive?.open_pnl != null ? fmtK(acctLive.open_pnl) : fmtK(openPnl)}
               </div>
-              {account?.equity ? (
-                <div className="text-[9px] text-slate-500 mt-0.5">{fmtPct(((account.open_pnl ?? openPnl) / account.equity) * 100)}</div>
+              {acctLive?.equity ? (
+                <div className="text-[9px] text-slate-500 mt-0.5">{fmtPct(((acctLive.open_pnl ?? openPnl) / acctLive.equity) * 100)}</div>
               ) : null}
             </div>
 
@@ -754,28 +862,22 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
                 ingested) → distinct 'no live source' treatment. */}
             {(() => {
               const cfL = overview?.cash_flow?.live;
-              const cfP = overview?.cash_flow?.paper;
-              const mtdParts = [cfL?.mtd_net, cfP?.mtd_net].filter(v => v != null);
-              const mtd = mtdParts.length ? mtdParts.reduce((a, b) => a + b, 0) : null;
-              const todayParts = [cfL?.today_net, cfP?.today_net].filter(v => v != null);
-              const today = todayParts.length ? todayParts.reduce((a, b) => a + b, 0) : null;
               const liveHasSource = !!(cfL && (cfL.mtd_net != null || cfL.net_all_time != null || cfL.last_flow_date != null));
-              const tip = 'Net cash flow (deposits − withdrawals), consumption.account_cash_flow_summary.'
-                + ` Paper: MTD ${cfP?.mtd_net != null ? fmtK(cfP.mtd_net) : '—'} (${cfP?.flows_mtd_count ?? 0} flows this month, last ${cfP?.last_flow_date ?? '—'}, all-time ${cfP?.net_all_time != null ? fmtK(cfP.net_all_time) : '—'}).`
+              const tip = 'Net cash flow (deposits − withdrawals), consumption.account_cash_flow_summary — live book.'
                 + (liveHasSource
-                    ? ` Live: MTD ${cfL.mtd_net != null ? fmtK(cfL.mtd_net) : '—'} (${cfL.flows_mtd_count} flows, last ${cfL.last_flow_date ?? '—'}).`
-                    : ' Live: no cash-flow source (IBKR cash transactions not yet ingested).');
+                    ? ` MTD ${cfL.mtd_net != null ? fmtK(cfL.mtd_net) : '—'} (${cfL.flows_mtd_count} flows, last ${cfL.last_flow_date ?? '—'}).`
+                    : ' No cash-flow source yet (IBKR cash transactions not yet ingested).');
               return (
                 <div className="qr-surface p-2.5 flex flex-col justify-center" title={tip}>
                   <div className="qr-label flex items-center gap-1.5">Net Cash Flow
                     <span className="text-[8px] uppercase tracking-wide text-slate-500">mtd</span>
                   </div>
-                  <div className={`font-mono text-lg font-bold mt-0.5 ${mtd != null ? pnlCl(mtd) : 'text-slate-600'}`}>
-                    {mtd != null ? `${mtd >= 0 ? '+' : ''}${fmtK(mtd)}` : '—'}
+                  <div className={`font-mono text-lg font-bold mt-0.5 ${cfL?.mtd_net != null ? pnlCl(cfL.mtd_net) : 'text-slate-600'}`}>
+                    {cfL?.mtd_net != null ? `${cfL.mtd_net >= 0 ? '+' : ''}${fmtK(cfL.mtd_net)}` : '—'}
                   </div>
                   <div className="text-[9px] text-slate-500 mt-0.5">
-                    today {today != null ? `${today >= 0 ? '+' : ''}${fmtK(today)}` : '—'}
-                    {cfP?.flows_mtd_count ? ` · paper ${cfP.flows_mtd_count} flows` : ''}
+                    today {cfL?.today_net != null ? `${cfL.today_net >= 0 ? '+' : ''}${fmtK(cfL.today_net)}` : '—'}
+                    {cfL?.flows_mtd_count ? ` · ${cfL.flows_mtd_count} flows` : ''}
                   </div>
                   {!liveHasSource && (
                     <div className="text-[8px] text-slate-600 mt-0.5">live book: no source</div>
@@ -787,27 +889,51 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
             <div className="qr-surface p-2.5 flex flex-col justify-center">
               <div className="qr-label">Buying Power</div>
               <div className="font-mono text-lg font-bold mt-0.5 text-white">
-                {account?.buying_power != null ? fmtK(account.buying_power) : '—'}
+                {acctLive?.buying_power != null ? fmtK(acctLive.buying_power) : '—'}
               </div>
-              {account?.cash_pct != null && (
-                <div className="text-[9px] text-slate-500 mt-0.5">{Number(account.cash_pct).toFixed(1)}% cash</div>
+              {acctLive?.cash_pct != null && (
+                <div className="text-[9px] text-slate-500 mt-0.5">{Number(acctLive.cash_pct).toFixed(1)}% cash</div>
               )}
             </div>
 
             <div className="qr-surface p-2.5 flex flex-col justify-center"
-              title={`Long ${equity ? ((longMV / equity) * 100).toFixed(1) : '—'}% vs short ${equity ? ((shortMV / equity) * 100).toFixed(1) : '—'}% of equity · gross ${gross != null ? gross.toFixed(1) : '—'}%`}>
+              title={`Long ${acctLive?.equity ? ((longMV / acctLive.equity) * 100).toFixed(1) : '—'}% vs short ${acctLive?.equity ? ((shortMV / acctLive.equity) * 100).toFixed(1) : '—'}% of equity · gross ${acctLive?.gross_exp_pct != null ? acctLive.gross_exp_pct.toFixed(1) : '—'}%`}>
               <div className="qr-label">Net Exposure</div>
-              <div className={`font-mono text-lg font-bold mt-0.5 ${net != null ? pnlCl(net) : 'text-slate-600'}`}>
-                {net != null ? `${net >= 0 ? '+' : ''}${net.toFixed(1)}%` : '—'}
+              <div className={`font-mono text-lg font-bold mt-0.5 ${acctLive?.net_exp_pct != null ? pnlCl(acctLive.net_exp_pct) : 'text-slate-600'}`}>
+                {acctLive?.net_exp_pct != null ? `${acctLive.net_exp_pct >= 0 ? '+' : ''}${acctLive.net_exp_pct.toFixed(1)}%` : '—'}
               </div>
               <div className="text-[9px] text-slate-500 mt-0.5">
-                gross {gross != null ? `${gross.toFixed(1)}%` : '—'}
-                {equity ? ` · L ${((longMV / equity) * 100).toFixed(0)}% / S ${((shortMV / equity) * 100).toFixed(0)}%` : ''}
+                gross {acctLive?.gross_exp_pct != null ? `${acctLive.gross_exp_pct.toFixed(1)}%` : '—'}
+                {acctLive?.equity ? ` · L ${((longMV / acctLive.equity) * 100).toFixed(0)}% / S ${((shortMV / acctLive.equity) * 100).toFixed(0)}%` : ''}
               </div>
             </div>
           </FreshWrap>
+          ) : isUat ? (
+          <FreshWrap fresh={fBook} className="grid grid-cols-2 gap-2">
+            <KpiTile label="Total Fills" value={st?.total_fills ?? '—'} sub={`${st?.ytd_trades ?? 0} this year`}
+              tip="Broker-rehearsal fills (gold.paper_uat_fills) — fills, not round-trips" />
+            <KpiTile label="Fills Today" value={st?.today?.trades ?? 0} />
+            <KpiTile label="Last Fill" value={st?.last_fill_at ? fmtAge(st.last_fill_at) : '—'} sub={st?.last_fill_at || undefined} />
+            <KpiTile label="Round-Trip P&L" value="—" valueCl="text-slate-600" sub="ledger pending"
+              tip="A per-strategy UAT round-trip P&L ledger is qr_etl's domain — never derived serve-time" />
+          </FreshWrap>
+          ) : (
+          <FreshWrap fresh={fBook} lastKnown={st?.cum_pnl != null ? fmtK(st.cum_pnl) : '—'} className="grid grid-cols-2 gap-2">
+            <KpiTile label="Win Rate" value={st?.win_rate != null ? `${st.win_rate}%` : '—'}
+              valueCl={st?.win_rate != null ? 'text-white' : 'text-slate-600'}
+              sub={`${st?.closed_trades ?? 0} closed all-time`} tip="Wins / closed trades" />
+            <KpiTile label="Open Positions" value={st?.open_trades ?? '—'} sub="actively monitored" />
+            <KpiTile label="Today" value={st?.today ? `${st.today.pnl >= 0 ? '+' : ''}${fmtK(st.today.pnl)}` : '—'}
+              valueCl={st?.today ? pnlCl(st.today.pnl) : 'text-slate-600'}
+              sub={st?.today ? `${st.today.trades} exits` : 'no exits today'} />
+            <KpiTile label="Cum P&L" value={st?.cum_pnl != null ? `${st.cum_pnl >= 0 ? '+' : ''}${fmtK(st.cum_pnl)}` : '—'}
+              valueCl={st?.cum_pnl != null ? pnlCl(st.cum_pnl) : 'text-slate-600'} sub="all-time realized" />
+          </FreshWrap>
+          )}
         </div>
       </div>
+        );
+      })()}
 
       {/* ZONE 3 — Regime Forecast + Top Opportunities (~45/55) */}
       <div className="grid grid-cols-1 lg:grid-cols-[0.82fr_1fr] gap-3">

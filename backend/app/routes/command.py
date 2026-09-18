@@ -840,6 +840,34 @@ def _mode_ledger_queries(mode):
     }
 
 
+def _uat_mode_summary(db):
+    """UAT mode summary: broker-rehearsal fills only (gold.paper_uat_fills).
+    Fills are not round-trips, so cum_pnl / win_rate / today P&L stay None —
+    a per-strategy UAT round-trip ledger is qr_etl's domain and is never
+    derived serve-time. Counts are fills, not trades."""
+    agg = safe_query_one(db, """
+        SELECT COUNT(*) AS fills,
+               COUNT(*) FILTER (WHERE fill_time::date = CURRENT_DATE) AS fills_today,
+               COUNT(DISTINCT strategy_id) AS strategies,
+               MAX(fill_time) AS last_fill_at
+        FROM gold.paper_uat_fills
+    """, label="pnl_mode_uat_fills")
+    return {
+        "cum_pnl": None,
+        "today": None,
+        "win_rate": None,
+        "closed_trades": None,
+        "open_trades": None,
+        "fills": int(agg.fills or 0) if agg else 0,
+        "fills_today": int(agg.fills_today or 0) if agg else 0,
+        "strategies_active": int(agg.strategies or 0) if agg else 0,
+        "last_fill_at": agg.last_fill_at.isoformat() if agg and agg.last_fill_at else None,
+        "strategies": [],
+        "strategies_overflow": 0,
+        "spark": [],
+    }
+
+
 @router.get("/command/pnl-by-mode")
 def get_command_pnl_by_mode(db: Session = Depends(get_db)):
     """P&L by execution mode — the Command page hero.
@@ -848,9 +876,13 @@ def get_command_pnl_by_mode(db: Session = Depends(get_db)):
     exits today), win rate over closed trades, open/closed trade counts,
     strategies currently deployed in that mode (open-trade bearers), and a
     30-day cumulative realized P&L sparkline (carry-forward over quiet days).
+    UAT is fills-only (no round-trip P&L) — see _uat_mode_summary.
     """
     modes = {}
-    for mode in ("live", "paper", "sim"):
+    for mode in ("live", "paper", "sim", "uat"):
+        if mode == "uat":
+            modes[mode] = _uat_mode_summary(db)
+            continue
         q = _mode_ledger_queries(mode)
         closed_row = safe_query_one(db, q["closed"], label=f"pnl_mode_{mode}_closed")
         today_row = safe_query_one(db, q["today"], label=f"pnl_mode_{mode}_today")
