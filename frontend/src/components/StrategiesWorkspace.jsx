@@ -93,11 +93,12 @@ function AssetSeg({ asset, setAsset, opts, counts }) {
   );
 }
 
-function Metric({ label, value, color, big }) {
+function Metric({ label, value, color, big, tip, sub }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }} title={tip || undefined}>
       <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>{label}</span>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: big ? 15 : 12, fontWeight: 700, color: color || 'var(--text-secondary)' }}>{value}</span>
+      {sub && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--text-faint)' }}>{sub}</span>}
     </div>
   );
 }
@@ -111,11 +112,20 @@ function Metric({ label, value, color, big }) {
 // openBar (paper mode only): mark-to-market OPEN book, rendered as a dashed
 // outline bar labelled 'open' — visibly distinct from solid realized bars so
 // unrealized P&L is never mistaken for a closed-trade return.
-export function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet', normalize = true, openBar = null }) {
+// oosStart/oosEnd (sim mode, ISO dates from the latest backtest run):
+//   - a bar year BEFORE the OOS window is an in-sample year → hatched fill +
+//     tooltip disclosure, so IS values are never read as OOS performance.
+//   - the year containing oos_end is partial → YTD tag under the year label.
+//   - OOS years with no stored annual return stay absent (never estimated);
+//     the coverage gap is disclosed on the section label's tooltip.
+export function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet', normalize = true, openBar = null, oosStart = null, oosEnd = null }) {
   const years = Object.keys(yearly || {}).sort();
   const entries = years
     .map((y) => ({ y, v: normalize ? fracToPct(yearly[y]?.return_pct, 1) : (yearly[y]?.return_pct != null ? +Number(yearly[y].return_pct).toFixed(1) : null) }))
     .filter((e) => e.v != null);
+  const oosStartYear = oosStart ? Number(String(oosStart).slice(0, 4)) : null;
+  // Partial when the window closes before Dec 31 of that year.
+  const ytdYear = oosEnd && String(oosEnd).slice(5, 10) < '12-31' ? Number(String(oosEnd).slice(0, 4)) : null;
   const showOpen = openBar && openBar.v != null;
   if (!entries.length && !showOpen) {
     return <div style={{ padding: '6px 0', fontSize: 9, color: 'var(--text-faint)', textAlign: 'center' }}>{emptyLabel}</div>;
@@ -127,21 +137,34 @@ export function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet',
   const max = Math.max(...entries.map((e) => Math.abs(e.v)), showOpen ? Math.abs(openBar.v) : 0, 5);
   return (
     <div style={{ display: 'flex', gap: 4 }}>
-      {entries.map(({ y, v }) => (
+      {entries.map(({ y, v }) => {
+        const isIS = oosStartYear != null && Number(y) < oosStartYear;
+        const isYTD = ytdYear != null && Number(y) === ytdYear;
+        const barColor = v >= 0 ? 'var(--signal-buy)' : 'var(--signal-sell)';
+        const tipParts = [];
+        if (isIS) tipParts.push(`in-sample year — OOS window starts ${oosStart}`);
+        if (isYTD) tipParts.push(`year-to-date through ${oosEnd}`);
+        if (yearly[y]?.pnl != null) tipParts.push(`$${Number(yearly[y].pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })} · ${yearly[y].trades ?? 0} closed trade${yearly[y].trades === 1 ? '' : 's'}`);
+        return (
         <div
           key={y}
           // Fixed slot width: with flex:1 a single year of data stretched to
           // the full strip width and read as one giant block.
           style={{ flex: '0 0 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
-          title={yearly[y]?.pnl != null ? `$${Number(yearly[y].pnl).toLocaleString(undefined, { maximumFractionDigits: 0 })} · ${yearly[y].trades ?? 0} closed trade${yearly[y].trades === 1 ? '' : 's'}` : undefined}
+          title={tipParts.length ? tipParts.join(' · ') : undefined}
         >
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 8, fontWeight: 700, color: v >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)' }}>{v >= 0 ? '+' : ''}{Number(v).toFixed(1)}%</span>
           <div style={{ height: 22, width: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-            <div style={{ height: `${Math.abs(v) / max * 100}%`, minHeight: 2, borderRadius: 2, background: v >= 0 ? 'var(--signal-buy)' : 'var(--signal-sell)', opacity: 0.85 }} />
+            <div style={{
+              height: `${Math.abs(v) / max * 100}%`, minHeight: 2, borderRadius: 2, opacity: isIS ? 0.55 : 0.85,
+              background: isIS ? `repeating-linear-gradient(45deg, ${barColor} 0 2px, transparent 2px 5px)` : barColor,
+            }} />
           </div>
-          <span style={{ fontSize: 7, color: 'var(--text-faint)' }}>{y}</span>
+          <span style={{ fontSize: 7, color: 'var(--text-faint)' }}>{y}{isIS ? '·IS' : ''}</span>
+          {isYTD && <span style={{ fontSize: 6, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-muted)', marginTop: -2 }}>YTD</span>}
         </div>
-      ))}
+        );
+      })}
       {showOpen && (
         <div
           key="open"
@@ -220,13 +243,30 @@ function RealMetrics({ s, mode }) {
     );
   }
 
+  // Sim (backtest/OOS) block. returns_oos semantics differ per strategy (CAGR
+  // on some runs, total return on others) and win-rate / trade-count bases
+  // differ per strategy too (per month/day vs per leg/rebalance event) —
+  // disclose both on tooltips instead of letting the numbers read as
+  // directly comparable. Unit normalization is tracked upstream (qr_etl
+  // t_fcfe5f4f); nothing is re-derived or estimated here.
+  const oosStart = s._api?.oos_start || null;
+  const oosEnd = s._api?.oos_end || null;
+  const oosWinShort = oosStart && oosEnd ? `${oosStart.slice(0, 7)}→${oosEnd.slice(0, 7)}` : null;
+  const oosTrades = s._api?.trade_count_oos;
+  const btWRn = s.btWR != null ? Number(s.btWR) : null;
+  // Non-integer WR×trades proves the WR base is not this trade count.
+  const wrMixedBase = btWRn != null && oosTrades > 0
+    && Math.abs((btWRn / 100) * oosTrades - Math.round((btWRn / 100) * oosTrades)) > 0.15;
+  const returnTip = `Stored OOS return of the latest backtest run${oosStart && oosEnd ? `, window ${oosStart} → ${oosEnd}` : ''}. Annualization basis differs per strategy (CAGR on some, total return on others) — unit normalization tracked in qr_etl t_fcfe5f4f; compare strategies via the annual bars, not this number alone.`;
+  const wrTip = `Win rate over this strategy's own OOS base (per trade / month / day — set by each run's convention).${wrMixedBase ? ' For this strategy the base is NOT the trade count shown, so WR × trades is not an integer.' : ''} Not directly comparable across strategies.`;
+  const tradesTip = 'OOS trade/event count from the latest backtest run; counting convention (legs vs rebalance events) differs per strategy.';
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
-      <Metric label="Return (BT)" value={s.returns != null ? `${s.returns >= 0 ? '+' : ''}${s.returns}%` : '—'} color={s.returns == null ? undefined : s.returns >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
+      <Metric label="Return (BT)" value={s.returns != null ? `${s.returns >= 0 ? '+' : ''}${s.returns}%` : '—'} color={s.returns == null ? undefined : s.returns >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big tip={returnTip} sub={oosWinShort ? `OOS ${oosWinShort}` : null} />
       <Metric label="Sharpe" value={s.sharpe ? s.sharpe.toFixed(2) : '—'} big />
-      <Metric label="Win rate" value={s.btWR != null ? `${s.btWR}%` : '—'} color={s.btWR == null ? undefined : s.btWR >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
+      <Metric label="Win rate" value={s.btWR != null ? `${s.btWR}%` : '—'} color={s.btWR == null ? undefined : s.btWR >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big tip={wrTip} />
       <Metric label="Max DD" value={s.dd != null ? `${s.dd}%` : '—'} color="var(--pnl-neg)" />
-      <Metric label="Trades (OOS)" value={s._api?.trade_count_oos ?? '—'} />
+      <Metric label="Trades (OOS)" value={s._api?.trade_count_oos ?? '—'} tip={tradesTip} />
       <Metric label="Conviction" value={conviction != null ? Number(conviction).toFixed(1) : '—'} />
     </div>
   );
@@ -378,10 +418,19 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
   // (kanban t_b64f7302) — show the rung but keep it disabled, no fake affordance.
   const nextBlocked = s.mode === 'UAT' && next === 'LIVE_TRADING';
   const NEXT_CTA = { PAPER_TRADING: 'Promote to Paper →', UAT: 'Promote to UAT →', LIVE_TRADING: 'Deploy Live →' };
+  const oosStart = s._api?.oos_start || null;
+  const oosEnd = s._api?.oos_end || null;
   const barsLabel = viewMode === 'paper' ? 'Paper returns · % of assigned capital (solid realized · outline open book)'
     : viewMode === 'live' ? 'Live returns'
     : viewMode === 'uat' ? 'Broker rehearsal — fills-based metrics pending qr_etl mirror'
-    : 'Annual backtest returns';
+    : (oosStart && oosEnd ? `Annual returns · OOS ${oosStart.slice(0, 7)}→${oosEnd.slice(0, 7)}` : 'Annual backtest returns');
+  // Bars honesty legend (sim): hatched = in-sample year (before OOS start),
+  // YTD = partial year through the window end, and OOS years with no stored
+  // annual return stay absent rather than estimated (book-level annual
+  // recompute tracked in qr_etl t_fcfe5f4f).
+  const barsTip = viewMode === 'sim'
+    ? 'Calendar-year returns of the latest backtest run. Hatched bar (·IS) = in-sample year before the OOS window. YTD = partial year through the window end. OOS years with no bar have no stored annual return — recompute in progress (qr_etl t_fcfe5f4f), never estimated.'
+    : undefined;
   const barsData = viewMode === 'sim' ? s._api?.yearly_backtest : viewMode === 'paper' ? s._api?.paper_yearly : null;
   const barsNormalize = viewMode === 'sim';
   const openBar = viewMode === 'paper' && s._api?.paper_open?.return_pct != null
@@ -409,8 +458,8 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
       <RealMetrics s={s} mode={viewMode} />
 
       <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>{barsLabel}</span>
-        <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → UAT' : undefined} />
+        <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }} title={barsTip}>{barsLabel}</span>
+        <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} oosStart={viewMode === 'sim' ? oosStart : null} oosEnd={viewMode === 'sim' ? oosEnd : null} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → UAT' : undefined} />
       </div>
 
       {showLadder && (
@@ -581,7 +630,7 @@ export function StrategyPipelineBoard({ book, error, hzn, setHzn, onOpen, onActi
       </div>
 
       <div className="strat-pipeline-grid">
-        {LADDER.map((st, i) => {
+        {LADDER.map((st) => {
           const items = view.filter((s) => s.mode === st.mode);
           return (
             <div key={st.mode} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

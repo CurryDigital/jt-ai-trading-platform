@@ -167,7 +167,9 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                        max_drawdown_oos,
                        win_rate_oos,
                        profit_factor_oos,
-                       returns_oos
+                       returns_oos,
+                       oos_start,
+                       oos_end
                 FROM gold.strategy_backtest_runs
                 WHERE strategy_id IS NOT NULL
                 ORDER BY strategy_id, created_at DESC
@@ -186,6 +188,10 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                     'win_rate_oos': float(yb.win_rate_oos) if yb.win_rate_oos is not None else None,
                     'profit_factor_oos': float(yb.profit_factor_oos) if yb.profit_factor_oos is not None else None,
                     'returns_oos': float(yb.returns_oos) if yb.returns_oos is not None else None,
+                    # OOS evaluation window of the latest run — the UI labels
+                    # Return(BT)/annual bars with it (IS-year + YTD markers).
+                    'oos_start': yb.oos_start.isoformat() if getattr(yb, 'oos_start', None) is not None else None,
+                    'oos_end': yb.oos_end.isoformat() if getattr(yb, 'oos_end', None) is not None else None,
                 }
                 if sid not in yearly_backtest_data:
                     yearly_backtest_data[sid] = {}
@@ -546,6 +552,8 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "backtest_trades": trade_count,
                 "trade_count_oos": trade_count,
                 "returns_oos": returns_oos,
+                "oos_start": oos.get('oos_start'),
+                "oos_end": oos.get('oos_end'),
                 "time_horizon": time_horizon,
                 "direction": direction,
                 "venue": venue,
