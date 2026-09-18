@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LoginPage } from './components/LoginPage';
-import { ExecScaffold, ExecStat, ExecTabs } from './components/execution/ExecScaffold';
+import { ExecScaffold, ExecStat } from './components/execution/ExecScaffold';
+import { BookOverview } from './components/execution/BookOverview';
+import { PositionsByReturn, normSimPosition } from './components/execution/BookPositions';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
 import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, getToken, setToken, clearToken, onUnauthorized, fetchWithTimeout } from './utils';
@@ -274,101 +276,16 @@ const KPI = ({ l, v, sub, pos, hint }) => (
   </div>
 );
 
-// Portfolio Component — Split by Asset Class
-// Neutral labels only (2026-08-26 unification): no per-class accent hues —
-// colour carries meaning only (signed P&L via pnlCl, side chips).
-const CLASS_META = {
-  STOCK:  { label: 'Stocks' },
-  FX:     { label: 'FX' },
-  CRYPTO: { label: 'Crypto' },
-  BOND:   { label: 'Bonds' },
-  ETF:    { label: 'ETFs' },
-  OPTION: { label: 'Options' },
-  FUTURE: { label: 'Futures' },
-  CASH:   { label: 'Cash' },
-  OTHER:  { label: 'Other' },
-};
-
-// Hoisted to module scope so it doesn't remount on every PortfolioTab render.
-// Table styling matches the Live book's base anatomy (qr-label headers,
-// sticky thead, hover rows, chip side badges).
-const PositionTable = ({ positions, title }) => {
-  const grpValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
-  const grpPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
-  return (
-    <div className="qr-surface overflow-hidden mb-3">
-      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="qr-label">{title}</span>
-          <span className="text-[10px] text-slate-500">{positions.length} positions</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="qr-num text-[11px] text-slate-400">{fmtK(grpValue)}</span>
-          <span className={`qr-num text-[11px] font-bold ${pnlCl(grpPnL)}`}>{grpPnL >= 0 ? '+' : ''}{fmtK(grpPnL)}</span>
-        </div>
-      </div>
-      <div className="overflow-x-auto max-h-72 overflow-y-auto">
-        <table className="w-full">
-          <thead className="qr-th-sticky">
-            <tr className="border-b border-white/[0.06]">
-              {['Ticker', 'Name', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
-                <th key={h} className="qr-label text-right py-1 px-2 first:text-left">{h}</th>)}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.04]">
-            {positions.map(p => {
-              const entry = p.avg_entry_price || p.entry_price || 0;
-              const current = p.current_price || 0;
-              const pnlPct = entry > 0 ? ((current - entry) / entry * 100 * (p.side === 'SHORT' ? -1 : 1)) : 0;
-              return (
-                <tr key={p.id || p.ticker} className="qr-tr-hover">
-                  <td className="py-1 px-2 text-[11px] font-mono text-white">{p.ticker}</td>
-                  <td className="py-1 px-2 text-slate-400 text-[10px] max-w-[120px] truncate">{p.name || p.strategy || '—'}</td>
-                  <td className="py-1 px-2 text-right">
-                    <span className={`qr-chip ${p.side === 'LONG' ? 'qr-chip-emerald' : p.side === 'SHORT' ? 'qr-chip-rose' : 'qr-chip-slate'}`}>{p.side || '—'}</span>
-                  </td>
-                  <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.quantity, 0)}</td>
-                  <td className="py-1 px-2 qr-num text-slate-400">${fmt(entry)}</td>
-                  <td className="py-1 px-2 qr-num text-slate-300">${fmt(current)}</td>
-                  <td className="py-1 px-2 qr-num text-slate-300">{fmtK(p.market_value)}</td>
-                  <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.unrealized_pnl || p.pnl)}`}>{fmtK(p.unrealized_pnl || p.pnl)}</td>
-                  <td className={`py-1 px-2 qr-num ${pnlCl(pnlPct)}`}>{fmtPct(pnlPct)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
+// Portfolio Component (SIM book) — unified Execution anatomy (2026-09-18):
+// same sections as the other three books, differing only by mode + data source
+// (/api/portfolio/positions). Strategy performance + full-width YTD curve come
+// from the shared BookOverview in the scaffold's overview slot; positions use
+// the shared PositionsByReturn split (positive / negative return). The old
+// per-tab asset-class PositionTables and CLASS_META were removed — asset class
+// now rides in each row's sub-line via normSimPosition.
 const PortfolioTab = ({ data }) => {
-  const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState('ALL');
-
-  const positions = useMemo(() =>
-    (data.positions || []).filter(p => {
-      const matchesSearch = !search || p.ticker?.toLowerCase().includes(search.toLowerCase());
-      const matchesFilter = activeFilter === 'ALL' || p.asset_class === activeFilter;
-      return matchesSearch && matchesFilter;
-    }),
-    [data.positions, search, activeFilter]
-  );
-
-  // Group by asset class
-  const byAssetClass = useMemo(() => {
-    const groups = {};
-    for (const p of positions) {
-      const cls = p.asset_class || 'OTHER';
-      if (!groups[cls]) groups[cls] = [];
-      groups[cls].push(p);
-    }
-    return groups;
-  }, [positions]);
-
-  const assetClasses = ['STOCK', 'FX', 'CRYPTO', 'BOND', 'ETF', 'OPTION', 'FUTURE', 'OTHER'];
-  const activeClasses = assetClasses.filter(c => byAssetClass[c]?.length > 0);
+  const positions = data.positions || [];
+  const rows = positions.map(normSimPosition);
 
   const totalValue = positions.reduce((s, p) => s + (p.market_value || 0), 0);
   const totalPnL = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
@@ -377,55 +294,19 @@ const PortfolioTab = ({ data }) => {
     <ExecScaffold
       mode="sim"
       book="sim"
+      overview={<BookOverview book="sim" />}
       stats={<>
         <ExecStat l="Total Value" v={fmtK(totalValue)} />
         <ExecStat l="Positions" v={positions.length} />
-        <ExecStat l="Asset Classes" v={activeClasses.length} tone="text-slate-400" />
         <ExecStat l="Unrealized P&L" v={`${totalPnL >= 0 ? '+' : ''}${fmtK(totalPnL)}`} tone={pnlCl(totalPnL)} />
       </>}
     >
-      {/* Asset-class filter — same tab strip anatomy as the Live book */}
-      <div className="qr-surface overflow-hidden">
-        <ExecTabs
-          tabs={[
-            { id: 'ALL', label: `All (${positions.length})` },
-            ...activeClasses.map(cls => ({ id: cls, label: `${CLASS_META[cls]?.label || cls} (${byAssetClass[cls].length})` })),
-          ]}
-          active={activeFilter}
-          onChange={setActiveFilter}
-          right={
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Filter by ticker..."
-              className="px-2 py-1 bg-slate-900/50 border border-white/10 rounded text-[11px] text-white w-40 placeholder-slate-600 focus:outline-none focus:border-white/20"
-            />
-          }
-        />
-      </div>
-
-      {/* Positions by Asset Class */}
-      {activeFilter === 'ALL' ? (
-        activeClasses.map(cls => (
-          <PositionTable
-            key={cls}
-            positions={byAssetClass[cls]}
-            title={CLASS_META[cls]?.label || cls}
-          />
-        ))
-      ) : (
-        byAssetClass[activeFilter] && (
-          <PositionTable
-            positions={byAssetClass[activeFilter]}
-            title={CLASS_META[activeFilter]?.label || activeFilter}
-          />
-        )
-      )}
-
-      {!positions.length && (
+      {positions.length === 0 ? (
         <div className="py-12 text-center text-slate-600 text-sm bg-slate-900/30 rounded-xl border border-white/[0.06]">
           No positions found
         </div>
+      ) : (
+        <PositionsByReturn rows={rows} />
       )}
     </ExecScaffold>
   );

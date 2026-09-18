@@ -110,7 +110,3 @@ export function usePaperCronStatus() {
 export function usePaperSignalProximity() {
   return usePoll('/api/agents/paper/signal-proximity', 300000);
 }
-
-export function usePaperOpenPositionsPnl() {
-  return usePoll('/api/agents/paper/open-positions-pnl', 60000);
-}

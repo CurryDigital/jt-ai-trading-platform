@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { ExecScaffold, ExecStat, ExecTabs, CloseButton } from './ExecScaffold';
-import { api, usePoll, fmt, fmtSigned, pnlCl } from '../../utils';
+import { BookOverview } from './BookOverview';
+import { PositionsByReturn, normUatPosition } from './BookPositions';
+import { api, usePoll } from '../../utils';
 
 // UAT — IBKR paper account book: real gateway, real order firing, paper money.
 // Backend landed in qr_etl t_8d32721e (verified t_1fbd9d7c): UAT mode (registry
@@ -19,10 +21,16 @@ const fmtAge = (iso) => {
   return `${Math.floor(s / 3600)}h`;
 };
 
-const fmtTime = (iso) => {
+const fmtFillDate = (iso) => {
   if (!iso) return '—';
   const t = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
-  return t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return t.toLocaleDateString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' });
+};
+
+const fmtFillStamp = (iso) => {
+  if (!iso) return '';
+  const t = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z');
+  return t.toLocaleString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 };
 
 // One IBKR gateway session row (primary or uat) with its own connect action.
@@ -233,6 +241,7 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
     <ExecScaffold
       mode="uat"
       book="uat"
+      overview={<BookOverview book="uat" />}
       stats={<>
         <ExecStat
           l="UAT Session"
@@ -244,6 +253,10 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
         <ExecStat l="Net Liq" v={netLiq != null ? `$${Number(netLiq).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'} tone="text-slate-200" />
       </>}
     >
+      {/* Per-book overview: strategy activity · fill stats · YTD curve
+          (PENDING — UAT ledger is fills-only). Mounted in the scaffold's
+          full-width overview slot. */}
+
       <div className="qr-surface overflow-hidden">
         <ExecTabs
           tabs={tabs}
@@ -274,7 +287,8 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
 
         {/* Positions — real IBKR paper-account positions from the gateway
             session, never the DB book. PENDING when the session is down so an
-            unreachable gateway never reads as a flat account. */}
+            unreachable gateway never reads as a flat account. Rows render via
+            the shared PositionsByReturn split (positive / negative return). */}
         {tab === 'positions' && (
           !positions ? (
             <div className="py-6 text-center text-slate-600 text-[11px]">Loading UAT positions…</div>
@@ -288,49 +302,24 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
               Paper account {positions?.account || ''} is flat — no open positions at IBKR
             </div>
           ) : (
-            <div className="overflow-x-auto max-h-72 overflow-y-auto">
-              <table className="w-full">
-                <thead className="qr-th-sticky">
-                  <tr className="border-b border-white/[0.06]">
-                    <th className="qr-label text-left  py-1 px-2">Ticker</th>
-                    <th className="qr-label text-right py-1 px-2">Qty</th>
-                    <th className="qr-label text-right py-1 px-2">Avg Cost</th>
-                    <th className="qr-label text-right py-1 px-2">Mkt Price</th>
-                    <th className="qr-label text-right py-1 px-2">Mkt Value</th>
-                    <th className="qr-label text-right py-1 px-2">Unrl P&L</th>
-                    <th className="qr-label text-right py-1 px-2"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04]">
-                  {posRows.map((p, i) => (
-                    <tr key={`${p.symbol}-${i}`} className="qr-tr-hover">
-                      <td className="py-1 px-2">
-                        <span className="text-[11px] font-mono text-white">{p.ticker}</span>
-                        <span className="ml-1.5 text-[9px] text-slate-500">{p.exchange} · {p.currency}</span>
-                      </td>
-                      <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.qty, 0)}</td>
-                      <td className="py-1 px-2 qr-num text-slate-400">{fmt(p.avg_cost)}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.market_price)}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.market_value, 0)}</td>
-                      <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.unrealized_pnl)}`}>{fmtSigned(p.unrealized_pnl)}</td>
-                      <td className="py-1 px-2 text-right whitespace-nowrap">
-                        <CloseButton
-                          busy={closing === p.symbol}
-                          disabled={closing != null}
-                          title={`${p.qty > 0 ? 'SELL' : 'BUY'} ${Math.abs(p.qty)} ${p.ticker} @ MKT on the UAT session — flattens this position (real order, paper money)`}
-                          onClick={() => closePosition(p)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <>
+              <PositionsByReturn
+                rows={posRows.map(normUatPosition)}
+                renderAction={(r) => (
+                  <CloseButton
+                    busy={closing === r.raw.symbol}
+                    disabled={closing != null}
+                    title={`${r.raw.qty > 0 ? 'SELL' : 'BUY'} ${Math.abs(r.raw.qty)} ${r.ticker} @ MKT on the UAT session — flattens this position (real order, paper money)`}
+                    onClick={() => closePosition(r.raw)}
+                  />
+                )}
+              />
               {closeMsg && (
                 <div className={`px-3 py-2 border-t border-white/[0.05] text-[10px] ${closeMsg.type === 'ok' ? 'text-emerald-400' : closeMsg.type === 'info' ? 'text-slate-300' : 'text-rose-400'}`}>
                   {closeMsg.text}
                 </div>
               )}
-            </div>
+            </>
           )
         )}
 
@@ -400,7 +389,7 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
               <table className="w-full">
                 <thead className="qr-th-sticky">
                   <tr className="border-b border-white/[0.06]">
-                    <th className="qr-label text-left  py-1 px-2">Time</th>
+                    <th className="qr-label text-left  py-1 px-2">Date</th>
                     <th className="qr-label text-right py-1 px-2">Side</th>
                     <th className="qr-label text-left  py-1 px-2">Ticker</th>
                     <th className="qr-label text-right py-1 px-2">Qty</th>
@@ -411,7 +400,7 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
                 <tbody className="divide-y divide-white/[0.04]">
                   {fills.map((r, i) => (
                     <tr key={`${r.t || r.ts}-${r.ticker}-${i}`} className="qr-tr-hover">
-                      <td className="py-1 px-2 qr-num text-[10px] text-slate-400">{fmtTime(r.t || r.ts)}</td>
+                      <td className="py-1 px-2 qr-num text-[10px] text-slate-400" title={fmtFillStamp(r.t || r.ts)}>{fmtFillDate(r.t || r.ts)}</td>
                       <td className="py-1 px-2 text-right">
                         <span className={`qr-chip ${(r.side || '').toUpperCase() === 'BUY' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{r.side || '—'}</span>
                       </td>

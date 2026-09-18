@@ -22,7 +22,7 @@ export const ExecStat = ({ l, v, tone }) => (
   </div>
 );
 
-export const ExecScaffold = ({ mode, book, stats, children, railExtra, hideTicket }) => {
+export const ExecScaffold = ({ mode, book, stats, overview, children, railExtra, hideTicket }) => {
   const meta = EXEC_MODE_META[mode];
   return (
     <div className="space-y-3">
@@ -36,6 +36,9 @@ export const ExecScaffold = ({ mode, book, stats, children, railExtra, hideTicke
         </div>
         {stats && <div className="flex items-center gap-4 flex-wrap">{stats}</div>}
       </div>
+      {/* Full-width overview slot (strategy performance + YTD curve) — renders
+          above the content/rail grid so the chart spans the whole page. */}
+      {overview}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-3 items-start">
         <div className="space-y-3 min-w-0">{children}</div>
         <div className="space-y-3">

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { api, usePoll, fmt, fmtK, fmtAge, pnlCl, fetchWithTimeout } from '../utils';
 import { ExecScaffold, ExecStat, ExecTabs, CloseButton } from './execution/ExecScaffold';
+import { BookOverview } from './execution/BookOverview';
+import { PositionsByReturn, normLivePosition } from './execution/BookPositions';
 
 // Fire a real opposite-side IBKR market order to close one position row.
 // LONG -> SELL, SHORT -> BUY, qty = full position quantity.
@@ -18,12 +20,13 @@ const fireCloseOrder = async (p) => {
 
 // Live positions table fed by GET /api/positions/live (gold.ibkr_positions_live
 // primary, netted gold.trade_executions LIVE_TRADING fills as per-ticker fallback).
-// Per-row Close fires a REAL opposite-side IBKR market order — the live book
-// always fires live (per-book guard, no global mode); window.confirm gates it.
-// stale=true (as_of > 24h) surfaces a STALE badge.
+// Rows render via the shared PositionsByReturn split (positive / negative
+// return) — the table UI is shared across all four books; what stays
+// live-specific here is the safeguard wiring: per-row Close fires a REAL
+// opposite-side IBKR market order behind window.confirm, stale=true (as_of >
+// 24h) surfaces a STALE badge, and the source/freshness strip stays visible.
 const LivePositionsPanel = ({ data, onRefresh }) => {
   const [closeState, setCloseState] = useState(null); // {id, busy, msg}
-  const canClose = true;
 
   const closeOne = async (p) => {
     const action = p.side === 'LONG' ? 'SELL' : 'BUY';
@@ -42,75 +45,39 @@ const LivePositionsPanel = ({ data, onRefresh }) => {
     return <div className="py-6 text-center text-slate-600 text-[11px]">Loading live positions…</div>;
   }
   const positions = data.positions || [];
+  if (!positions.length) {
+    return (
+      <div className="py-6 text-center text-slate-600 text-[11px]">
+        No live positions{data.source === 'none' ? ' · no broker snapshot and no ledger fills' : ''}
+      </div>
+    );
+  }
   return (
-    <div className="qr-surface overflow-hidden">
-      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between flex-wrap gap-2">
-        <span className="flex items-center gap-2">
-          <span className="qr-label">Live Positions{positions.length ? ` (${positions.length})` : ''}</span>
-          {data.stale && (
-            <span className="qr-chip qr-chip-rose" title={`Broker snapshot is >24h old (as_of ${data.as_of || '—'}) — sync pipeline has not refreshed`}>STALE</span>
-          )}
-        </span>
+    <PositionsByReturn
+      rows={positions.map(normLivePosition)}
+      strip={<>
+        {data.stale && (
+          <span className="qr-chip qr-chip-rose" title={`Broker snapshot is >24h old (as_of ${data.as_of || '—'}) — sync pipeline has not refreshed`}>STALE</span>
+        )}
         <span className="text-[9px] text-slate-500" title="Primary: gold.ibkr_positions_live broker snapshot. Fallback: netted LIVE_TRADING fills from gold.trade_executions.">
           src {data.source || '—'} · upd {data.as_of ? fmtAge(data.as_of) + ' ago' : '—'}
         </span>
-      </div>
-      {!positions.length ? (
-        <div className="py-6 text-center text-slate-600 text-[11px]">
-          No live positions{data.source === 'none' ? ' · no broker snapshot and no ledger fills' : ''}
-        </div>
-      ) : (
-        <div className="overflow-x-auto max-h-72 overflow-y-auto">
-          <table className="w-full">
-            <thead className="qr-th-sticky">
-              <tr className="border-b border-white/[0.06]">
-                <th className="qr-label text-left  py-1 px-2">Ticker</th>
-                <th className="qr-label text-right py-1 px-2">Side</th>
-                <th className="qr-label text-right py-1 px-2">Qty</th>
-                <th className="qr-label text-right py-1 px-2">Avg Entry</th>
-                <th className="qr-label text-right py-1 px-2">Current</th>
-                <th className="qr-label text-right py-1 px-2">Unreal P&L</th>
-                <th className="qr-label text-right py-1 px-2">Src</th>
-                <th className="qr-label text-right py-1 px-2"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04]">
-              {positions.map((p, i) => (
-                <tr key={`${p.ticker}-${p.id ?? i}`} className="qr-tr-hover">
-                  <td className="py-1 px-2 text-[11px] font-mono text-white">{p.ticker}</td>
-                  <td className="py-1 px-2 text-right">
-                    <span className={`qr-chip ${SIDE_STYLE[p.side] || 'qr-chip-slate'}`}>{p.side}</span>
-                  </td>
-                  <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(p.quantity, 0)}</td>
-                  <td className="py-1 px-2 qr-num text-slate-400 text-right">{fmt(p.avg_entry)}</td>
-                  <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(p.current_price)}</td>
-                  <td className={`py-1 px-2 qr-num font-bold text-right ${pnlCl(p.unrealized_pnl)}`}>{p.unrealized_pnl == null ? '—' : fmt(p.unrealized_pnl)}</td>
-                  <td className="py-1 px-2 qr-num text-[9px] text-slate-500 text-right">{(p.source || '').replace('ibkr_snapshot', 'ibkr')}</td>
-                  <td className="py-1 px-2 text-right whitespace-nowrap">
-                    <CloseButton
-                      busy={closeState?.id === p.id && closeState.busy}
-                      disabled={!canClose}
-                      title={`Fire real IBKR ${p.side === 'LONG' ? 'SELL' : 'BUY'} ${p.quantity} ${p.ticker} (MKT) to close`}
-                      onClick={() => closeOne(p)}
-                    />
-                    {closeState?.id === p.id && closeState.msg && (
-                      <div className={`text-[9px] mt-0.5 ${closeState.msg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {closeState.msg.text}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      </>}
+      renderAction={(r) => (
+        <>
+          <CloseButton
+            busy={closeState?.id === r.raw.id && closeState.busy}
+            title={`Fire real IBKR ${r.side === 'LONG' ? 'SELL' : 'BUY'} ${r.qty} ${r.ticker} (MKT) to close`}
+            onClick={() => closeOne(r.raw)}
+          />
+          {closeState?.id === r.raw.id && closeState.msg && (
+            <div className={`text-[9px] mt-0.5 ${closeState.msg.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {closeState.msg.text}
+            </div>
+          )}
+        </>
       )}
-      {!canClose && positions.length > 0 && (
-        <div className="px-3 py-1.5 border-t border-white/[0.05] text-[9px] text-slate-500">
-          Close buttons arm only when the global mode is LIVE.
-        </div>
-      )}
-    </div>
+    />
   );
 };
 
@@ -327,7 +294,7 @@ export const LiveOpsPanel = ({ onSelectStrategy }) => {
   // The rail (manual ticket + close) stays usable in this state.
   if (!s) {
     return (
-      <ExecScaffold mode="live" book="live" railExtra={<LiveFlattenCard />}>
+      <ExecScaffold mode="live" book="live" overview={<BookOverview book="live" />} railExtra={<LiveFlattenCard />}>
         <div className="qr-surface px-4 py-8 text-center">
           <span className="qr-chip qr-chip-rose">PENDING</span>
           <div className="mt-2 text-[12px] font-semibold text-slate-300">Live operations data not available yet</div>
@@ -358,6 +325,7 @@ export const LiveOpsPanel = ({ onSelectStrategy }) => {
     <ExecScaffold
       mode="live"
       book="live"
+      overview={<BookOverview book="live" />}
       stats={<>
         <ExecStat l="Today" v={fmtK(s.today_pnl)} tone={pnlCl(s.today_pnl)} />
         <ExecStat l="W / L" v={`${s.today_winners} / ${s.today_losers}`} tone="text-slate-400" />
