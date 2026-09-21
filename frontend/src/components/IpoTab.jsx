@@ -105,6 +105,46 @@ const CSS = `
 .ipo-stage .step{font-size:9px;color:#565e6c;letter-spacing:.5px;font-weight:700;white-space:nowrap;}
 .ipo-stage .n{font-size:14px;font-weight:600;font-family:ui-monospace,monospace;color:#e6e8eb;}
 .ipo-stage .sub{font-size:9px;color:#565e6c;line-height:1.4;margin-top:1px;}
+/* IPO ALLOTMENT EXIT PLAYBOOK — manual guide, visually distinct (dashed border)
+   from the automated strategy cards; palette: neutral slate, rose = critical
+   (overheat) only, signed stats via ipo-green/ipo-red. */
+.ipo-pb{border:1px dashed #2a3242;border-radius:8px;background:#0d1118;}
+.ipo-pb-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;cursor:pointer;user-select:none;}
+.ipo-pb-head:hover .ipo-pb-title{color:#e6e8eb;}
+.ipo-pb-title{font-size:11px;color:#8b93a3;letter-spacing:.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.ipo-tag-manual{background:transparent;border:1px dashed #565e6c;color:#8b93a3;}
+.ipo-pb-chev{font-size:10px;color:#565e6c;font-family:ui-monospace,monospace;}
+.ipo-pb-body{padding:0 16px 14px;}
+.ipo-pb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+.ipo-pb-grid>*{min-width:0;}
+@media (max-width:1400px){.ipo-pb-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (max-width:900px){.ipo-pb-grid{grid-template-columns:minmax(0,1fr);}}
+.ipo-pb-card{border:1px solid #1d2430;border-radius:8px;padding:10px 12px;background:#10141c;}
+.ipo-pb-card .scn{font-size:12px;font-weight:700;color:#e6e8eb;display:flex;align-items:baseline;gap:6px;}
+.ipo-pb-card .scn .n{font-size:10px;color:#565e6c;font-weight:400;font-family:ui-monospace,monospace;}
+.ipo-pb-card .cond{font-size:10px;color:#8b93a3;margin-top:2px;}
+.ipo-pb-act{font-size:11px;font-weight:700;letter-spacing:.4px;color:#e6e8eb;margin-top:8px;}
+.ipo-pb-when{font-size:10px;color:#8b93a3;margin-top:2px;}
+.ipo-pb-ev{margin-top:8px;border-top:1px solid #161b25;padding-top:6px;}
+.ipo-pb-ev .row{display:flex;justify-content:space-between;gap:8px;font-size:10px;padding:2px 0;}
+.ipo-pb-ev .k{color:#565e6c;}
+.ipo-pb-ev .v{font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums;text-align:right;}
+.ipo-pb-note{font-size:10px;color:#8b93a3;line-height:1.5;margin-top:6px;}
+.ipo-pb-crit{color:#f87171;}
+.ipo-pb-wide{grid-column:1/-1;}
+.ipo-pb-sub{border:1px solid #1d2430;border-radius:6px;padding:8px 10px;background:#0d1118;flex:1;min-width:0;}
+.ipo-pb-sub .h{font-size:10px;font-weight:700;color:#e6e8eb;letter-spacing:.3px;}
+.ipo-pb-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;}
+.ipo-pb-steps>*{min-width:0;}
+@media (max-width:900px){.ipo-pb-steps{grid-template-columns:minmax(0,1fr);}}
+.ipo-pb-step{border:1px solid #1d2430;border-radius:8px;padding:8px 10px;background:#10141c;}
+.ipo-pb-step .t{font-size:10px;font-weight:700;color:#e6e8eb;font-family:ui-monospace,monospace;}
+.ipo-pb-step .b{font-size:10px;color:#8b93a3;line-height:1.5;margin-top:4px;}
+.ipo-pb-list{font-size:10px;color:#8b93a3;line-height:1.6;}
+.ipo-pb-list li{margin-bottom:3px;}
+.ipo-pb-disc{border:1px solid #161b25;border-radius:8px;padding:10px 12px;margin-top:12px;background:#10141c;}
+.ipo-pb-disc .h{font-size:10px;font-weight:700;letter-spacing:.5px;color:#8b93a3;}
+.ipo-pb-sec{font-size:10px;font-weight:700;letter-spacing:.5px;color:#565e6c;margin-top:14px;margin-bottom:6px;}
 `;
 
 const num = (v, d = 2) => v == null || isNaN(v) ? '—' : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -876,6 +916,186 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause, mir
 };
 
 // ---- main tab -----------------------------------------------------------
+
+// ---- IPO ALLOTMENT EXIT PLAYBOOK (manual guide, no automation) -----------
+// Static decision guide from qr_research hk_ipo_sub/IPO_ALLOTMENT_EXIT_PLAYBOOK.md
+// (2026-09-21): n=285 Main-board HK IPOs 2024→2026-09
+// (silver.unified_ipo_calendar/performance + unified_prices). NOT a strategy —
+// no engine, no ETL, no paper enrollment, no signal feed. Tells a user who
+// already holds an IPO allotment exactly when to sell, by day-1 open vs offer.
+// Purely presentational: zero API calls. (t_f5b166ba)
+
+const PB_SCENARIOS = [
+  {
+    id: 'A', name: 'Deep break', cond: 'day-1 open < −10% vs offer', n: 54,
+    action: 'SELL AT OPEN', when: '09:20–09:30 HKT opening auction',
+    evidence: [
+      ['Intraday med', '−0.38%', 0],
+      ['Close back above offer', '3.7%', null],
+      ['D1→D5 med', '−1.53%', -1, 'win 37%'],
+      ['D10 med', '−4.77%', -1],
+    ],
+    note: 'Do NOT wait for recovery — 96% never see offer again that day.',
+  },
+  {
+    id: 'B', name: 'Break', cond: 'day-1 open −10…−2% vs offer', n: 15,
+    action: 'SELL AT OPEN', when: '09:20–09:30 HKT opening auction',
+    evidence: [
+      ['Intraday med', '−3.67%', -1, 'worst bucket'],
+      ['D1→D5 med', '−2.31%', -1, 'win 27%'],
+    ],
+    note: 'Worst intraday continuation of any bucket — every minute of waiting is negative-EV on median.',
+  },
+  {
+    id: 'C', name: 'Flat', cond: 'day-1 open ±2% vs offer', n: 49,
+    action: 'SELL DAY-1 — timing indifferent', when: 'Open or close; sell at open for discipline',
+    evidence: [
+      ['Intraday med', '0.00%', 0],
+      ['D1→D5 med', '0.00%', 0, 'coin flip'],
+      ['Close ≥ offer', '63%', null],
+    ],
+    note: 'Data shows no difference between open and close — take the open for discipline.',
+  },
+  {
+    id: 'D', name: 'Small up', cond: 'day-1 open +2…+10% vs offer', n: 29,
+    action: 'SELL AT OPEN / morning strength', when: 'Morning; do not hold past day 1',
+    evidence: [
+      ['Intraday med', '−0.13%', -1],
+      ['D1→D5 med', '−1.06%', -1, 'win 35%'],
+    ],
+    note: 'Pop fades on median — do not hold past day 1.',
+  },
+  {
+    id: 'E', name: 'Up', cond: 'day-1 open +10…+30% vs offer', n: 30,
+    action: 'SELL DAY-1 into strength — OUT by close', when: 'Open-to-afternoon both fine; hard rule: out by 16:00 HKT',
+    evidence: [
+      ['Intraday med', '+0.84%', 1, 'win 53%'],
+      ['D1→D5 med', '−2.67%', -1, 'win 43%'],
+    ],
+    note: 'Intraday slightly positive, but D5 drift is negative — out by day-1 close.',
+  },
+];
+
+const PbEv = ({ rows }) => (
+  <div className="ipo-pb-ev">
+    {rows.map(([k, v, sgn, sub], i) => (
+      <div className="row" key={i}>
+        <span className="k">{k}{sub ? ` · ${sub}` : ''}</span>
+        <span className={`v ${sgn == null ? 'ipo-faint' : sgn > 0 ? 'ipo-green' : sgn < 0 ? 'ipo-red' : ''}`}>{v}</span>
+      </div>
+    ))}
+  </div>
+);
+
+export const IpoExitPlaybook = () => {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="ipo-pb" data-testid="ipo-exit-playbook">
+      <div className="ipo-pb-head" onClick={() => setOpen(o => !o)} title="Collapse / expand">
+        <div className="ipo-pb-title">
+          IPO ALLOTMENT EXIT PLAYBOOK
+          <span className="ipo-tag ipo-tag-manual">MANUAL GUIDE — no automation</span>
+          <span style={{ fontSize: 9, color: '#565e6c', letterSpacing: '.2px' }}>
+            n=285 Main-board HK IPOs · 2024→2026-09 · if you hold an allotment, this is when to sell
+          </span>
+        </div>
+        <span className="ipo-pb-chev">{open ? '▾' : '▸'}</span>
+      </div>
+      {open && (
+        <div className="ipo-pb-body">
+          {/* scenario cards A–F keyed by day-1 open vs offer */}
+          <div className="ipo-pb-grid">
+            {PB_SCENARIOS.map(sc => (
+              <div className="ipo-pb-card" key={sc.id} data-testid={`pb-scenario-${sc.id}`}>
+                <div className="scn">{sc.id} · {sc.name} <span className="n">n={sc.n}</span></div>
+                <div className="cond">{sc.cond}</div>
+                <div className="ipo-pb-act">{sc.action}</div>
+                <div className="ipo-pb-when">Sell moment: {sc.when}</div>
+                <PbEv rows={sc.evidence} />
+                <div className="ipo-pb-note">{sc.note}</div>
+              </div>
+            ))}
+            {/* F — hot: conditional, F1/F2 sub-cases */}
+            <div className="ipo-pb-card ipo-pb-wide" data-testid="pb-scenario-F">
+              <div className="scn">F · Hot <span className="n">n=108</span></div>
+              <div className="cond">day-1 open &gt; +30% vs offer</div>
+              <div className="ipo-pb-act">CONDITIONAL — decide by day-1 candle colour</div>
+              <PbEv rows={[
+                ['Intraday med', '−3.85%', -1, 'median hot name FADES through day 1'],
+                ['Close ≥ offer', '99.1%', null],
+              ]} />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                <div className="ipo-pb-sub">
+                  <div className="h">F1 · day-1 RED candle (close &lt; open) → SELL</div>
+                  <div className="ipo-pb-when">Sell moment: open auction preferred — hot red-faders lose med ~−10% open→close; held past noon → sell at the close.</div>
+                  <PbEv rows={[['D1→D5 med', '−1.69%', -1, 'win 41% · n=92 across D/E/F']]} />
+                  <div className="ipo-pb-note">No hold past day 1.</div>
+                </div>
+                <div className="ipo-pb-sub">
+                  <div className="h">F2 · day-1 GREEN + oversub ≥500x + close ≤1.5x offer → HOLD</div>
+                  <div className="ipo-pb-when">Exit: close of listing day +5 trading days (16:00 HKT).</div>
+                  <PbEv rows={[['Hold cell D1→D5 med', '+1.82%', 1, 'win 55.6% · n=45']]} />
+                  <div className="ipo-pb-note">
+                    All three conditions required; any failure → sell day-1 (500x+ green at 1.5–3x offer: med +0.99%, win 50.9% — no edge, take the day-1 win).
+                  </div>
+                  <div className="ipo-pb-note ipo-pb-crit">
+                    Overheat override: day-1 close &gt; 3x offer → SELL day-1 regardless (n=11, D1→D5 med −1.33%).
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* decision tree — 3-step timeline */}
+          <div className="ipo-pb-sec">DECISION TREE — as it runs in real time</div>
+          <div className="ipo-pb-steps" data-testid="pb-timeline">
+            <div className="ipo-pb-step">
+              <div className="t">1 · 09:20 HKT — opening auction</div>
+              <div className="b">
+                open &lt; offer → SELL AT OPEN (A/B), done · open ±2% → sell, open or close (C) ·
+                open +2…+30% → sell day-1, morning strength preferred (D/E), done by 16:00 ·
+                open &gt; +30% → sell at open UNLESS you intend to run the F2 check (F)
+              </div>
+            </div>
+            <div className="ipo-pb-step">
+              <div className="t">2 · ~15:50 HKT — F2 green/red check</div>
+              <div className="b">
+                Hot names only, and only if oversub ≥500x and close ≤1.5x offer:
+                closing GREEN → HOLD · closing RED → SELL at the close
+              </div>
+            </div>
+            <div className="ipo-pb-step">
+              <div className="t">3 · listing +5 trading days, 16:00 HKT — F2 exit</div>
+              <div className="b">Sell at the close. No re-entry, no extension.</div>
+            </div>
+          </div>
+
+          {/* sell signals */}
+          <div className="ipo-pb-sec">SELL SIGNALS — what to watch, in plain terms</div>
+          <ol className="ipo-pb-list" style={{ margin: 0, paddingLeft: 18 }} data-testid="pb-signals">
+            <li>Any open below offer = the sell signal itself — the signal is the open price vs your offer price, nothing else needed.</li>
+            <li>Hot name turning red vs its open = the day-1 move is over; a red day-1 candle confirms no continuation (win 41% over 5 days).</li>
+            <li>Green close on a ≥500x name with close ≤1.5x offer = the only validated hold signal in the entire research record.</li>
+            <li>Close &gt;3x offer = overheat sell signal — the blowoff zone.</li>
+          </ol>
+
+          {/* candid limitations — verbatim from the spec */}
+          <div className="ipo-pb-disc" data-testid="pb-limitations">
+            <div className="h">CANDID LIMITATIONS</div>
+            <ol className="ipo-pb-list" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              <li>Medians, not promises. Per-name dispersion is huge (broken-open recoveries of +67% and continuations of −40% both exist and are not separable ex-ante).</li>
+              <li>Hot-regime sample: 2024→2026-09 HK IPO market; 2026 especially hot. Scenario E/F edges are regime-dependent.</li>
+              <li>Daily bars only. "Sell at open" vs "wait 30 min for a bounce" is untested.</li>
+              <li>Grey market (暗盘) never in scope — no evidence either way.</li>
+              <li>100–500x green names show NEGATIVE D1→D5 (n=16, med −4.37%) — the hold signal does NOT generalize below 500x oversubscription.</li>
+              <li>This playbook does NOT make subscription profitable. It only optimizes the exit conditional on already holding shares. The research verdict stands: blind subscription is net-negative after fees and allotment rationing.</li>
+            </ol>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export function IpoTab({ onOpen }) {
   const [ipos, setIpos] = useState(null);
@@ -1771,6 +1991,9 @@ export function IpoTab({ onOpen }) {
           ))}
         </div>
       </Panel>
+
+      {/* manual exit playbook — static guide, not a strategy (t_f5b166ba) */}
+      <IpoExitPlaybook />
 
       {/* active IPO book — positions, metrics only */}
       <Panel
