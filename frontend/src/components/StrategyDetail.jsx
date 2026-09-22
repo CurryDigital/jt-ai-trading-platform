@@ -640,7 +640,11 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
               <div className="p-2 grid grid-cols-1 lg:grid-cols-[1fr_150px] gap-3">
                 <div>
                   {(data.monthly_returns || []).length === 0 ? (
-                    <div className="text-[10px] text-slate-600 text-center py-4">No monthly return data — this backtest stored aggregate metrics only (t_c76796a2)</div>
+                    <div className="text-[10px] text-slate-600 text-center py-4">
+                      {(data.backtest_trades || []).length > 0
+                        ? 'No monthly return series published for this run — per-trade OOS ledger exists; monthly aggregation pending (t_fdfdf106)'
+                        : 'No monthly return data — this backtest stored aggregate metrics only (t_fdfdf106)'}
+                    </div>
                   ) : (
                     <MonthlyHeatmap rows={data.monthly_returns} />
                   )}
