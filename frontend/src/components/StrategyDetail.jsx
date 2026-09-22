@@ -4,6 +4,14 @@ import { PromotionPanel } from './PromotionPanel';
 import { CapitalAllocationPanel } from './CapitalAllocationPanel';
 import { RiskWatchPanel } from './RiskWatchPanel';
 
+// UTC-date helpers for the SIM "Signals" rule-mirror watchlist (HK IPO strategies).
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
+const addDaysISO = (d, n) => {
+  const dt = new Date(`${d}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+};
+
 // Tiny inline SVG sparkline / equity curve --------------------------------
 const EquityCurve = ({ points, height = 80 }) => {
   if (!points?.length) {
@@ -271,6 +279,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
   const [mode, setMode] = useState(null);        // selected strip tile; default = deployment mode
   const [tab, setTab] = useState('rebalances');  // paper/live panel sub-tab
   const [simTab, setSimTab] = useState('rebalances');
+  const [ipoWatch, setIpoWatch] = useState(null);  // HK IPO rule-mirror forward watchlist feed
   const [refreshedAt, setRefreshedAt] = useState(null);
   const altRef = useRef({});
 
@@ -302,6 +311,13 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     setRefreshedAt(new Date().toISOString());
     setLoading(false);
     if (d && mode == null) setMode(deployedTileFor(d.execution_mode));
+    // Forward "what to buy" feed for HK IPO strategies — rule mirror over the
+    // IPO calendar (/api/hkex/ipos), refreshed alongside the evaluation poll.
+    if (strategyId.startsWith('hk_ipo')) {
+      api.get('/api/hkex/ipos?limit=400')
+        .then(res => setIpoWatch((res && res.ipos) || []))
+        .catch(() => {});
+    }
     return d;
   };
 
@@ -388,6 +404,43 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     ((data && data.backtest_trades) || []).filter(t => !t.exit_date)
       .sort((a, b) => (b.entry_date || '').localeCompare(a.entry_date || '')),
   [data && data.backtest_trades]);
+
+  // SIM "Signals" tab: forward-looking rule mirror for HK IPO drift strategies —
+  // which names the documented rule buys, and when. Rows past their exit are
+  // excluded (history lives in the Ledger tab). Decision words:
+  //   ENTERED  — in oversub band and the +20td entry day has traded (mirror open)
+  //   BUY ON   — in band, entry still ahead (queued); date measured, else est.
+  //   WATCH    — band undecidable (pre-listing; retail oversub lands at allotment)
+  //   SKIP     — oversub outside 100–500x
+  const simBuyWatch = useMemo(() => {
+    if (!ipoWatch) return null;
+    const rows = [];
+    for (const r of ipoWatch) {
+      if (!r.listing_date) continue;
+      const entry = r.day20_date || addDaysISO(r.listing_date, 28);  // ≈20td
+      const exit = r.day40_date || addDaysISO(entry, 28);            // +20td hold
+      let phase;
+      if (r.listing_date > TODAY_ISO) phase = 'pre_listing';
+      else if (TODAY_ISO < entry) phase = 'ahead';
+      else if (TODAY_ISO <= exit) phase = 'in_hold';
+      else continue;  // passed — history, shown in the Ledger tab
+      const ov = r.oversubscription_retail;
+      let word, sub;
+      if (phase === 'pre_listing' || ov == null) {
+        word = 'WATCH'; sub = 'band at allotment';
+      } else if (ov < 100 || ov > 500) {
+        word = 'SKIP'; sub = `${Math.round(ov)}x outside 100–500x`;
+      } else if (phase === 'ahead') {
+        word = 'BUY ON'; sub = `${entry}${r.day20_date ? '' : ' (est)'}`;
+      } else {
+        word = 'ENTERED'; sub = `${entry} · exit ${exit}${r.day40_date ? '' : ' (est)'}`;
+      }
+      rows.push({ ticker: r.ticker, name: r.stock_name || r.stock_name_zh || '',
+        listing: r.listing_date, entry, exit, oversub: ov, phase, word, sub });
+    }
+    const order = { in_hold: 0, ahead: 1, pre_listing: 2 };
+    return rows.sort((a, b) => order[a.phase] - order[b.phase] || a.entry.localeCompare(b.entry));
+  }, [ipoWatch]);
 
   const activeSignals = useMemo(() =>
     ((data && data.recent_signals) || []).filter(s => s.signal === 'BUY').sort((a, b) => a.ticker.localeCompare(b.ticker)),
@@ -670,6 +723,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                   { id: 'rebalances', label: `Rebalances (${simRebalances.length})` },
                   { id: 'allocation', label: `Allocation (${simOpen.length})` },
                   { id: 'trades',     label: `Ledger (${(data.backtest_trades || []).length})` },
+                  { id: 'signals',    label: `Signals (${strategyId.startsWith('hk_ipo') ? (simBuyWatch || []).filter(r => r.word === 'BUY ON' || r.word === 'ENTERED').length : activeSignals.length})` },
                 ].map(t => (
                   <button
                     key={t.id}
@@ -793,6 +847,79 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                     </tbody>
                   </table>
                 </div>
+              )}
+
+              {simTab === 'signals' && (
+                strategyId.startsWith('hk_ipo') ? (
+                  <div className="overflow-x-auto max-h-[520px] overflow-auto">
+                    <table className="w-full">
+                      <thead className="sticky top-0 bg-slate-900 z-10">
+                        <tr className="border-b border-white/[0.06]">
+                          <th className="qr-label text-left py-1 px-2">Decision</th>
+                          <th className="qr-label text-left py-1 px-2">Ticker</th>
+                          <th className="qr-label text-left py-1 px-2">Name</th>
+                          <th className="qr-label text-left py-1 px-2">Listing</th>
+                          <th className="qr-label text-left py-1 px-2" title="20th trading day after listing (measured close date; calendar estimate until then)">Entry +20td</th>
+                          <th className="qr-label text-left py-1 px-2">Exit +40td</th>
+                          <th className="qr-label text-right py-1 px-2" title="Retail oversubscription — the 100–500x band is the trade filter">Oversub</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.04]">
+                        {(simBuyWatch || []).map((r, i) => (
+                          <tr key={`${r.ticker}-${i}`} className="qr-tr-hover">
+                            <td className="py-1 px-2 w-40">
+                              <span className={`text-[10px] font-bold ${r.word === 'BUY ON' || r.word === 'ENTERED' ? 'text-white' : r.word === 'WATCH' ? 'text-slate-400' : 'text-slate-600'}`}>{r.word}</span>
+                              <span className="block text-[9px] text-slate-500">{r.sub}</span>
+                            </td>
+                            <td className="py-1 px-2 text-white text-[11px] font-mono w-20">{r.ticker}</td>
+                            <td className="py-1 px-2 text-slate-300 text-[10px] max-w-[180px] truncate" title={r.name}>{r.name || '—'}</td>
+                            <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{r.listing}</td>
+                            <td className="py-1 px-2 qr-num text-slate-300 text-[10px]">{r.entry}</td>
+                            <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{r.exit}</td>
+                            <td className="py-1 px-2 qr-num text-slate-300 text-right">{r.oversub != null ? `${Math.round(r.oversub)}x` : '—'}</td>
+                          </tr>
+                        ))}
+                        {simBuyWatch && !simBuyWatch.length && (
+                          <tr><td colSpan={7} className="py-6 text-center text-slate-600 text-[11px]">No IPOs in an entry window — nothing to buy or queue right now</td></tr>
+                        )}
+                        {!simBuyWatch && (
+                          <tr><td colSpan={7} className="py-6 text-center text-slate-600 text-[11px]">Loading IPO calendar…</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                    <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
+                      RULE MIRROR of the documented entry rule (oversub 100–500x · D1 close ≥ offer · entry px 0.9–1.3× D1 close · enter +20td, hold 20td) over /api/hkex/ipos — not an engine signal. The 0.9–1.3× D1-close band decides at the entry close; slot cap not modelled.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[520px] overflow-auto">
+                    <table className="w-full">
+                      <thead className="sticky top-0 bg-slate-900 z-10">
+                        <tr className="border-b border-white/[0.06]">
+                          <th className="qr-label text-left py-1 px-2">Ticker</th>
+                          <th className="qr-label text-left py-1 px-2">Signal</th>
+                          <th className="qr-label text-right py-1 px-2">Strength</th>
+                          <th className="qr-label text-right py-1 px-2">Price</th>
+                          <th className="qr-label text-right py-1 px-2">As of</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.04]">
+                        {activeSignals.map((s, i) => (
+                          <tr key={`${s.ticker}-${i}`} className="qr-tr-hover">
+                            <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{s.ticker}</td>
+                            <td className="py-1 px-2 text-white text-[10px] font-bold">{s.signal}</td>
+                            <td className="py-1 px-2 qr-num text-slate-300 text-right">{s.strength != null ? Number(s.strength).toFixed(2) : '—'}</td>
+                            <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(s.price)}</td>
+                            <td className="py-1 px-2 qr-num text-slate-500 text-right text-[10px]">{s.ts ? fmtAge(s.ts) : '—'}</td>
+                          </tr>
+                        ))}
+                        {!activeSignals.length && (
+                          <tr><td colSpan={5} className="py-6 text-center text-slate-600 text-[11px]">No current BUY signals from the engine (consumption.strategies_signals_current)</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               )}
             </div>
           </>
