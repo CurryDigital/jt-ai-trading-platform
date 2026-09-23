@@ -325,6 +325,25 @@ const OfferRangeCell = ({ r }) => (
   </td>
 );
 
+// NAV % — offer price vs pro-forma NAV per share. Premium (+) means paying
+// above book → thin subscription upside; discount (−) means below NAV.
+// Contract (qr_etl t_ef6032f4): offer_to_nav_pct percent-scaled, plus
+// nav_per_share; falls back to deriving from nav_per_share when only that
+// lands (offer basis = fixed/final offer, else top of range — marked ◦).
+const NavPctCell = ({ r }) => {
+  let v = r.offer_to_nav_pct;
+  let derived = false;
+  if (v == null && r.nav_per_share != null && r.nav_per_share > 0) {
+    const px = r.fixed_price ? r.offer_price : (r.offer_price_high ?? r.offer_price);
+    if (px != null) { v = (px / r.nav_per_share - 1) * 100; derived = true; }
+  }
+  if (v == null) {
+    return <td className="num"><span className="ipo-faint" title="Pro-forma NAV per share not ingested upstream yet — qr_etl t_ef6032f4">—</span></td>;
+  }
+  const tip = `${derived ? 'Derived client-side: ' : ''}offer ${r.fixed_price ? (r.offer_price ?? '?') : (r.offer_price_high ?? r.offer_price ?? '?')} vs NAV ${r.nav_per_share ?? '?'} per share${r.nav_asof ? ` (as of ${r.nav_asof})` : ''} — priced at/above NAV leaves thin subscription upside`;
+  return <td className={`num ${sgnCl(v)}`} title={tip}>{fmtPct(v)}{derived ? ' ◦' : ''}</td>;
+};
+
 // ---- HK IPO strategy card ----------------------------------------------
 // Actionable card: backtest block, annual returns, SIM/PAPER/UAT/LIVE mode
 // ladder (mirrors the Strategy Detail tab), engine state, and an
@@ -1845,6 +1864,7 @@ export function IpoTab({ onOpen }) {
                   <th>Ticker</th><th>Name</th><th>Sector</th>
                   <th className="num">Price range</th><th className="num">Lot size</th><th className="num">Min. investment</th>
                   <th>Subscription window</th><th className="num">Closes</th><th className="num">Oversub (retail)</th>
+                  <th className="num" title="Offer price vs pro-forma NAV per share (premium + / discount −). An offer priced at/above NAV leaves thin subscription upside — qr_etl t_ef6032f4">NAV %</th>
                   <th className="num">Listing</th><th>Action</th>
                 </tr>
               </thead>
@@ -1869,6 +1889,7 @@ export function IpoTab({ onOpen }) {
                         : <span className="ipo-pill ipo-st-book">WINDOW TBC</span>}</td>
                       <td className="num">{r.application_end || '—'}</td>
                       <td className="num">{r.oversubscription_retail != null ? `${num(r.oversubscription_retail, 1)}x` : <span className="ipo-faint" title="Retail oversubscription not published upstream yet — qr_etl t_90585bf2">—</span>}</td>
+                      <NavPctCell r={r} />
                       <td className="num">{r.listing_date || '—'}</td>
                       <td><button className="ipo-btn ipo-btn-primary" disabled title="IPO subscription is not wired to a broker route">Apply ↗</button></td>
                     </tr>
