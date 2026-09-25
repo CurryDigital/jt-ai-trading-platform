@@ -409,9 +409,11 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
   // which names the documented rule buys, and when. Rows past their exit are
   // excluded (history lives in the Ledger tab). Decision words:
   //   ENTERED  — in oversub band and the +20td entry day has traded (mirror open)
-  //   BUY ON   — in band, entry still ahead (queued); date measured, else est.
+  //   BUY ON   — all gates pass, entry still ahead (queued); date measured, else est.
   //   WATCH    — band undecidable (pre-listing; retail oversub lands at allotment)
-  //   SKIP     — oversub outside 100–500x
+  //              or the day-1 close is not published yet
+  //   SKIP     — oversub outside 100–500x, D1 close < offer (D1 red), or the
+  //              measured entry px outside 0.9–1.3x the D1 close
   const simBuyWatch = useMemo(() => {
     if (!ipoWatch) return null;
     const rows = [];
@@ -424,13 +426,32 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
       else if (TODAY_ISO < entry) phase = 'ahead';
       else if (TODAY_ISO <= exit) phase = 'in_hold';
       else continue;  // passed — history, shown in the Ledger tab
+      // Gate chain mirrors IpoTab.stratDecision (IPO-page canonical) 1:1 —
+      // 2026-09-25 misalignment: this list used to apply ONLY the oversub band,
+      // so D1-red names (e.g. 2041.HK, D1 close 8.80 < offer 15.42) showed
+      // BUY ON here while the IPO page said SKIP. Keep the two in sync.
       const ov = r.oversubscription_retail;
+      const d1c = r.first_day_close;
+      const offer = r.offer_price ?? r.offer_price_high ?? null;  // same basis as IpoTab ipoPx
+      const entryPx = r.day20_price ?? null;
+      const d1Ratio = entryPx != null && d1c ? entryPx / d1c : null;
+      const oversubPending = ov == null
+        ? (phase === 'pre_listing' ? 'band at allotment' : 'oversub pending (t_90585bf2)')
+        : null;
       let word, sub;
-      if (phase === 'pre_listing' || ov == null) {
-        word = 'WATCH'; sub = 'band at allotment';
+      if (oversubPending) {
+        word = 'WATCH'; sub = oversubPending;
       } else if (ov < 100 || ov > 500) {
         word = 'SKIP'; sub = `${Math.round(ov)}x outside 100–500x`;
-      } else if (phase === 'ahead') {
+      } else if (d1c != null && offer != null && d1c < offer) {
+        // C1 deal-health gate: day-1 close must hold the offer.
+        word = 'SKIP'; sub = `D1 red — close ${d1c} < offer ${offer}`;
+      } else if (d1c == null && phase !== 'pre_listing') {
+        word = 'WATCH'; sub = 'awaiting D1 close';
+      } else if (d1Ratio != null && (d1Ratio < 0.9 || d1Ratio > 1.3)) {
+        // C1 entry/D1-close band, decidable once the +20td entry leg is measured.
+        word = 'SKIP'; sub = `entry/D1 ${d1Ratio.toFixed(2)} outside 0.9–1.3×`;
+      } else if (phase === 'ahead' || phase === 'pre_listing') {
         word = 'BUY ON'; sub = `${entry}${r.day20_date ? '' : ' (est)'}`;
       } else {
         word = 'ENTERED'; sub = `${entry} · exit ${exit}${r.day40_date ? '' : ' (est)'}`;
