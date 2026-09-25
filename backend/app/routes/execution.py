@@ -704,6 +704,44 @@ def get_manual_positions(db: Session = Depends(get_db)):
         FROM gold.manual_positions
     """, label="manual_positions_summary")
 
+    # Per-market aggregates (2026-09-25): the HK book marks in HKD and the US
+    # book in USD — per-market summaries keep each book in its native
+    # currency so performance is evaluated without silent FX mixing.
+    per_market_rows = safe_query(db, """
+        SELECT market,
+               COUNT(*) FILTER (WHERE exit_date IS NULL) AS open,
+               COUNT(*) FILTER (WHERE exit_date IS NOT NULL) AS closed,
+               COUNT(*) FILTER (WHERE exit_date IS NOT NULL AND realized_pnl > 0) AS wins,
+               SUM(realized_pnl) AS cum_pnl,
+               SUM(realized_pnl) FILTER (WHERE exit_date >= date_trunc('year', now())::date) AS ytd_pnl,
+               COUNT(*) FILTER (WHERE exit_date = CURRENT_DATE) AS today_trades,
+               SUM(realized_pnl) FILTER (WHERE exit_date = CURRENT_DATE) AS today_pnl
+        FROM gold.manual_positions
+        GROUP BY market
+    """, label="manual_positions_by_market")
+
+    unreal_by_market = {}
+    for p in open_positions:
+        if p["unrealized_pnl"] is not None:
+            unreal_by_market[p["market"]] = round(unreal_by_market.get(p["market"], 0.0) + p["unrealized_pnl"], 2)
+
+    summary_by_market = {}
+    for r in per_market_rows:
+        m = r._mapping
+        mk = m["market"]
+        cl = int(m["closed"] or 0)
+        w = int(m["wins"] or 0)
+        summary_by_market[mk] = {
+            "open": int(m["open"] or 0),
+            "closed": cl,
+            "win_rate": round(w / cl * 100, 1) if cl else None,
+            "ytd_pnl": round(float(m["ytd_pnl"]), 2) if m["ytd_pnl"] is not None else None,
+            "cum_pnl": round(float(m["cum_pnl"]), 2) if m["cum_pnl"] is not None else None,
+            "today": ({"trades": int(m["today_trades"]), "pnl": round(float(m["today_pnl"] or 0), 2)}
+                      if m["today_trades"] else None),
+            "unrealized_pnl": unreal_by_market.get(mk, 0.0),
+        }
+
     closed_n = int(agg.closed or 0) if agg else 0
     wins = int(agg.wins or 0) if agg else 0
     summary = {
@@ -716,7 +754,9 @@ def get_manual_positions(db: Session = Depends(get_db)):
                   if agg and agg.today_trades else None),
         "unrealized_pnl": round(tot_unreal, 2),
     }
-    return {"open": open_positions, "closed": closed_positions, "summary": summary, "as_of": _now_iso()}
+    return {"open": open_positions, "closed": closed_positions,
+            "summary": summary, "summary_by_market": summary_by_market,
+            "as_of": _now_iso()}
 
 
 class ManualPositionAdd(BaseModel):

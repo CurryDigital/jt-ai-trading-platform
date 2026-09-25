@@ -10,15 +10,18 @@ import { fmt, fmtK, pnlCl, api, usePoll, fetchWithTimeout } from '../../utils';
 // → gold.daily_ohlcv fallback), computed server-side. Siloed by design: the
 // manual book does NOT feed Command aggregates or NAV.
 //
-// Anatomy mirrors the Paper book: ExecScaffold header + summary strip in the
-// stats slot, shared PositionsByReturn table (Paper columns minus Strategy,
-// plus Notes on the sub line), per-row Close (small exit form, not an order),
-// and an Add Position form in the right rail instead of the order ticket.
+// 2026-09-25 pm: split into per-market books (US / HK side by side, stacked
+// on narrow screens) so HK and US performance evaluate separately — each
+// panel carries its own summary strip in its NATIVE currency (USD / HKD);
+// the HK book marks in HKD, the US book in USD, and a combined total would
+// mix FX silently.
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
-const fmtUsd = (n) => n == null ? '—'
-  : `${n < 0 ? '-' : '+'}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const CCY = { US: { sign: '$', code: 'USD', title: 'US Stocks' }, HK: { sign: 'HK$', code: 'HKD', title: 'HK Stocks' } };
+
+const fmtCcy = (n, sign) => n == null ? '—'
+  : `${n < 0 ? '-' : '+'}${sign}${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 const inputCls = 'w-full bg-slate-900/70 border border-white/[0.08] rounded px-2 py-1 text-[11px] text-white placeholder-slate-600 focus:outline-none focus:border-white/[0.2]';
 const labelCls = 'qr-label block mb-0.5';
@@ -28,7 +31,14 @@ const AddPositionForm = ({ onAdded }) => {
     symbol: '', market: 'US', side: 'LONG', qty: '', entry_price: '', entry_date: TODAY, notes: '',
   });
   const [state, setState] = useState(null); // { busy, msg: { type, text } }
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k) => (e) => {
+    const v = e.target.value;
+    setForm((f) => ({
+      ...f, [k]: v,
+      // Symbol suffix implies the market — .HK flips the market select.
+      ...(k === 'symbol' && /\.HK$/i.test(v.trim()) ? { market: 'HK' } : {}),
+    }));
+  };
 
   const submit = async () => {
     setState({ busy: true, msg: null });
@@ -128,6 +138,7 @@ const AddPositionForm = ({ onAdded }) => {
 // server-side. No order routing.
 const CloseForm = ({ row, onDone, onCancel }) => {
   const p = row.raw;
+  const meta = CCY[p.market] || CCY.US;
   const [exitPrice, setExitPrice] = useState(p.current_price != null ? String(p.current_price) : '');
   const [exitDate, setExitDate] = useState(TODAY);
   const [state, setState] = useState(null);
@@ -142,7 +153,7 @@ const CloseForm = ({ row, onDone, onCancel }) => {
       }, 20000);
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
-        onDone?.(`Closed ${p.symbol} · realized ${fmtUsd(body.realized_pnl)}`);
+        onDone?.(`Closed ${p.symbol} · realized ${fmtCcy(body.realized_pnl, meta.sign)}`);
       } else {
         setState({ busy: false, msg: body.detail || `Close failed (${res.status})` });
       }
@@ -159,10 +170,10 @@ const CloseForm = ({ row, onDone, onCancel }) => {
           <button onClick={onCancel} className="text-slate-500 hover:text-slate-300 text-[11px] px-1">✕</button>
         </div>
         <div className="text-[11px] text-white font-mono">{p.symbol}
-          <span className="ml-2 text-[9px] text-slate-500">{p.side} {fmt(p.qty, 0)} @ ${fmt(p.entry_price)} · {p.entry_date}</span>
+          <span className="ml-2 text-[9px] text-slate-500">{p.side} {fmt(p.qty, 0)} @ {meta.sign}{fmt(p.entry_price)} · {p.entry_date}</span>
         </div>
         <div>
-          <label className={labelCls}>Exit Price</label>
+          <label className={labelCls}>Exit Price ({meta.code})</label>
           <input className={inputCls} type="number" min="0" step="any" value={exitPrice} onChange={(e) => setExitPrice(e.target.value)} />
         </div>
         <div>
@@ -182,7 +193,14 @@ const CloseForm = ({ row, onDone, onCancel }) => {
   );
 };
 
-const ClosedTable = ({ rows }) => (
+const MiniTile = ({ label, value, tone, title }) => (
+  <div className="rounded bg-white/[0.03] px-1.5 py-1 min-w-0" title={title}>
+    <div className="qr-label">{label}</div>
+    <div className={`font-mono text-[11px] font-bold leading-tight truncate ${tone || 'text-white'}`}>{value}</div>
+  </div>
+);
+
+const ClosedTable = ({ rows, sign }) => (
   <div className="overflow-x-auto max-h-96 overflow-y-auto">
     <table className="w-full">
       <thead className="qr-th-sticky">
@@ -196,18 +214,18 @@ const ClosedTable = ({ rows }) => (
           <tr key={p.id} className="qr-tr-hover">
             <td className="py-1 px-2">
               <span className="text-[11px] font-mono text-white">{p.symbol}</span>
-              <span className="ml-1.5 text-[9px] text-slate-500">{[p.market, p.notes].filter(Boolean).join(' · ')}</span>
+              {p.notes && <span className="ml-1.5 text-[9px] text-slate-500">{p.notes}</span>}
             </td>
             <td className="py-1 px-2 text-right">
               <span className={`qr-chip ${p.side === 'SHORT' ? 'qr-chip-rose' : 'qr-chip-emerald'}`}>{p.side}</span>
             </td>
             <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.qty, 0)}</td>
-            <td className="py-1 px-2 qr-num text-slate-400">${fmt(p.entry_price)}</td>
-            <td className="py-1 px-2 qr-num text-slate-300">{p.exit_price != null ? `$${fmt(p.exit_price)}` : '—'}</td>
+            <td className="py-1 px-2 qr-num text-slate-400">{sign}{fmt(p.entry_price)}</td>
+            <td className="py-1 px-2 qr-num text-slate-300">{p.exit_price != null ? `${sign}${fmt(p.exit_price)}` : '—'}</td>
             <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{p.entry_date}</td>
             <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{p.exit_date}</td>
             <td className="py-1 px-2 qr-num text-slate-400">{p.held_days != null ? `${p.held_days}d` : '—'}</td>
-            <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.realized_pnl)}`}>{p.realized_pnl != null ? fmtUsd(p.realized_pnl) : '—'}</td>
+            <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.realized_pnl)}`}>{p.realized_pnl != null ? fmtCcy(p.realized_pnl, sign) : '—'}</td>
           </tr>
         ))}
       </tbody>
@@ -215,9 +233,58 @@ const ClosedTable = ({ rows }) => (
   </div>
 );
 
+// One market book: summary strip in native currency + Positions / Closed tabs.
+const MarketBook = ({ market, open, closed, summary, onCloseRow }) => {
+  const [tab, setTab] = useState('open');
+  const meta = CCY[market] || { sign: '$', code: market, title: `${market} Stocks` };
+  const s = summary || {};
+  const rows = open.map(normManualPosition);
+  const tabs = [
+    { id: 'open',   label: `Positions (${open.length})` },
+    { id: 'closed', label: `Closed (${closed.length})` },
+  ];
+  return (
+    <div className="qr-surface overflow-hidden">
+      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
+        <span className="qr-label">{meta.title}</span>
+        <span className="text-[9px] text-slate-600">values in {meta.code}</span>
+      </div>
+      <div className="px-2 pt-2 grid grid-cols-4 sm:grid-cols-7 gap-1">
+        <MiniTile label="YTD P&L" value={fmtCcy(s.ytd_pnl, meta.sign)} tone={pnlCl(s.ytd_pnl)} title="Realized since Jan 1" />
+        <MiniTile label="Today" value={s.today ? fmtCcy(s.today.pnl, meta.sign) : '—'} tone={pnlCl(s.today?.pnl)} title={s.today ? `${s.today.trades} exits today` : 'No exits today'} />
+        <MiniTile label="Win Rate" value={s.win_rate != null ? `${s.win_rate}%` : '—'} title="Share of closed trades with positive realized P&L" />
+        <MiniTile label="Closed" value={s.closed ?? 0} tone="text-slate-300" />
+        <MiniTile label="Open" value={s.open ?? open.length} tone="text-slate-300" />
+        <MiniTile label="Cum P&L" value={fmtCcy(s.cum_pnl, meta.sign)} tone={pnlCl(s.cum_pnl)} title="All-time realized P&L" />
+        <MiniTile label="Unrealized" value={fmtCcy(s.unrealized_pnl, meta.sign)} tone={pnlCl(s.unrealized_pnl)} title="Open book marked to latest close" />
+      </div>
+      <ExecTabs tabs={tabs} active={tab} onChange={setTab} />
+      {tab === 'open' ? (
+        open.length === 0 ? (
+          <div className="py-6 text-center text-slate-600 text-[11px]">No open {market} positions</div>
+        ) : (
+          <div className="p-2 space-y-2">
+            <PositionsByReturn
+              rows={rows}
+              renderAction={(r) => (
+                <CloseButton onClick={() => onCloseRow(r)} title="Record exit legs — ledger write only, no order routed" />
+              )}
+            />
+          </div>
+        )
+      ) : (
+        closed.length === 0 ? (
+          <div className="py-6 text-center text-slate-600 text-[11px]">No closed {market} trades yet</div>
+        ) : (
+          <ClosedTable rows={closed} sign={meta.sign} />
+        )
+      )}
+    </div>
+  );
+};
+
 export const ManualPanel = () => {
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState('open');
   const [closing, setClosing] = useState(null);   // normalized row being closed
   const [notice, setNotice] = useState(null);     // { type, text }
 
@@ -230,12 +297,10 @@ export const ManualPanel = () => {
   const open = data?.open || [];
   const closed = data?.closed || [];
   const summary = data?.summary || {};
-  const rows = open.map(normManualPosition);
-
-  const tabs = [
-    { id: 'open',   label: `Positions (${data ? open.length : '…'})` },
-    { id: 'closed', label: `Closed (${data ? closed.length : '…'})` },
-  ];
+  const byMarket = data?.summary_by_market || {};
+  // Markets to render: any market with rows or a summary — US first, then HK.
+  const markets = ['US', 'HK'].filter(mk =>
+    open.some(p => p.market === mk) || closed.some(p => p.market === mk) || byMarket[mk]);
 
   return (
     <>
@@ -245,13 +310,9 @@ export const ManualPanel = () => {
         hideTicket
         railExtra={<AddPositionForm onAdded={load} />}
         stats={<>
-          <ExecStat l="YTD P&L" v={summary.ytd_pnl != null ? fmtUsd(summary.ytd_pnl) : '—'} tone={pnlCl(summary.ytd_pnl)} />
-          <ExecStat l="Today" v={summary.today ? fmtUsd(summary.today.pnl) : '—'} tone={pnlCl(summary.today?.pnl)} />
-          <ExecStat l="Win Rate" v={summary.win_rate != null ? `${summary.win_rate}%` : '—'} />
-          <ExecStat l="Closed" v={summary.closed ?? '—'} tone="text-slate-300" />
           <ExecStat l="Open" v={summary.open ?? '—'} tone="text-slate-300" />
-          <ExecStat l="Cum P&L" v={summary.cum_pnl != null ? fmtUsd(summary.cum_pnl) : '—'} tone={pnlCl(summary.cum_pnl)} />
-          <ExecStat l="Unrealized" v={data ? fmtUsd(summary.unrealized_pnl) : '…'} tone={pnlCl(summary.unrealized_pnl)} />
+          <ExecStat l="Closed" v={summary.closed ?? '—'} tone="text-slate-300" />
+          <ExecStat l="Win Rate" v={summary.win_rate != null ? `${summary.win_rate}%` : '—'} />
         </>}
       >
         {notice && (
@@ -259,38 +320,27 @@ export const ManualPanel = () => {
             {notice.text}
           </div>
         )}
-        <div className="qr-surface overflow-hidden">
-          <ExecTabs
-            tabs={tabs}
-            active={tab}
-            onChange={setTab}
-            right={<span className="text-[9px] text-slate-600">marked to latest close · same quote source as Paper · siloed — not in Command totals</span>}
-          />
-          {tab === 'open' ? (
-            !data ? (
-              <div className="py-6 text-center text-slate-600 text-[11px]">Loading…</div>
-            ) : open.length === 0 ? (
-              <div className="py-6 text-center text-slate-600 text-[11px]">No open manual positions — add one from the form on the right</div>
-            ) : (
-              <div className="p-2 space-y-2">
-                <PositionsByReturn
-                  rows={rows}
-                  renderAction={(r) => (
-                    <CloseButton onClick={() => setClosing(r)} title="Record exit legs — ledger write only, no order routed" />
-                  )}
-                />
-              </div>
-            )
-          ) : (
-            !data ? (
-              <div className="py-6 text-center text-slate-600 text-[11px]">Loading…</div>
-            ) : closed.length === 0 ? (
-              <div className="py-6 text-center text-slate-600 text-[11px]">No closed manual trades yet</div>
-            ) : (
-              <ClosedTable rows={closed} />
-            )
-          )}
+        <div className="flex items-center justify-end px-1">
+          <span className="text-[9px] text-slate-600">marked to latest close · same quote source as Paper · per-market summaries in native currency (US = USD, HK = HKD) · siloed — not in Command totals</span>
         </div>
+        {!data ? (
+          <div className="qr-surface py-6 text-center text-slate-600 text-[11px]">Loading…</div>
+        ) : markets.length === 0 ? (
+          <div className="qr-surface py-6 text-center text-slate-600 text-[11px]">No manual positions yet — add one from the form on the right</div>
+        ) : (
+          <div className={`grid grid-cols-1 gap-3 ${markets.length > 1 ? 'xl:grid-cols-2' : ''} items-start`}>
+            {markets.map((mk) => (
+              <MarketBook
+                key={mk}
+                market={mk}
+                open={open.filter(p => p.market === mk)}
+                closed={closed.filter(p => p.market === mk)}
+                summary={byMarket[mk]}
+                onCloseRow={setClosing}
+              />
+            ))}
+          </div>
+        )}
       </ExecScaffold>
       {closing && (
         <CloseForm
