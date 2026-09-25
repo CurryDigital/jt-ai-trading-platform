@@ -50,6 +50,7 @@ const StrategyCompare = lazyRetry(() => import('./components/StrategyCompare').t
 const LiveOpsPanel = lazyRetry(() => import('./components/LiveOpsPanel').then(m => ({ default: m.LiveOpsPanel })), 'LiveOpsPanel');
 const PaperStrategiesPage = lazyRetry(() => import('./components/PaperStrategiesPage'), 'PaperStrategiesPage');
 const UatPanel = lazyRetry(() => import('./components/execution/UatPanel').then(m => ({ default: m.UatPanel })), 'UatPanel');
+const ManualPanel = lazyRetry(() => import('./components/execution/ManualPanel').then(m => ({ default: m.ManualPanel })), 'ManualPanel');
 const SignalsTab = lazyRetry(() => import('./components/SignalsTab').then(m => ({ default: m.SignalsTab })), 'SignalsTab');
 const MacroTab = lazyRetry(() => import('./components/MacroTab').then(m => ({ default: m.MacroTab })), 'MacroTab');
 const AnalyticsTab = lazyRetry(() => import('./components/AnalyticsTab').then(m => ({ default: m.AnalyticsTab })), 'AnalyticsTab');
@@ -630,6 +631,26 @@ export default function App() {
     { id: 'settings',   label: 'Settings',  short: 'Set',  IconComponent: Icon.Settings,    key: '5' },
   ], []);
 
+  // Global header alert badge (2026-09-18): the Action Center moved to
+  // Settings ▸ Alerts; this badge keeps the live count + worst severity
+  // visible from every tab and deep-links into that section.
+  const [alertBadge, setAlertBadge] = useState(null); // { total, critical, warning }
+  const [settingsDeepLink, setSettingsDeepLink] = useState(null); // { section, n }
+  usePoll(async () => {
+    const res = await api.get('/api/command/overview');
+    if (!res) return;
+    const attn = res.attention || [];
+    const risks = res.strategy_risks || [];
+    const gap = (res.monitoring_gap || 0) > 0 ? 1 : 0;
+    const crit = attn.filter(a => a.sev === 'critical').length + risks.filter(r => r.sev === 'critical').length;
+    const warn = attn.filter(a => a.sev === 'warning').length + risks.filter(r => r.sev === 'warning').length;
+    setAlertBadge({ total: attn.length + risks.length + gap, critical: crit, warning: warn });
+  }, 60000);
+  const openAlerts = () => {
+    setSettingsDeepLink({ section: 'alerts', n: Date.now() });
+    navigateToTab('settings');
+  };
+
   // Sub-tab configs — each main tab has a clear intent:
   //   Research  -> find trade ideas (markets, signals, agents)
   //   Strategies -> manage lifecycle (lab, pipeline, performance)
@@ -654,6 +675,7 @@ export default function App() {
       { id: 'paper_strategies', label: 'Paper',     short: 'Ppr', IconComponent: Icon.Portfolio,   key: 'w' },
       { id: 'uat',              label: 'UAT', short: 'UAT', IconComponent: Icon.Command,     key: 'e' },
       { id: 'live_ops',         label: 'Live',      short: 'Live', IconComponent: Icon.Command,    key: 'r' },
+      { id: 'manual',           label: 'Manual',    short: 'Man', IconComponent: Icon.Portfolio,   key: 't' },
     ],
   }), []);
 
@@ -796,6 +818,23 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            {alertBadge && (
+              <button
+                onClick={openAlerts}
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-bold transition-colors ${
+                  alertBadge.critical > 0
+                    ? 'text-rose-300 bg-rose-500/15 hover:bg-rose-500/25'
+                    : alertBadge.total > 0
+                      ? 'text-slate-300 bg-white/[0.07] hover:bg-white/[0.12]'
+                      : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title={alertBadge.total > 0
+                  ? `${alertBadge.total} open alert${alertBadge.total === 1 ? '' : 's'}${alertBadge.critical ? ` (${alertBadge.critical} critical)` : ''}${alertBadge.warning ? ` (${alertBadge.warning} warning)` : ''} — Alerts · Action Center (Settings)`
+                  : 'No open alerts — Alerts · Action Center (Settings)'}
+              >
+                ⚠ {alertBadge.total}
+              </button>
+            )}
             <div className="hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded">
               <span className={`qr-dot ${ibkrConnected ? 'qr-dot-live animate-pulse-dot' : 'qr-dot-idle'}`} />
               <span className="text-[9px] text-slate-500 uppercase tracking-wider">IBKR</span>
@@ -864,7 +903,7 @@ export default function App() {
 
         <Suspense fallback={<TabFallback />}>
         {currentTab === 'command'          && <CommandCenter data={data} navigateToTab={navigateToTab} onSelectStrategy={openStrategyDetail} />}
-        {currentTab === 'settings'         && <SettingsTab healthData={healthData} latencyMs={latencyMs} wsConnected={wsConnected} />}
+        {currentTab === 'settings'         && <SettingsTab healthData={healthData} latencyMs={latencyMs} wsConnected={wsConnected} initialSection={settingsDeepLink} navigateToTab={navigateToTab} onSelectStrategy={openStrategyDetail} />}
 
         {/* Research tab — find trade ideas */}
         {currentTab === 'research' && (
@@ -894,6 +933,7 @@ export default function App() {
             {activeSubTab === 'paper_strategies' && <PaperStrategiesPage />}
             {activeSubTab === 'uat'              && <UatPanel />}
             {activeSubTab === 'live_ops'         && <LiveOpsPanel onSelectStrategy={openStrategyDetail} />}
+            {activeSubTab === 'manual'           && <ManualPanel />}
           </>
         )}
 

@@ -406,8 +406,10 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
   [data && data.backtest_trades]);
 
   // SIM "Signals" tab: forward-looking rule mirror for HK IPO drift strategies —
-  // which names the documented rule buys, and when. Rows past their exit are
-  // excluded (history lives in the Ledger tab). Decision words:
+  // queued/undecided only. Full gate chain still runs (mirrors IpoTab.stratDecision
+  // 1:1) but SKIP/ENTERED rows are dropped from the display — the user only
+  // wants BUY ON (actionable) and WATCH (band not decidable yet) rows
+  // (2026-09-25 request). Gate semantics kept for reference:
   //   ENTERED  — in oversub band and the +20td entry day has traded (mirror open)
   //   BUY ON   — all gates pass, entry still ahead (queued); date measured, else est.
   //   WATCH    — band undecidable (pre-listing; retail oversub lands at allotment)
@@ -456,6 +458,10 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
       } else {
         word = 'ENTERED'; sub = `${entry} · exit ${exit}${r.day40_date ? '' : ' (est)'}`;
       }
+      // Display filter: BUY ON (queued) and WATCH (undecidable yet) only —
+      // SKIP (gate failed) and ENTERED (already in hold; see Ledger/Allocation)
+      // are noise for this list (2026-09-25 request).
+      if (word !== 'BUY ON' && word !== 'WATCH') continue;
       rows.push({ ticker: r.ticker, name: r.stock_name || r.stock_name_zh || '',
         listing: r.listing_date, entry, exit, oversub: ov, phase, word, sub });
     }
@@ -744,7 +750,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                   { id: 'rebalances', label: `Rebalances (${simRebalances.length})` },
                   { id: 'allocation', label: `Allocation (${simOpen.length})` },
                   { id: 'trades',     label: `Ledger (${(data.backtest_trades || []).length})` },
-                  { id: 'signals',    label: `Signals (${strategyId.startsWith('hk_ipo') ? (simBuyWatch || []).filter(r => r.word === 'BUY ON' || r.word === 'ENTERED').length : activeSignals.length})` },
+                  { id: 'signals',    label: `Signals (${strategyId.startsWith('hk_ipo') ? (simBuyWatch || []).length : activeSignals.length})` },
                 ].map(t => (
                   <button
                     key={t.id}

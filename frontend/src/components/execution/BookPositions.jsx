@@ -83,6 +83,28 @@ export const normLivePosition = (p) => {
   };
 };
 
+// Manual book (Execution > Manual tab): discretionary hand-entered positions
+// from /api/execution/manual/positions. Same columns as Paper minus Strategy;
+// the sub line carries market · held-days · notes instead.
+export const normManualPosition = (p) => {
+  const qty = p.qty ?? null;
+  const current = p.current_price ?? null;
+  return {
+    key: p.id,
+    ticker: p.symbol,
+    sub: [p.market, p.held_days != null ? `held ${p.held_days}d` : null, p.notes]
+      .filter(Boolean).join(' · '),
+    side: p.side,
+    qty,
+    entry: p.entry_price ?? null,
+    current,
+    value: p.market_value ?? (qty != null && current != null ? qty * current : null),
+    pnl: p.unrealized_pnl ?? null,
+    pnlPct: null,  // shared helper derives % with the SHORT sign flip
+    raw: p,
+  };
+};
+
 // ---------------------------------------------------------------------------
 
 const SIDE_CHIP = { LONG: 'qr-chip-emerald', SHORT: 'qr-chip-rose', BUY: 'qr-chip-emerald', SELL: 'qr-chip-rose' };

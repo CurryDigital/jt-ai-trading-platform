@@ -13,6 +13,7 @@ export const EXEC_MODE_META = {
   paper: { badge: 'PAPER', title: 'Paper Book',     note: 'virtual money · strategy rehearsal · no IBKR' },
   uat:   { badge: 'UAT',   title: 'UAT',            note: 'IBKR paper account · real order routing · paper money' },
   live:  { badge: 'LIVE',  title: 'Live Book',      note: 'IBKR live account · real money' },
+  manual: { badge: 'MANUAL', title: 'Manual Book',   note: 'discretionary hand-entered positions · ledger only · no IBKR' },
 };
 
 export const ExecStat = ({ l, v, tone }) => (

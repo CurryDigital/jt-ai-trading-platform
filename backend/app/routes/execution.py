@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import time
 
 from app.dependencies import get_db, logger
@@ -212,6 +212,227 @@ def get_execution_trades(book: str = "live", limit: int = 50, db: Session = Depe
     return {"data": data, "as_of": _now_iso() if data else None}
 
 
+# =============================================================================
+# Book Overview (Execution tab layout, 2026-09-14): per-book performance
+# summary for the SIM / PAPER / UAT subtabs — best-performing strategies,
+# headline stats, and the YTD cumulative realized P&L curve in dollars.
+# Ledgers (canonical, qr_etl-owned — same mapping as /api/command/pnl-by-mode):
+#   SIM   -> gold.paper_trades_synthetic x registry SIMULATION (closed, exit_date)
+#   PAPER -> gold.paper_trades_synthetic x registry PAPER      (closed, exit_date)
+#   UAT   -> gold.paper_uat_fills (fill_time) — fills only, no round-trip P&L;
+#            strategy P&L / win-rate stay NULL until a per-strategy UAT
+#            round-trip ledger exists (qr_etl's domain — never derived here).
+# Read-only; a book with no data returns nulls, never a misleading $0.
+# =============================================================================
+
+def _book_overview_sim_paper(db, exec_mode):
+    """Shared query block for the two synthetic-ledger books (mode-scoped via
+    the registry join so SIM and PAPER stay distinct). exec_mode is a fixed
+    internal literal ('SIMULATION' | 'PAPER'), never request input."""
+    closed_row = safe_query_one(db, f"""
+        SELECT COUNT(*) AS closed,
+               COUNT(*) FILTER (WHERE t.pnl > 0) AS wins,
+               SUM(t.pnl) AS cum_pnl,
+               SUM(t.pnl) FILTER (
+                   WHERE t.exit_date >= date_trunc('year', now())::date
+               ) AS ytd_pnl,
+               COUNT(*) FILTER (
+                   WHERE t.exit_date >= date_trunc('year', now())::date
+               ) AS ytd_trades
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+    """, label=f"book_overview_{exec_mode}_closed")
+
+    today_row = safe_query_one(db, f"""
+        SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND t.exit_date = CURRENT_DATE
+          AND (t.ticker IS NULL OR t.ticker != 'CASH')
+    """, label=f"book_overview_{exec_mode}_today")
+
+    open_row = safe_query_one(db, f"""
+        SELECT COUNT(*) AS n
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        JOIN gold.strategy_paper_monitoring m
+          ON m.strategy_id = t.strategy_id AND m.is_active
+        WHERE t.status = 'open' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+    """, label=f"book_overview_{exec_mode}_open")
+
+    # YTD cumulative realized P&L in dollars, carry-forward over quiet days.
+    daily_rows = safe_query(db, f"""
+        SELECT t.exit_date AS d, SUM(t.pnl) AS pnl
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
+          AND t.exit_date >= date_trunc('year', now())::date
+          AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        GROUP BY t.exit_date ORDER BY t.exit_date
+    """, label=f"book_overview_{exec_mode}_daily")
+
+    # Best-performing strategies: all-time realized ranking with the YTD
+    # slice alongside, so a strategy that won big last year but is flat this
+    # year reads honestly in both columns.
+    strat_rows = safe_query(db, f"""
+        SELECT t.strategy_id, r.name,
+               COUNT(*) AS closed,
+               COUNT(*) FILTER (WHERE t.pnl > 0) AS wins,
+               SUM(t.pnl) AS cum_pnl,
+               SUM(t.pnl) FILTER (
+                   WHERE t.exit_date >= date_trunc('year', now())::date
+               ) AS ytd_pnl
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        GROUP BY t.strategy_id, r.name
+        ORDER BY SUM(t.pnl) DESC NULLS LAST
+        LIMIT 6
+    """, label=f"book_overview_{exec_mode}_strats")
+
+    # Worst-performing strategies: identical ranking, ascending.
+    strat_rows_worst = safe_query(db, f"""
+        SELECT t.strategy_id, r.name,
+               COUNT(*) AS closed,
+               COUNT(*) FILTER (WHERE t.pnl > 0) AS wins,
+               SUM(t.pnl) AS cum_pnl,
+               SUM(t.pnl) FILTER (
+                   WHERE t.exit_date >= date_trunc('year', now())::date
+               ) AS ytd_pnl
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        GROUP BY t.strategy_id, r.name
+        ORDER BY SUM(t.pnl) ASC NULLS LAST
+        LIMIT 6
+    """, label=f"book_overview_{exec_mode}_strats_worst")
+
+    closed = int(closed_row.closed or 0) if closed_row else 0
+    wins = int(closed_row.wins or 0) if closed_row else 0
+    cum_pnl = float(closed_row.cum_pnl) if closed_row and closed_row.cum_pnl is not None else None
+    ytd_trades = int(closed_row.ytd_trades or 0) if closed_row else 0
+    ytd_pnl = float(closed_row.ytd_pnl) if closed_row and closed_row.ytd_pnl is not None else None
+    today = None
+    if today_row and today_row.trades:
+        today = {"trades": int(today_row.trades), "pnl": float(today_row.pnl or 0)}
+
+    by_day = {r.d: float(r.pnl or 0) for r in daily_rows}
+    ytd_curve = []
+    if by_day:
+        start = datetime.now(timezone.utc).date().replace(month=1, day=1)
+        end = datetime.now(timezone.utc).date()
+        run = 0.0
+        d = start
+        while d <= end:
+            run += by_day.get(d, 0.0)
+            ytd_curve.append({"d": str(d), "cum": round(run, 2)})
+            d += timedelta(days=1)
+
+    def _strat_row(r):
+        return {
+            "strategy_id": r.strategy_id,
+            "name": r.name or r.strategy_id,
+            "closed_trades": int(r.closed or 0),
+            "win_rate": round(int(r.wins or 0) / int(r.closed) * 100, 1) if r.closed else None,
+            "cum_pnl": round(float(r.cum_pnl), 2) if r.cum_pnl is not None else None,
+            "ytd_pnl": round(float(r.ytd_pnl), 2) if r.ytd_pnl is not None else None,
+        }
+
+    strategies = [_strat_row(r) for r in strat_rows]
+    worst_strategies = [_strat_row(r) for r in strat_rows_worst]
+
+    return {
+        "stats": {
+            "closed_trades": closed,
+            "win_rate": round(wins / closed * 100, 1) if closed else None,
+            "open_trades": int(open_row.n or 0) if open_row else 0,
+            "today": today,
+            "ytd_pnl": round(ytd_pnl, 2) if ytd_pnl is not None else None,
+            "ytd_trades": ytd_trades,
+            "cum_pnl": round(cum_pnl, 2) if cum_pnl is not None else None,
+        },
+        "ytd_curve": ytd_curve,
+        "top_strategies": strategies,
+        "worst_strategies": worst_strategies,
+        "strategy_metric": "realized_pnl",
+    }
+
+
+def _book_overview_uat(db):
+    """UAT book: broker-rehearsal fills only (gold.paper_uat_fills has no
+    per-fill pnl — they are fills, not round-trips). Strategy ranking is by
+    fill activity, clearly flagged; P&L / win-rate stay NULL."""
+    agg = safe_query_one(db, """
+        SELECT COUNT(*) AS fills,
+               COUNT(*) FILTER (WHERE fill_time::date = CURRENT_DATE) AS fills_today,
+               COUNT(*) FILTER (WHERE fill_time >= date_trunc('year', now())) AS fills_ytd,
+               COUNT(DISTINCT strategy_id) AS strategies,
+               MAX(fill_time) AS last_fill_at
+        FROM gold.paper_uat_fills
+    """, label="book_overview_uat_agg")
+
+    strat_rows = safe_query(db, """
+        SELECT f.strategy_id, r.name,
+               COUNT(*) AS fills,
+               COUNT(DISTINCT f.symbol) AS symbols,
+               MAX(f.fill_time) AS last_fill_at
+        FROM gold.paper_uat_fills f
+        LEFT JOIN gold.strategy_registry r ON r.strategy_id = f.strategy_id
+        GROUP BY f.strategy_id, r.name
+        ORDER BY COUNT(*) DESC
+        LIMIT 6
+    """, label="book_overview_uat_strats")
+
+    strategies = [{
+        "strategy_id": r.strategy_id,
+        "name": r.name or r.strategy_id,
+        "fills": int(r.fills or 0),
+        "symbols": int(r.symbols or 0),
+        "last_fill_at": r.last_fill_at.isoformat() if r.last_fill_at else None,
+        "closed_trades": None, "win_rate": None, "cum_pnl": None, "ytd_pnl": None,
+    } for r in strat_rows]
+
+    return {
+        "stats": {
+            "closed_trades": None,
+            "win_rate": None,
+            "open_trades": None,
+            "today": ({"trades": int(agg.fills_today), "pnl": None}
+                      if agg and agg.fills_today else None),
+            "ytd_pnl": None,
+            "ytd_trades": int(agg.fills_ytd or 0) if agg else 0,
+            "cum_pnl": None,
+            "total_fills": int(agg.fills or 0) if agg else 0,
+            "last_fill_at": agg.last_fill_at.isoformat() if agg and agg.last_fill_at else None,
+        },
+        "ytd_curve": [],
+        "top_strategies": strategies,
+        "strategy_metric": "fills",
+    }
+
+
+@router.get("/book-overview")
+def get_book_overview(book: str = "sim", db: Session = Depends(get_db)):
+    """Execution-tab per-book overview: stats, YTD cumulative realized P&L
+    (dollars), and the best-performing strategies for SIM / PAPER / UAT."""
+    if book == "paper_uat":
+        book = "uat"
+    if book not in ("sim", "paper", "uat"):
+        raise HTTPException(status_code=400, detail="book must be sim, paper or uat")
+    if book == "uat":
+        out = _book_overview_uat(db)
+    else:
+        out = _book_overview_sim_paper(db, "SIMULATION" if book == "sim" else "PAPER")
+    return {"book": book, **out, "as_of": _now_iso()}
+
+
 class ManualOrderRequest(BaseModel):
     book: str
     ticker: str
@@ -388,6 +609,212 @@ def get_execution_limits(db: Session = Depends(get_db)):
         "global_halt": bool(global_row.global_halt) if global_row else False,
         "per_strategy": per_strategy,
     }
+
+
+# =============================================================================
+# Manual book (Execution > Manual tab, 2026-09-25 goal): discretionary
+# positions entered by hand — tracked in gold.manual_positions, marked with
+# the SAME quote source as the Paper book (silver.unified_prices latest
+# close, fallback gold.daily_ohlcv). No IBKR routing anywhere in this
+# section: add writes a row, close writes exit legs. Siloed by design —
+# manual positions do NOT feed Command aggregates or NAV.
+# =============================================================================
+
+def _latest_mark(db, symbol):
+    """Latest close for a symbol — identical source/fallback order as the
+    paper book's close-position mark."""
+    mark = db.execute(text("""
+        SELECT close, date FROM silver.unified_prices
+        WHERE ticker = :t AND close IS NOT NULL
+        ORDER BY date DESC LIMIT 1
+    """), {"t": symbol}).fetchone()
+    if mark:
+        return float(mark.close), str(mark.date), "silver.unified_prices"
+    mark = db.execute(text("""
+        SELECT close, date FROM gold.daily_ohlcv
+        WHERE ticker = :t AND close IS NOT NULL
+        ORDER BY date DESC LIMIT 1
+    """), {"t": symbol}).fetchone()
+    if mark:
+        return float(mark.close), str(mark.date), "gold.daily_ohlcv"
+    return None, None, None
+
+
+def _signed_pnl(side, entry, exit_or_mark, qty):
+    sign = -1.0 if (side or "").upper() == "SHORT" else 1.0
+    return sign * (float(exit_or_mark) - float(entry)) * float(qty)
+
+
+@router.get("/manual/positions")
+def get_manual_positions(db: Session = Depends(get_db)):
+    """Manual book — open positions marked to the latest close + closed
+    positions with realized P&L, plus the summary strip figures."""
+    rows = safe_query(db, """
+        SELECT id, symbol, market, asset_type, side, qty,
+               entry_price, entry_date, exit_price, exit_date, realized_pnl,
+               notes, created_at
+        FROM gold.manual_positions
+        ORDER BY (exit_date IS NULL) DESC, entry_date DESC, id DESC
+    """, label="manual_positions_list")
+
+    open_positions, closed_positions = [], []
+    tot_unreal = 0.0
+    for r in rows:
+        m = r._mapping
+        base = {
+            "id": m["id"],
+            "symbol": m["symbol"],
+            "market": m["market"],
+            "asset_type": m["asset_type"],
+            "side": m["side"],
+            "qty": float(m["qty"]),
+            "entry_price": float(m["entry_price"]),
+            "entry_date": str(m["entry_date"]),
+            "held_days": (datetime.now(timezone.utc).date() - m["entry_date"]).days if m["entry_date"] else None,
+            "notes": m["notes"],
+        }
+        if m["exit_date"] is None:
+            mark, mark_date, mark_source = _latest_mark(db, m["symbol"])
+            unreal = _signed_pnl(m["side"], m["entry_price"], mark, m["qty"]) if mark is not None else None
+            if unreal is not None:
+                tot_unreal += unreal
+            open_positions.append({
+                **base,
+                "current_price": mark,
+                "current_price_date": mark_date,
+                "price_source": mark_source,
+                "unrealized_pnl": round(unreal, 2) if unreal is not None else None,
+                "market_value": round(mark * float(m["qty"]), 2) if mark is not None else None,
+            })
+        else:
+            closed_positions.append({
+                **base,
+                "exit_price": float(m["exit_price"]) if m["exit_price"] is not None else None,
+                "exit_date": str(m["exit_date"]),
+                "realized_pnl": round(float(m["realized_pnl"]), 2) if m["realized_pnl"] is not None else None,
+            })
+
+    agg = safe_query_one(db, """
+        SELECT COUNT(*) FILTER (WHERE exit_date IS NOT NULL) AS closed,
+               COUNT(*) FILTER (WHERE exit_date IS NOT NULL AND realized_pnl > 0) AS wins,
+               SUM(realized_pnl) AS cum_pnl,
+               SUM(realized_pnl) FILTER (WHERE exit_date >= date_trunc('year', now())::date) AS ytd_pnl,
+               COUNT(*) FILTER (WHERE exit_date = CURRENT_DATE) AS today_trades,
+               SUM(realized_pnl) FILTER (WHERE exit_date = CURRENT_DATE) AS today_pnl
+        FROM gold.manual_positions
+    """, label="manual_positions_summary")
+
+    closed_n = int(agg.closed or 0) if agg else 0
+    wins = int(agg.wins or 0) if agg else 0
+    summary = {
+        "open": len(open_positions),
+        "closed": closed_n,
+        "win_rate": round(wins / closed_n * 100, 1) if closed_n else None,
+        "ytd_pnl": round(float(agg.ytd_pnl), 2) if agg and agg.ytd_pnl is not None else None,
+        "cum_pnl": round(float(agg.cum_pnl), 2) if agg and agg.cum_pnl is not None else None,
+        "today": ({"trades": int(agg.today_trades), "pnl": round(float(agg.today_pnl or 0), 2)}
+                  if agg and agg.today_trades else None),
+        "unrealized_pnl": round(tot_unreal, 2),
+    }
+    return {"open": open_positions, "closed": closed_positions, "summary": summary, "as_of": _now_iso()}
+
+
+class ManualPositionAdd(BaseModel):
+    symbol: str
+    market: str
+    asset_type: Optional[str] = "STOCK"
+    side: str
+    qty: float
+    entry_price: float
+    entry_date: str
+    notes: Optional[str] = None
+
+
+@router.post("/manual/positions", status_code=201)
+def post_manual_position(payload: ManualPositionAdd, db: Session = Depends(get_db)):
+    """Add a discretionary position. Row insert only — never routes to IBKR."""
+    symbol = payload.symbol.strip().upper()
+    side = payload.side.strip().upper()
+    market = payload.market.strip().upper()
+    asset_type = (payload.asset_type or "STOCK").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=422, detail="symbol is required")
+    if side not in ("LONG", "SHORT"):
+        raise HTTPException(status_code=422, detail="side must be LONG or SHORT")
+    if market not in ("US", "HK"):
+        raise HTTPException(status_code=422, detail="market must be US or HK")
+    if asset_type not in ("STOCK", "CRYPTO", "FX"):
+        raise HTTPException(status_code=422, detail="asset_type must be STOCK, CRYPTO or FX")
+    if payload.qty <= 0:
+        raise HTTPException(status_code=422, detail="qty must be > 0")
+    if payload.entry_price <= 0:
+        raise HTTPException(status_code=422, detail="entry_price must be > 0")
+    try:
+        entry_date = datetime.strptime(payload.entry_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="entry_date must be YYYY-MM-DD")
+    if entry_date > datetime.now(timezone.utc).date():
+        raise HTTPException(status_code=422, detail="entry_date cannot be in the future")
+
+    row = safe_query_one(db, """
+        INSERT INTO gold.manual_positions
+            (symbol, market, asset_type, side, qty, entry_price, entry_date, notes, created_by)
+        VALUES (:symbol, :market, :asset_type, :side, :qty, :entry_price, :entry_date, :notes, 'workspace')
+        RETURNING id
+    """, {
+        "symbol": symbol, "market": market, "asset_type": asset_type, "side": side,
+        "qty": payload.qty, "entry_price": payload.entry_price,
+        "entry_date": entry_date, "notes": (payload.notes or None),
+    }, label="manual_position_insert")
+    if row is None:
+        raise HTTPException(status_code=503, detail="gold.manual_positions is not provisioned yet")
+    db.commit()
+    return {"id": row._mapping["id"], "status": "accepted", "symbol": symbol, "as_of": _now_iso()}
+
+
+class ManualPositionClose(BaseModel):
+    exit_price: float
+    exit_date: str
+    notes: Optional[str] = None
+
+
+@router.post("/manual/positions/{position_id}/close")
+def close_manual_position(position_id: int, payload: ManualPositionClose, db: Session = Depends(get_db)):
+    """Close a manual position with exit legs; realized P&L computed server-side
+    (side-signed). Update only — no order routing."""
+    if payload.exit_price <= 0:
+        raise HTTPException(status_code=422, detail="exit_price must be > 0")
+    try:
+        exit_date = datetime.strptime(payload.exit_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="exit_date must be YYYY-MM-DD")
+
+    cur = safe_query_one(db, """
+        SELECT id, symbol, side, qty, entry_price, entry_date
+        FROM gold.manual_positions WHERE id = :id
+    """, {"id": position_id}, label="manual_position_get")
+    if cur is None:
+        raise HTTPException(status_code=404, detail=f"No manual position id={position_id}")
+    m = cur._mapping
+    if m["entry_date"] and exit_date < m["entry_date"]:
+        raise HTTPException(status_code=422, detail="exit_date cannot be before entry_date")
+
+    realized = _signed_pnl(m["side"], m["entry_price"], payload.exit_price, m["qty"])
+    note_sql = "notes = COALESCE(:notes, notes)," if payload.notes else ""
+    updated = safe_query_one(db, f"""
+        UPDATE gold.manual_positions
+        SET exit_price = :exit_price, exit_date = :exit_date, realized_pnl = :realized,
+            {note_sql} updated_at = now()
+        WHERE id = :id AND exit_date IS NULL
+        RETURNING id
+    """, {
+        "exit_price": payload.exit_price, "exit_date": exit_date,
+        "realized": realized, "notes": payload.notes, "id": position_id,
+    }, label="manual_position_close")
+    if updated is None:
+        raise HTTPException(status_code=409, detail="Position is already closed")
+    db.commit()
+    return {"id": position_id, "status": "closed", "realized_pnl": round(realized, 2), "as_of": _now_iso()}
 
 
 class KillSwitchRequest(BaseModel):

@@ -230,6 +230,12 @@ const daysSince = (dateStr) => {
   return Math.floor((Date.now() - new Date(dateStr + 'T00:00:00Z').getTime()) / 86400000);
 };
 const TODAY = new Date().toISOString().slice(0, 10);
+// HK public offers close at 12:00 noon HKT on the application_end date
+// (HKT = UTC+8, no DST). Whole-calendar-day comparison keeps an IPO in
+// UNDER SUBSCRIPTION for ~12h after applications actually stopped.
+const NOW_MS = Date.now();
+const TODAY_HKT = new Date(NOW_MS + 8 * 3600e3).toISOString().slice(0, 10);
+const subCutoffMs = (ae) => new Date(ae + 'T12:00:00+08:00').getTime();
 const addDays = (dateStr, n) => {
   const d = new Date(dateStr + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
@@ -240,8 +246,9 @@ const addDays = (dateStr, n) => {
 const stageOf = (r) => {
   const ld = r.listing_date, as = r.application_start, ae = r.application_end;
   if (ld && ld <= TODAY) return 'public';
-  if (as && ae && as <= TODAY && TODAY <= ae) return 'subscription';
-  if (ae && ae < TODAY) return 'grey';
+  // subscription open until 12:00 noon HKT on application_end (HK public-offer cutoff)
+  if (as && ae && as <= TODAY_HKT && NOW_MS < subCutoffMs(ae)) return 'subscription';
+  if (ae && (ae < TODAY || NOW_MS >= subCutoffMs(ae))) return 'grey';
   return 'announced';
 };
 const STAGES = [
