@@ -192,16 +192,17 @@ export const PositionsByReturn = ({ rows, renderAction, strip }) => {
   };
   const winners = rows.filter(r => r.pnl != null && r.pnl >= 0).sort(byPct('desc'));
   const losers = rows.filter(r => r.pnl != null && r.pnl < 0).sort(byPct('asc'));
-  const unscored = rows.length - winners.length - losers.length;
+  const unscoredRows = rows.filter(r => r.pnl == null);
   return (
     <>
       {strip && <div className="flex items-center justify-end gap-2 px-1">{strip}</div>}
       <SectionCard title="Positive Return" rows={winners} renderAction={renderAction} />
       <SectionCard title="Negative Return" rows={losers} renderAction={renderAction} />
-      {unscored > 0 && (
-        <div className="px-1 text-[9px] text-slate-600" title="These rows have no P&L mark from the source — excluded from both sections rather than counted as zero">
-          {unscored} position{unscored === 1 ? '' : 's'} unscored — no P&L mark
-        </div>
+      {/* Unscored rows (no price mark from the source) render in their own
+          section — a position must never vanish from the book because the
+          quote universe lacks its ticker (2026-09-25: SPCX hidden incident). */}
+      {unscoredRows.length > 0 && (
+        <SectionCard title="Unscored — no price mark" rows={unscoredRows} renderAction={renderAction} />
       )}
     </>
   );
