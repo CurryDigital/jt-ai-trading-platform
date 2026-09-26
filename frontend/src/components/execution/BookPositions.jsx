@@ -117,31 +117,44 @@ const pnlPctOf = (r) => {
   return null;
 };
 
-const SectionCard = ({ title, rows, renderAction }) => {
+// Currency-signed compact formatter — fmtK hardcodes '$', but the Manual
+// book's HK panel marks in HKD (and any future non-USD book needs its own
+// sign). sign defaults to '$' so existing books are unchanged.
+const fmtKS = (n, sign = '$') => n == null ? '—'
+  : Math.abs(n) >= 1e6 ? `${sign}${(n / 1e6).toFixed(1)}M`
+  : Math.abs(n) >= 1e3 ? `${sign}${(n / 1e3).toFixed(1)}K`
+  : `${sign}${n.toFixed(0)}`;
+
+// dense: half-width books (Manual per-market panels) — the sub line stacks
+// under the ticker, padding tightens, and Entry/Current render bare numbers
+// (the panel header already names the currency) so the table fits without
+// horizontal scroll.
+const SectionCard = ({ title, rows, renderAction, dense, sign }) => {
   const totValue = rows.reduce((s, r) => s + (r.value || 0), 0);
   const totPnl = rows.reduce((s, r) => s + (r.pnl || 0), 0);
+  const cell = dense ? 'py-1 px-1' : 'py-1 px-2';
   return (
     <div className="qr-surface overflow-hidden">
-      <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between">
+      <div className={`${dense ? 'px-2' : 'px-3'} py-2 border-b border-white/[0.05] flex items-center justify-between`}>
         <div className="flex items-center gap-2">
           <span className="qr-label">{title}</span>
           <span className="text-[10px] text-slate-500">{rows.length} positions</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="qr-num text-[11px] text-slate-400">{fmtK(totValue)}</span>
-          <span className={`qr-num text-[11px] font-bold ${pnlCl(totPnl)}`}>{totPnl >= 0 ? '+' : ''}{fmtK(totPnl)}</span>
+          <span className="qr-num text-[11px] text-slate-400">{fmtKS(totValue, sign)}</span>
+          <span className={`qr-num text-[11px] font-bold ${pnlCl(totPnl)}`}>{totPnl >= 0 ? '+' : ''}{fmtKS(totPnl, sign)}</span>
         </div>
       </div>
       {rows.length === 0 ? (
         <div className="py-4 text-center text-slate-600 text-[11px]">None</div>
       ) : (
-        <div className="overflow-x-auto max-h-72 overflow-y-auto">
-          <table className="w-full">
+        <div className={`max-h-72 overflow-y-auto ${dense ? '' : 'overflow-x-auto'}`}>
+          <table className={`w-full ${dense ? 'qr-pos-dense' : ''}`}>
             <thead className="qr-th-sticky">
               <tr className="border-b border-white/[0.06]">
                 {['Ticker', 'Side', 'Qty', 'Entry', 'Current', 'Value', 'P&L', 'P&L %'].map(h =>
-                  <th key={h} className="qr-label text-right py-1 px-2 first:text-left">{h}</th>)}
-                {renderAction && <th className="qr-label text-right py-1 px-2"></th>}
+                  <th key={h} className={`qr-label text-right ${cell} first:text-left`}>{h}</th>)}
+                {renderAction && <th className={`qr-label text-right ${cell}`}></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
@@ -149,21 +162,23 @@ const SectionCard = ({ title, rows, renderAction }) => {
                 const pct = pnlPctOf(r);
                 return (
                   <tr key={`${r.key}-${i}`} className="qr-tr-hover">
-                    <td className="py-1 px-2">
+                    <td className={cell}>
                       <span className="text-[11px] font-mono text-white">{r.ticker || '—'}</span>
-                      {r.sub && <span className="ml-1.5 text-[9px] text-slate-500">{r.sub}</span>}
+                      {r.sub && (dense
+                        ? <span className="block text-[9px] text-slate-500 leading-tight">{r.sub}</span>
+                        : <span className="ml-1.5 text-[9px] text-slate-500">{r.sub}</span>)}
                     </td>
-                    <td className="py-1 px-2 text-right">
+                    <td className={`${cell} text-right`}>
                       <span className={`qr-chip ${SIDE_CHIP[r.side] || 'qr-chip-slate'}`}>{r.side || '—'}</span>
                     </td>
-                    <td className="py-1 px-2 qr-num text-slate-300">{fmt(r.qty, 0)}</td>
-                    <td className="py-1 px-2 qr-num text-slate-400">{r.entry != null ? `$${fmt(r.entry)}` : '—'}</td>
-                    <td className="py-1 px-2 qr-num text-slate-300">{r.current != null ? `$${fmt(r.current)}` : '—'}</td>
-                    <td className="py-1 px-2 qr-num text-slate-300">{r.value != null ? fmtK(r.value) : '—'}</td>
-                    <td className={`py-1 px-2 qr-num font-bold ${pnlCl(r.pnl)}`}>{r.pnl != null ? fmtK(r.pnl) : '—'}</td>
-                    <td className={`py-1 px-2 qr-num ${pnlCl(pct)}`}>{pct != null ? fmtPct(pct) : '—'}</td>
+                    <td className={`${cell} qr-num text-slate-300`}>{fmt(r.qty, 0)}</td>
+                    <td className={`${cell} qr-num text-slate-400`}>{r.entry != null ? (dense ? fmt(r.entry) : `$${fmt(r.entry)}`) : '—'}</td>
+                    <td className={`${cell} qr-num text-slate-300`}>{r.current != null ? (dense ? fmt(r.current) : `$${fmt(r.current)}`) : '—'}</td>
+                    <td className={`${cell} qr-num text-slate-300`}>{r.value != null ? fmtKS(r.value, sign) : '—'}</td>
+                    <td className={`${cell} qr-num font-bold ${pnlCl(r.pnl)}`}>{r.pnl != null ? fmtKS(r.pnl, sign) : '—'}</td>
+                    <td className={`${cell} qr-num ${pnlCl(pct)}`}>{pct != null ? fmtPct(pct) : '—'}</td>
                     {renderAction && (
-                      <td className="py-1 px-2 text-right whitespace-nowrap">{renderAction(r)}</td>
+                      <td className={`${cell} text-right whitespace-nowrap`}>{renderAction(r)}</td>
                     )}
                   </tr>
                 );
@@ -182,7 +197,7 @@ const SectionCard = ({ title, rows, renderAction }) => {
 // strip: optional thin book-level line above the sections (source/stale notes).
 // Sections are ordered by P&L % return: winners best-first, losers
 // worst-first; rows with no derivable % sink to the bottom of their section.
-export const PositionsByReturn = ({ rows, renderAction, strip }) => {
+export const PositionsByReturn = ({ rows, renderAction, strip, dense, sign }) => {
   const byPct = (dir) => (a, b) => {
     const pa = pnlPctOf(a), pb = pnlPctOf(b);
     if (pa == null && pb == null) return 0;
@@ -196,13 +211,13 @@ export const PositionsByReturn = ({ rows, renderAction, strip }) => {
   return (
     <>
       {strip && <div className="flex items-center justify-end gap-2 px-1">{strip}</div>}
-      <SectionCard title="Positive Return" rows={winners} renderAction={renderAction} />
-      <SectionCard title="Negative Return" rows={losers} renderAction={renderAction} />
+      <SectionCard title="Positive Return" rows={winners} renderAction={renderAction} dense={dense} sign={sign} />
+      <SectionCard title="Negative Return" rows={losers} renderAction={renderAction} dense={dense} sign={sign} />
       {/* Unscored rows (no price mark from the source) render in their own
           section — a position must never vanish from the book because the
           quote universe lacks its ticker (2026-09-25: SPCX hidden incident). */}
       {unscoredRows.length > 0 && (
-        <SectionCard title="Unscored — no price mark" rows={unscoredRows} renderAction={renderAction} />
+        <SectionCard title="Unscored — no price mark" rows={unscoredRows} renderAction={renderAction} dense={dense} sign={sign} />
       )}
     </>
   );

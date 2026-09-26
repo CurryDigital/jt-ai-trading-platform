@@ -726,6 +726,27 @@ def get_manual_positions(db: Session = Depends(get_db)):
         if p["unrealized_pnl"] is not None:
             unreal_by_market[p["market"]] = round(unreal_by_market.get(p["market"], 0.0) + p["unrealized_pnl"], 2)
 
+    # Monthly realized P&L by exit month per market (2026-09-26) — powers the
+    # per-market heatmap on the Manual tab. Keyed "YYYY-MM"; unrealized P&L
+    # is never mixed in (realized only, native currency).
+    monthly_rows = safe_query(db, """
+        SELECT market,
+               EXTRACT(YEAR FROM exit_date)::int AS yr,
+               EXTRACT(MONTH FROM exit_date)::int AS mo,
+               SUM(realized_pnl) AS pnl,
+               COUNT(*) AS n
+        FROM gold.manual_positions
+        WHERE exit_date IS NOT NULL
+        GROUP BY market, EXTRACT(YEAR FROM exit_date), EXTRACT(MONTH FROM exit_date)
+    """, label="manual_positions_monthly")
+    monthly_by_market = {}
+    for r in monthly_rows:
+        m = r._mapping
+        monthly_by_market.setdefault(m["market"], {})[f"{m['yr']}-{m['mo']:02d}"] = {
+            "pnl": round(float(m["pnl"]), 2) if m["pnl"] is not None else None,
+            "n": int(m["n"]),
+        }
+
     summary_by_market = {}
     for r in per_market_rows:
         m = r._mapping
@@ -757,6 +778,7 @@ def get_manual_positions(db: Session = Depends(get_db)):
     }
     return {"open": open_positions, "closed": closed_positions,
             "summary": summary, "summary_by_market": summary_by_market,
+            "monthly_by_market": monthly_by_market,
             "as_of": _now_iso()}
 
 

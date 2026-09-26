@@ -191,6 +191,21 @@ body {
     @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider;
     line-height: 1.2;
   }
+
+  /* Dense positions tables (Manual per-market panels) — fit half-width cards
+     without horizontal scroll: tighter side chip + tighter row action button. */
+  .qr-pos-dense .qr-chip,
+  .qr-pos-dense .qr-chip-emerald,
+  .qr-pos-dense .qr-chip-rose,
+  .qr-pos-dense .qr-chip-slate {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+    letter-spacing: 0.02em;
+  }
+  .qr-pos-dense td:last-child button {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
   .qr-chip-emerald {
     @apply inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25;
     line-height: 1.2;

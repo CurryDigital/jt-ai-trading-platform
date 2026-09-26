@@ -10,13 +10,17 @@ import { fmt, fmtK, pnlCl, api, usePoll, fetchWithTimeout } from '../../utils';
 // → gold.daily_ohlcv fallback), computed server-side. Siloed by design: the
 // manual book does NOT feed Command aggregates or NAV.
 //
-// 2026-09-25 pm: split into per-market books (US / HK / CN side by side,
-// stacked on narrow screens) so per-region performance evaluates separately —
-// each panel carries its own summary strip in its NATIVE currency
-// (USD / HKD / CNY); the HK book marks in HKD, the CN book in CNY, the US
-// book in USD, and a combined total would mix FX silently. All three region
-// panels render always (empty regions show an honest empty state) so the
-// per-region structure is visible before the first HK/CN entry.
+// 2026-09-25 pm: split into per-market books (US / HK side by side, stacked
+// on narrow screens) so per-region performance evaluates separately — each
+// panel carries its own summary strip in its NATIVE currency (USD / HKD);
+// a combined total would mix FX silently. Both region panels render always
+// (empty regions show an honest empty state).
+//
+// 2026-09-26: CN support exists in the BACKEND (market=CN validates; .SS/.SZ
+// tickers mark fine) but the UI shows US + HK only, per user. Any unexpected
+// market value in the ledger still gets a defensive extra panel — a position
+// must never vanish. Each book also carries a monthly realized-P&L heatmap
+// (backend monthly_by_market, realized by exit month, native currency).
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -25,13 +29,12 @@ const CCY = {
   HK: { sign: 'HK$', code: 'HKD', title: 'HK Stocks' },
   CN: { sign: 'CN¥', code: 'CNY', title: 'CN Stocks' },
 };
-const MARKETS = ['US', 'HK', 'CN'];
+const MARKETS = ['US', 'HK'];
 
-// Symbol suffix implies the market: .HK → HK, .SS/.SZ (Shanghai/Shenzhen) → CN.
+// Symbol suffix implies the market: .HK → HK.
 const marketForSymbol = (sym) => {
   const s = (sym || '').trim().toUpperCase();
   if (/\.HK$/.test(s)) return 'HK';
-  if (/\.(SS|SZ)$/.test(s)) return 'CN';
   return null;
 };
 
@@ -50,7 +53,7 @@ const AddPositionForm = ({ onAdded }) => {
     const v = e.target.value;
     setForm((f) => ({
       ...f, [k]: v,
-      // Symbol suffix implies the market — .HK → HK, .SS/.SZ → CN.
+      // Symbol suffix implies the market — .HK → HK.
       ...(k === 'symbol' && marketForSymbol(v) ? { market: marketForSymbol(v) } : {}),
     }));
   };
@@ -95,7 +98,7 @@ const AddPositionForm = ({ onAdded }) => {
       <div className="p-3 space-y-2">
         <div>
           <label className={labelCls}>Symbol</label>
-          <input className={inputCls} placeholder="AAPL · 0700.HK · 600519.SS" value={form.symbol} onChange={set('symbol')} />
+          <input className={inputCls} placeholder="AAPL · 0700.HK" value={form.symbol} onChange={set('symbol')} />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -214,32 +217,94 @@ const MiniTile = ({ label, value, tone, title }) => (
   </div>
 );
 
+// Monthly realized-P&L heatmap (2026-09-26, per user) — years × months grid
+// with a YTD column, realized P&L by EXIT month in the book's native
+// currency (backend monthly_by_market). '·' = no closed trades that month
+// (never a fake $0); unrealized is never mixed in. Cells are signed text
+// (emerald/rose via pnlCl) on neutral slate — heat comes from sign, not hue.
+const MONTH_LETTERS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const fmtCell = (v) => v == null ? '·'
+  : `${v < 0 ? '-' : '+'}${Math.abs(v) >= 1e6 ? `${(Math.abs(v) / 1e6).toFixed(1)}M`
+    : Math.abs(v) >= 1e3 ? `${(Math.abs(v) / 1e3).toFixed(1)}K`
+    : Math.abs(v).toFixed(0)}`;
+
+const MonthlyHeatmap = ({ data, sign, code }) => {
+  const cells = data || {};
+  const thisYear = new Date().getFullYear();
+  const years = [...new Set([thisYear, ...Object.keys(cells).map(k => +k.slice(0, 4))])].sort((a, b) => b - a);
+  const hasAny = Object.values(cells).some(c => c && c.pnl != null);
+  return (
+    <div className="px-2 pt-2">
+      <div className="flex items-center justify-between pb-1">
+        <span className="qr-label">Monthly Realized P&amp;L</span>
+        <span className="text-[9px] text-slate-600" title={`Realized P&L grouped by exit month, in ${code}. Unrealized P&L on open positions is never mixed in; '·' means no closed trades that month.`}>
+          {hasAny ? `by exit month · ${code}` : `no closed trades yet · ${code}`}
+        </span>
+      </div>
+      <table className="w-full table-fixed">
+        <thead>
+          <tr className="border-b border-white/[0.06]">
+            <th className="qr-label text-left py-0.5 pr-1 w-8">YR</th>
+            {MONTH_LETTERS.map((m, i) => <th key={`${m}-${i}`} className="qr-label text-right py-0.5 px-0.5">{m}</th>)}
+            <th className="qr-label text-right py-0.5 pl-1 w-10">YTD</th>
+          </tr>
+        </thead>
+        <tbody>
+          {years.map((y) => {
+            const months = MONTH_LETTERS.map((_, i) => cells[`${y}-${String(i + 1).padStart(2, '0')}`] || null);
+            const ytd = months.reduce((s, c) => s + (c && c.pnl != null ? c.pnl : 0), 0);
+            const ytdAny = months.some(c => c && c.pnl != null);
+            return (
+              <tr key={y} className="border-b border-white/[0.03] last:border-0">
+                <td className="py-0.5 pr-1 font-mono text-[10px] text-slate-400">{y}</td>
+                {months.map((c, i) => (
+                  <td key={i}
+                    className={`py-0.5 px-0.5 text-right font-mono text-[10px] ${c && c.pnl != null ? pnlCl(c.pnl) : 'text-slate-700'}`}
+                    title={c ? `${MONTH_NAMES[i]} ${y} · ${c.n} exit${c.n === 1 ? '' : 's'} · ${c.pnl != null ? fmtCcy(c.pnl, sign) : '—'}` : `${MONTH_NAMES[i]} ${y} · no closed trades`}>
+                    {c && c.pnl != null ? fmtCell(c.pnl) : '·'}
+                  </td>
+                ))}
+                <td className={`py-0.5 pl-1 text-right font-mono text-[10px] font-bold ${ytdAny ? pnlCl(ytd) : 'text-slate-700'}`}
+                  title={ytdAny ? `${y} realized P&L · ${fmtCcy(ytd, sign)}` : `${y} · no closed trades`}>
+                  {ytdAny ? fmtCell(ytd) : '·'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 const ClosedTable = ({ rows, sign }) => (
-  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+  <div className="max-h-96 overflow-y-auto">
     <table className="w-full">
       <thead className="qr-th-sticky">
         <tr className="border-b border-white/[0.06]">
           {['Symbol', 'Side', 'Qty', 'Entry', 'Exit', 'Entry Date', 'Exit Date', 'Days', 'Realized P&L'].map(h =>
-            <th key={h} className="qr-label text-right py-1 px-2 first:text-left">{h}</th>)}
+            <th key={h} className="qr-label text-right py-1 px-1 first:text-left">{h}</th>)}
         </tr>
       </thead>
       <tbody className="divide-y divide-white/[0.04]">
         {rows.map((p) => (
           <tr key={p.id} className="qr-tr-hover">
-            <td className="py-1 px-2">
+            <td className="py-1 px-1">
               <span className="text-[11px] font-mono text-white">{p.symbol}</span>
-              {p.notes && <span className="ml-1.5 text-[9px] text-slate-500">{p.notes}</span>}
+              {p.notes && <span className="block text-[9px] text-slate-500 leading-tight truncate max-w-[110px]" title={p.notes}>{p.notes}</span>}
             </td>
-            <td className="py-1 px-2 text-right">
+            <td className="py-1 px-1 text-right">
               <span className={`qr-chip ${p.side === 'SHORT' ? 'qr-chip-rose' : 'qr-chip-emerald'}`}>{p.side}</span>
             </td>
-            <td className="py-1 px-2 qr-num text-slate-300">{fmt(p.qty, 0)}</td>
-            <td className="py-1 px-2 qr-num text-slate-400">{sign}{fmt(p.entry_price)}</td>
-            <td className="py-1 px-2 qr-num text-slate-300">{p.exit_price != null ? `${sign}${fmt(p.exit_price)}` : '—'}</td>
-            <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{p.entry_date}</td>
-            <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{p.exit_date}</td>
-            <td className="py-1 px-2 qr-num text-slate-400">{p.held_days != null ? `${p.held_days}d` : '—'}</td>
-            <td className={`py-1 px-2 qr-num font-bold ${pnlCl(p.realized_pnl)}`}>{p.realized_pnl != null ? fmtCcy(p.realized_pnl, sign) : '—'}</td>
+            <td className="py-1 px-1 qr-num text-slate-300">{fmt(p.qty, 0)}</td>
+            <td className="py-1 px-1 qr-num text-slate-400">{fmt(p.entry_price)}</td>
+            <td className="py-1 px-1 qr-num text-slate-300">{p.exit_price != null ? fmt(p.exit_price) : '—'}</td>
+            <td className="py-1 px-1 qr-num text-slate-400 text-[10px] whitespace-nowrap">{p.entry_date}</td>
+            <td className="py-1 px-1 qr-num text-slate-400 text-[10px] whitespace-nowrap">{p.exit_date}</td>
+            <td className="py-1 px-1 qr-num text-slate-400">{p.held_days != null ? `${p.held_days}d` : '—'}</td>
+            <td className={`py-1 px-1 qr-num font-bold whitespace-nowrap ${pnlCl(p.realized_pnl)}`}>{p.realized_pnl != null ? fmtCcy(p.realized_pnl, sign) : '—'}</td>
           </tr>
         ))}
       </tbody>
@@ -247,8 +312,9 @@ const ClosedTable = ({ rows, sign }) => (
   </div>
 );
 
-// One market book: summary strip in native currency + Positions / Closed tabs.
-const MarketBook = ({ market, open, closed, summary, onCloseRow }) => {
+// One market book: summary strip + monthly realized heatmap in native
+// currency + Positions / Closed tabs.
+const MarketBook = ({ market, open, closed, summary, monthly, onCloseRow }) => {
   const [tab, setTab] = useState('open');
   const meta = CCY[market] || { sign: '$', code: market, title: `${market} Stocks` };
   const s = summary || {};
@@ -272,6 +338,7 @@ const MarketBook = ({ market, open, closed, summary, onCloseRow }) => {
         <MiniTile label="Cum P&L" value={fmtCcy(s.cum_pnl, meta.sign)} tone={pnlCl(s.cum_pnl)} title="All-time realized P&L" />
         <MiniTile label="Unrealized" value={fmtCcy(s.unrealized_pnl, meta.sign)} tone={pnlCl(s.unrealized_pnl)} title="Open book marked to latest close" />
       </div>
+      <MonthlyHeatmap data={monthly} sign={meta.sign} code={meta.code} />
       <ExecTabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'open' ? (
         open.length === 0 ? (
@@ -280,6 +347,8 @@ const MarketBook = ({ market, open, closed, summary, onCloseRow }) => {
           <div className="p-2 space-y-2">
             <PositionsByReturn
               rows={rows}
+              dense
+              sign={meta.sign}
               renderAction={(r) => (
                 <CloseButton onClick={() => onCloseRow(r)} title="Record exit legs — ledger write only, no order routed" />
               )}
@@ -312,8 +381,10 @@ export const ManualPanel = () => {
   const closed = data?.closed || [];
   const summary = data?.summary || {};
   const byMarket = data?.summary_by_market || {};
-  // Render all three region books always (empty regions show an honest empty
-  // state) — plus any unexpected legacy market value defensively appended.
+  const monthlyByMarket = data?.monthly_by_market || {};
+  // Render the US + HK region books always (empty regions show an honest
+  // empty state) — plus any unexpected legacy market value defensively
+  // appended so a ledger row can never vanish from view.
   const markets = [...new Set([...MARKETS,
     ...open.map(p => p.market), ...closed.map(p => p.market)])];
 
@@ -336,12 +407,12 @@ export const ManualPanel = () => {
           </div>
         )}
         <div className="flex items-center justify-end px-1">
-          <span className="text-[9px] text-slate-600">marked to latest close · same quote source as Paper · per-market summaries in native currency (US = USD · HK = HKD · CN = CNY) · siloed — not in Command totals</span>
+          <span className="text-[9px] text-slate-600">marked to latest close · same quote source as Paper · per-market summaries in native currency (US = USD · HK = HKD) · siloed — not in Command totals</span>
         </div>
         {!data ? (
           <div className="qr-surface py-6 text-center text-slate-600 text-[11px]">Loading…</div>
         ) : (
-          <div className={`grid grid-cols-1 gap-3 ${markets.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : markets.length > 1 ? 'xl:grid-cols-2' : ''} items-start`}>
+          <div className={`grid grid-cols-1 gap-3 ${markets.length > 1 ? 'xl:grid-cols-2' : ''} items-start`}>
             {markets.map((mk) => (
               <MarketBook
                 key={mk}
@@ -349,6 +420,7 @@ export const ManualPanel = () => {
                 open={open.filter(p => p.market === mk)}
                 closed={closed.filter(p => p.market === mk)}
                 summary={byMarket[mk]}
+                monthly={monthlyByMarket[mk]}
                 onCloseRow={setClosing}
               />
             ))}
