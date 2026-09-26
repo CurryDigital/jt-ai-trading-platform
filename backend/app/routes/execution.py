@@ -704,9 +704,10 @@ def get_manual_positions(db: Session = Depends(get_db)):
         FROM gold.manual_positions
     """, label="manual_positions_summary")
 
-    # Per-market aggregates (2026-09-25): the HK book marks in HKD and the US
-    # book in USD — per-market summaries keep each book in its native
-    # currency so performance is evaluated without silent FX mixing.
+    # Per-market aggregates (2026-09-25; CN added 2026-09-26): each book
+    # marks in its own currency (US=USD, HK=HKD, CN=CNY) — per-market
+    # summaries keep each book in its native currency so performance is
+    # evaluated without silent FX mixing.
     per_market_rows = safe_query(db, """
         SELECT market,
                COUNT(*) FILTER (WHERE exit_date IS NULL) AS open,
@@ -781,8 +782,8 @@ def post_manual_position(payload: ManualPositionAdd, db: Session = Depends(get_d
         raise HTTPException(status_code=422, detail="symbol is required")
     if side not in ("LONG", "SHORT"):
         raise HTTPException(status_code=422, detail="side must be LONG or SHORT")
-    if market not in ("US", "HK"):
-        raise HTTPException(status_code=422, detail="market must be US or HK")
+    if market not in ("US", "HK", "CN"):
+        raise HTTPException(status_code=422, detail="market must be US, HK or CN")
     if asset_type not in ("STOCK", "CRYPTO", "FX"):
         raise HTTPException(status_code=422, detail="asset_type must be STOCK, CRYPTO or FX")
     if payload.qty <= 0:

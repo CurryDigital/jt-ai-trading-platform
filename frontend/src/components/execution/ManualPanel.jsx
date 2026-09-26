@@ -10,15 +10,30 @@ import { fmt, fmtK, pnlCl, api, usePoll, fetchWithTimeout } from '../../utils';
 // → gold.daily_ohlcv fallback), computed server-side. Siloed by design: the
 // manual book does NOT feed Command aggregates or NAV.
 //
-// 2026-09-25 pm: split into per-market books (US / HK side by side, stacked
-// on narrow screens) so HK and US performance evaluate separately — each
-// panel carries its own summary strip in its NATIVE currency (USD / HKD);
-// the HK book marks in HKD, the US book in USD, and a combined total would
-// mix FX silently.
+// 2026-09-25 pm: split into per-market books (US / HK / CN side by side,
+// stacked on narrow screens) so per-region performance evaluates separately —
+// each panel carries its own summary strip in its NATIVE currency
+// (USD / HKD / CNY); the HK book marks in HKD, the CN book in CNY, the US
+// book in USD, and a combined total would mix FX silently. All three region
+// panels render always (empty regions show an honest empty state) so the
+// per-region structure is visible before the first HK/CN entry.
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
-const CCY = { US: { sign: '$', code: 'USD', title: 'US Stocks' }, HK: { sign: 'HK$', code: 'HKD', title: 'HK Stocks' } };
+const CCY = {
+  US: { sign: '$', code: 'USD', title: 'US Stocks' },
+  HK: { sign: 'HK$', code: 'HKD', title: 'HK Stocks' },
+  CN: { sign: 'CN¥', code: 'CNY', title: 'CN Stocks' },
+};
+const MARKETS = ['US', 'HK', 'CN'];
+
+// Symbol suffix implies the market: .HK → HK, .SS/.SZ (Shanghai/Shenzhen) → CN.
+const marketForSymbol = (sym) => {
+  const s = (sym || '').trim().toUpperCase();
+  if (/\.HK$/.test(s)) return 'HK';
+  if (/\.(SS|SZ)$/.test(s)) return 'CN';
+  return null;
+};
 
 const fmtCcy = (n, sign) => n == null ? '—'
   : `${n < 0 ? '-' : '+'}${sign}${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -35,8 +50,8 @@ const AddPositionForm = ({ onAdded }) => {
     const v = e.target.value;
     setForm((f) => ({
       ...f, [k]: v,
-      // Symbol suffix implies the market — .HK flips the market select.
-      ...(k === 'symbol' && /\.HK$/i.test(v.trim()) ? { market: 'HK' } : {}),
+      // Symbol suffix implies the market — .HK → HK, .SS/.SZ → CN.
+      ...(k === 'symbol' && marketForSymbol(v) ? { market: marketForSymbol(v) } : {}),
     }));
   };
 
@@ -80,14 +95,13 @@ const AddPositionForm = ({ onAdded }) => {
       <div className="p-3 space-y-2">
         <div>
           <label className={labelCls}>Symbol</label>
-          <input className={inputCls} placeholder="AAPL · 0700.HK" value={form.symbol} onChange={set('symbol')} />
+          <input className={inputCls} placeholder="AAPL · 0700.HK · 600519.SS" value={form.symbol} onChange={set('symbol')} />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={labelCls}>Market</label>
             <select className={inputCls} value={form.market} onChange={set('market')}>
-              <option value="US">US</option>
-              <option value="HK">HK</option>
+              {MARKETS.map(mk => <option key={mk} value={mk}>{mk}</option>)}
             </select>
           </div>
           <div>
@@ -298,9 +312,10 @@ export const ManualPanel = () => {
   const closed = data?.closed || [];
   const summary = data?.summary || {};
   const byMarket = data?.summary_by_market || {};
-  // Markets to render: any market with rows or a summary — US first, then HK.
-  const markets = ['US', 'HK'].filter(mk =>
-    open.some(p => p.market === mk) || closed.some(p => p.market === mk) || byMarket[mk]);
+  // Render all three region books always (empty regions show an honest empty
+  // state) — plus any unexpected legacy market value defensively appended.
+  const markets = [...new Set([...MARKETS,
+    ...open.map(p => p.market), ...closed.map(p => p.market)])];
 
   return (
     <>
@@ -321,14 +336,12 @@ export const ManualPanel = () => {
           </div>
         )}
         <div className="flex items-center justify-end px-1">
-          <span className="text-[9px] text-slate-600">marked to latest close · same quote source as Paper · per-market summaries in native currency (US = USD, HK = HKD) · siloed — not in Command totals</span>
+          <span className="text-[9px] text-slate-600">marked to latest close · same quote source as Paper · per-market summaries in native currency (US = USD · HK = HKD · CN = CNY) · siloed — not in Command totals</span>
         </div>
         {!data ? (
           <div className="qr-surface py-6 text-center text-slate-600 text-[11px]">Loading…</div>
-        ) : markets.length === 0 ? (
-          <div className="qr-surface py-6 text-center text-slate-600 text-[11px]">No manual positions yet — add one from the form on the right</div>
         ) : (
-          <div className={`grid grid-cols-1 gap-3 ${markets.length > 1 ? 'xl:grid-cols-2' : ''} items-start`}>
+          <div className={`grid grid-cols-1 gap-3 ${markets.length > 2 ? 'xl:grid-cols-2 2xl:grid-cols-3' : markets.length > 1 ? 'xl:grid-cols-2' : ''} items-start`}>
             {markets.map((mk) => (
               <MarketBook
                 key={mk}
