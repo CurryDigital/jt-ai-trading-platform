@@ -747,6 +747,43 @@ def get_manual_positions(db: Session = Depends(get_db)):
             "n": int(m["n"]),
         }
 
+    # Unrealized P&L by month-end mark per market (2026-09-26, per user): for
+    # each OPEN position, every calendar month from entry month to the current
+    # month is marked at that month's last close (current month = latest
+    # close), side-signed vs entry price, summed per market. Same quote
+    # source/fallback as the live marks; native currency, never FX-mixed.
+    unreal_monthly_by_market = {}
+    if open_positions:
+        tickers = sorted({p["symbol"] for p in open_positions})
+        month_marks = {}
+        for tbl, lbl in (("silver.unified_prices", "manual_monthly_marks_silver"),
+                         ("gold.daily_ohlcv", "manual_monthly_marks_gold")):
+            for r in safe_query(db, f"""
+                SELECT DISTINCT ON (ticker, date_trunc('month', date))
+                       ticker, to_char(date_trunc('month', date), 'YYYY-MM') AS mo, close
+                FROM {tbl}
+                WHERE ticker = ANY(:tickers) AND close IS NOT NULL
+                ORDER BY ticker, date_trunc('month', date), date DESC
+            """, {"tickers": tickers}, label=lbl):
+                month_marks.setdefault((r._mapping["ticker"], r._mapping["mo"]),
+                                       float(r._mapping["close"]))
+        today = datetime.now(timezone.utc).date()
+        cur_ym = f"{today.year}-{today.month:02d}"
+        for p in open_positions:
+            if not p["entry_date"]:
+                continue
+            y, m = int(p["entry_date"][:4]), int(p["entry_date"][5:7])
+            while (y, m) <= (today.year, today.month):
+                ym = f"{y}-{m:02d}"
+                mark = p["current_price"] if ym == cur_ym else month_marks.get((p["symbol"], ym))
+                if mark is not None:
+                    pnl = _signed_pnl(p["side"], p["entry_price"], mark, p["qty"])
+                    mkt_agg = unreal_monthly_by_market.setdefault(p["market"], {})
+                    mkt_agg[ym] = round(mkt_agg.get(ym, 0.0) + pnl, 2)
+                m += 1
+                if m == 13:
+                    y, m = y + 1, 1
+
     summary_by_market = {}
     for r in per_market_rows:
         m = r._mapping
@@ -779,6 +816,7 @@ def get_manual_positions(db: Session = Depends(get_db)):
     return {"open": open_positions, "closed": closed_positions,
             "summary": summary, "summary_by_market": summary_by_market,
             "monthly_by_market": monthly_by_market,
+            "unrealized_monthly_by_market": unreal_monthly_by_market,
             "as_of": _now_iso()}
 
 

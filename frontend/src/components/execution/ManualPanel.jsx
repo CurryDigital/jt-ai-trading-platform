@@ -279,6 +279,68 @@ const MonthlyHeatmap = ({ data, sign, code }) => {
   );
 };
 
+// Unrealized P&L by month-end mark (2026-09-26, per user) — one bar per
+// calendar month from the oldest open position's entry month to now; the
+// current month marks at the latest close, past months at month-end close
+// (same quote source as the live marks). Open book only, native currency.
+// Bars are emerald/rose by SIGN (signed-value convention); height is
+// relative to the max |month| in the visible series, exact value on hover.
+const UnrealizedMonthlyChart = ({ data, sign, code }) => {
+  const cells = data || {};
+  const keys = Object.keys(cells).sort();
+  if (!keys.length) return null;
+  const now = new Date();
+  const curYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const seq = [];
+  {
+    let [y, m] = keys[0].split('-').map(Number);
+    while (`${y}-${String(m).padStart(2, '0')}` <= curYm && seq.length < 240) {
+      seq.push(`${y}-${String(m).padStart(2, '0')}`);
+      m += 1; if (m === 13) { y += 1; m = 1; }
+    }
+  }
+  const maxAbs = Math.max(...seq.map(k => Math.abs(cells[k] ?? 0)), 1e-9);
+  const cur = cells[curYm];
+  return (
+    <div className="px-2 pt-2">
+      <div className="flex items-center justify-between pb-1">
+        <span className="qr-label">Unrealized P&amp;L · Monthly</span>
+        <span className={`text-[9px] font-mono ${cur != null ? pnlCl(cur) : 'text-slate-600'}`}
+          title={`Open book marked at each month-end close (current month = latest close), in ${code}. Reconstructed from daily closes — same quote source as the live marks.`}>
+          {cur != null ? `now ${fmtCcy(cur, sign)}` : `month-end marks · ${code}`}
+        </span>
+      </div>
+      <div className="flex items-stretch gap-px h-14">
+        {seq.map((k) => {
+          const v = cells[k];
+          const h = v != null ? Math.max(Math.abs(v) / maxAbs * 50, 2) : 0;
+          const [y, m] = k.split('-').map(Number);
+          return (
+            <div key={k} className="relative flex-1 min-w-0"
+              title={v != null ? `${MONTH_NAMES[m - 1]} ${y} · ${fmtCcy(v, sign)}` : `${MONTH_NAMES[m - 1]} ${y} · no mark`}>
+              <div className="absolute left-0 right-0 top-1/2 border-t border-white/[0.08]" />
+              {v != null && (
+                <div className={`absolute left-0 right-0 mx-px ${v >= 0 ? 'bottom-1/2 bg-emerald-500/40' : 'top-1/2 bg-rose-500/40'}`}
+                  style={{ height: `${h}%` }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-px">
+        {seq.map((k) => {
+          const [y, m] = k.split('-').map(Number);
+          return (
+            <div key={k} className="flex-1 min-w-0 text-center font-mono text-[8px] text-slate-600">
+              {MONTH_LETTERS[m - 1]}{m === 1 || k === seq[0] ? <span className="text-slate-700">{`'${String(y).slice(2)}`}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const ClosedTable = ({ rows, sign }) => (
   <div className="max-h-96 overflow-y-auto">
     <table className="w-full">
@@ -312,9 +374,9 @@ const ClosedTable = ({ rows, sign }) => (
   </div>
 );
 
-// One market book: summary strip + monthly realized heatmap in native
-// currency + Positions / Closed tabs.
-const MarketBook = ({ market, open, closed, summary, monthly, onCloseRow }) => {
+// One market book: summary strip + monthly realized heatmap + unrealized
+// monthly chart in native currency + Positions / Closed tabs.
+const MarketBook = ({ market, open, closed, summary, monthly, unrealMonthly, onCloseRow }) => {
   const [tab, setTab] = useState('open');
   const meta = CCY[market] || { sign: '$', code: market, title: `${market} Stocks` };
   const s = summary || {};
@@ -339,6 +401,7 @@ const MarketBook = ({ market, open, closed, summary, monthly, onCloseRow }) => {
         <MiniTile label="Unrealized" value={fmtCcy(s.unrealized_pnl, meta.sign)} tone={pnlCl(s.unrealized_pnl)} title="Open book marked to latest close" />
       </div>
       <MonthlyHeatmap data={monthly} sign={meta.sign} code={meta.code} />
+      <UnrealizedMonthlyChart data={unrealMonthly} sign={meta.sign} code={meta.code} />
       <ExecTabs tabs={tabs} active={tab} onChange={setTab} />
       {tab === 'open' ? (
         open.length === 0 ? (
@@ -382,6 +445,7 @@ export const ManualPanel = () => {
   const summary = data?.summary || {};
   const byMarket = data?.summary_by_market || {};
   const monthlyByMarket = data?.monthly_by_market || {};
+  const unrealMonthlyByMarket = data?.unrealized_monthly_by_market || {};
   // Render the US + HK region books always (empty regions show an honest
   // empty state) — plus any unexpected legacy market value defensively
   // appended so a ledger row can never vanish from view.
@@ -421,6 +485,7 @@ export const ManualPanel = () => {
                 closed={closed.filter(p => p.market === mk)}
                 summary={byMarket[mk]}
                 monthly={monthlyByMarket[mk]}
+                unrealMonthly={unrealMonthlyByMarket[mk]}
                 onCloseRow={setClosing}
               />
             ))}
