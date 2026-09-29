@@ -1014,10 +1014,18 @@ const PbEv = ({ rows }) => (
 );
 
 export const IpoExitPlaybook = () => {
-  const [open, setOpen] = useState(true);
+  // Collapsed by default (2026-09-29, per user — the full playbook body is a
+  // reference doc, not a panel to read every visit); choice persists.
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem('ipo.playbookOpen') === '1'; } catch { return false; }
+  });
+  const toggle = () => setOpen(o => {
+    try { localStorage.setItem('ipo.playbookOpen', o ? '0' : '1'); } catch { /* ignore */ }
+    return !o;
+  });
   return (
     <div className="ipo-pb" data-testid="ipo-exit-playbook">
-      <div className="ipo-pb-head" onClick={() => setOpen(o => !o)} title="Collapse / expand">
+      <div className="ipo-pb-head" onClick={toggle} title="Collapse / expand">
         <div className="ipo-pb-title">
           IPO ALLOTMENT EXIT PLAYBOOK
           <span className="ipo-tag ipo-tag-manual">MANUAL GUIDE — no automation</span>
