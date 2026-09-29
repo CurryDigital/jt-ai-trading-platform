@@ -179,6 +179,25 @@ const CloseForm = ({ row, onDone, onCancel }) => {
     }
   };
 
+  // Purge (2026-09-29, per user): delete the ledger row entirely so it is
+  // never recognized as a closed trade — for testing tickers. Hard delete,
+  // confirm-gated; no order routing.
+  const purge = async () => {
+    if (!window.confirm(`Purge ${p.symbol} #${p.id}? The ledger row is deleted entirely — it will NOT be recorded as a closed trade.`)) return;
+    setState({ busy: true, msg: null });
+    try {
+      const res = await fetchWithTimeout(`/api/execution/manual/positions/${p.id}`, { method: 'DELETE' }, 20000);
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        onDone?.(`Purged ${p.symbol} — ledger row deleted, not recorded as closed`);
+      } else {
+        setState({ busy: false, msg: body.detail || `Purge failed (${res.status})` });
+      }
+    } catch (e) {
+      setState({ busy: false, msg: e.message || 'Network error' });
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div className="qr-surface w-72 p-3 space-y-2" onClick={(e) => e.stopPropagation()}>
@@ -203,6 +222,14 @@ const CloseForm = ({ row, onDone, onCancel }) => {
           className="w-full px-2 py-1.5 rounded text-[11px] font-bold bg-slate-700/80 text-slate-100 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {state?.busy ? 'Closing…' : 'Close Position'}
+        </button>
+        <button
+          onClick={purge}
+          disabled={state?.busy}
+          className="w-full text-center text-[10px] text-rose-400/80 hover:text-rose-300 disabled:opacity-40 transition-colors"
+          title="Delete this ledger row entirely — it will NOT be recorded as a closed trade. For testing tickers."
+        >
+          Purge record — delete, no closed entry kept
         </button>
         {state?.msg && <div className="text-[10px] text-rose-400">{state.msg}</div>}
       </div>

@@ -918,6 +918,21 @@ def close_manual_position(position_id: int, payload: ManualPositionClose, db: Se
     return {"id": position_id, "status": "closed", "realized_pnl": round(realized, 2), "as_of": _now_iso()}
 
 
+@router.delete("/manual/positions/{position_id}")
+def purge_manual_position(position_id: int, db: Session = Depends(get_db)):
+    """Purge a manual position row entirely (2026-09-29, per user — testing
+    tickers): DELETE removes the ledger row, so it is never counted as open
+    OR closed (closed stats / monthly heatmap / win rate all ignore it).
+    Hard delete by design — not an undo-close."""
+    deleted = safe_query_one(db, """
+        DELETE FROM gold.manual_positions WHERE id = :id RETURNING id
+    """, {"id": position_id}, label="manual_position_purge")
+    if deleted is None:
+        raise HTTPException(status_code=404, detail=f"No manual position id={position_id}")
+    db.commit()
+    return {"id": position_id, "status": "purged", "as_of": _now_iso()}
+
+
 class KillSwitchRequest(BaseModel):
     phrase: str
 
