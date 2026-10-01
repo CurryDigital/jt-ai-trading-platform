@@ -57,6 +57,7 @@ const AnalyticsTab = lazyRetry(() => import('./components/AnalyticsTab').then(m 
 const NewsTab = lazyRetry(() => import('./components/NewsTab').then(m => ({ default: m.NewsTab })), 'NewsTab');
 const StrategiesWorkspace = lazyRetry(() => import('./components/StrategiesWorkspace').then(m => ({ default: m.StrategiesWorkspace })), 'StrategiesWorkspace');
 const IpoTab = lazyRetry(() => import('./components/IpoTab').then(m => ({ default: m.IpoTab })), 'IpoTab');
+const DerivativesTab = lazyRetry(() => import('./components/derivatives/DerivativesTab').then(m => ({ default: m.DerivativesTab })), 'DerivativesTab');
 
 const TabFallback = () => (
   <div className="qr-surface px-3 py-8 flex items-center justify-center gap-2 text-[11px] text-slate-500">
@@ -77,6 +78,7 @@ const Icon = {
   Markets: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>),
   Settings: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>),
   Strategies: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>),
+  Derivatives: () => (<svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 17c2.5 0 3.5-2 5-2s2.5 2 5 2 3.5-6 5-6 2.5 4 3 4M3 7h.01M3 21h18" /></svg>),
 };
 
 // =================================================================
@@ -616,18 +618,23 @@ export default function App() {
   };
 
   // =================================================================
-  // 5-tab navigation — each tab has a clear intent:
-  //   Command    -> platform overview & quick navigation
-  //   Research   -> find trade ideas (markets, signals, agentic research)
-  //   Strategies -> manage strategy lifecycle (lab, pipeline, performance)
-  //   Execution  -> track positions & trades (sim, paper, paper uat, live)
-  //   Settings   -> system configuration
+  // 6-tab navigation — each tab has a clear intent:
+  //   Command     -> platform overview & quick navigation
+  //   Research    -> find trade ideas (markets, signals, agentic research)
+  //   Strategies  -> manage strategy lifecycle (lab, pipeline, performance)
+  //   Execution   -> track positions & trades (sim, paper, paper uat, live)
+  //   Derivatives -> contained vertical for derivative strategies
+  //                    (research / backtest / execution — separate ledgers,
+  //                    separate /api/derivatives/* namespace; nothing here
+  //                    feeds the equity books or shared strategy universe)
+  //   Settings    -> system configuration
   // =================================================================
   const navItems = useMemo(() => [
     { id: 'command',    label: 'Command',   short: 'Cmd',  IconComponent: Icon.Command,     key: '1' },
     { id: 'research',   label: 'Research',  short: 'Res',  IconComponent: Icon.Research,    key: '2' },
     { id: 'strategies', label: 'Strategies', short: 'Str',  IconComponent: Icon.Strategies,  key: '3' },
     { id: 'execution',  label: 'Execution', short: 'Exec', IconComponent: Icon.Portfolio,   key: '4' },
+    { id: 'derivatives', label: 'Derivatives', short: 'Drv', IconComponent: Icon.Derivatives, key: '6' },
     { id: 'settings',   label: 'Settings',  short: 'Set',  IconComponent: Icon.Settings,    key: '5' },
   ], []);
 
@@ -655,6 +662,7 @@ export default function App() {
   //   Research  -> find trade ideas (markets, signals, agents)
   //   Strategies -> manage lifecycle (lab, pipeline, performance)
   //   Execution -> track positions & trades (sim, paper, paper uat, live)
+  //   Derivatives -> contained derivatives vertical (research, backtest, execution)
   // Sub-tab hotkeys: q/w/e/r for left-hand easy access
   const subTabConfig = useMemo(() => ({
     research: [
@@ -677,15 +685,21 @@ export default function App() {
       { id: 'live_ops',         label: 'Live',      short: 'Live', IconComponent: Icon.Command,    key: 'r' },
       { id: 'manual',           label: 'Manual',    short: 'Man', IconComponent: Icon.Portfolio,   key: 't' },
     ],
+    derivatives: [
+      { id: 'research',         label: 'Research',  short: 'Res',  IconComponent: Icon.Research,    key: 'q' },
+      { id: 'backtest',         label: 'Backtest',  short: 'BT',   IconComponent: Icon.Performance, key: 'w' },
+      { id: 'execution',        label: 'Execution', short: 'Exec', IconComponent: Icon.Portfolio,   key: 'e' },
+    ],
   }), []);
 
   const navigateToTab = (tab) => navigate(`/${currentMode}/${tab}`);
 
   // Sub-tab state — default to the first sub-tab of each merged section
   const [activeSubTabs, setActiveSubTabs] = useState({
-    research:   'macro',
-    strategies: 'lab',
-    execution:  'portfolio',
+    research:    'macro',
+    strategies:  'lab',
+    execution:   'portfolio',
+    derivatives: 'research',
   });
   const currentSubTabs = subTabConfig[currentTab];
   const activeSubTab = activeSubTabs[currentTab] || (currentSubTabs?.[0]?.id);
@@ -694,12 +708,12 @@ export default function App() {
     setActiveSubTabs(prev => ({ ...prev, [tab]: sub }));
   };
 
-  // Keyboard shortcut: 1-5 for main tabs, letter keys for sub-tabs
+  // Keyboard shortcut: 1-6 for main tabs, letter keys for sub-tabs
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // Main tabs 1-5
+      // Main tabs 1-6
       const item = navItems.find(n => n.key === e.key);
       if (item) {
         e.preventDefault();
@@ -937,6 +951,9 @@ export default function App() {
           </>
         )}
 
+        {/* Derivatives tab — contained vertical; own components, own API namespace */}
+        {currentTab === 'derivatives' && <DerivativesTab sub={activeSubTab} />}
+
         {currentTab === 'strategy_detail'  && (
           selectedStrategyId
             ? <StrategyDetail key={selectedStrategyId} strategyId={selectedStrategyId} onBack={closeStrategyDetail} />
@@ -953,7 +970,7 @@ export default function App() {
       {/* Mobile bottom nav */}
       <nav className="bottom-nav md:hidden">
         <div className="flex items-center justify-around px-1 py-1">
-          {navItems.slice(0, 5).map(n => (
+          {navItems.slice(0, 6).map(n => (
             <button key={n.id} onClick={() => navigateToTab(n.id)}
               className={`flex flex-col items-center gap-0.5 px-1.5 py-1 rounded min-w-0 transition-colors ${
                 currentTab === n.id ? 'text-blue-400' : 'text-slate-500'
