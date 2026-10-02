@@ -6,6 +6,7 @@ import { BookOverview } from './components/execution/BookOverview';
 import { PositionsByReturn, normSimPosition } from './components/execution/BookPositions';
 import { useEventStream } from './hooks/useEventStream';
 import { useToasts, ToastContainer } from './components/Toasts';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { fmt, fmtK, fmtPct, pnlCl, api, usePoll, getToken, setToken, clearToken, onUnauthorized, fetchWithTimeout } from './utils';
 import { FR, FR_NAME, classifySource, useFreshness, fmtAgeSec } from './freshness';
 
@@ -916,6 +917,7 @@ export default function App() {
         )}
 
         <Suspense fallback={<TabFallback />}>
+        <ErrorBoundary label={currentTab} resetKey={`${currentTab}/${activeSubTab}`}>
         {currentTab === 'command'          && <CommandCenter data={data} navigateToTab={navigateToTab} onSelectStrategy={openStrategyDetail} />}
         {currentTab === 'settings'         && <SettingsTab healthData={healthData} latencyMs={latencyMs} wsConnected={wsConnected} initialSection={settingsDeepLink} navigateToTab={navigateToTab} onSelectStrategy={openStrategyDetail} />}
 
@@ -964,6 +966,7 @@ export default function App() {
             ? <StrategyCompare strategyIds={compareIds} onClose={closeCompare} onSelectStrategy={openStrategyDetail} />
             : <div className="qr-surface p-6 text-center text-[11px] text-slate-500">No strategies selected · pick 2–6 from <button onClick={() => { navigateToTab('strategies'); setSubTab('strategies', 'performance'); }} className="text-blue-400 hover:text-blue-300 underline">Performance</button> and click Compare</div>
         )}
+        </ErrorBoundary>
         </Suspense>
       </main>
 

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { IbkrGatewayTester } from './IbkrGatewayTester';
 import { AuditLog } from './AuditLog';
+import { ActionCenter } from './ActionCenter';
 import { marketClock, marketStatus, fetchWithTimeout } from '../utils';
 import { useBarQuality, barQualityView } from '../freshness';
 
 // Enhanced Settings Tab with Configuration Management + System Health
-export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
-  const [activeSection, setActiveSection] = useState('ibkr'); // ibkr, trading, sync, display, data, health
+export const SettingsTab = ({ healthData, latencyMs, wsConnected, initialSection, navigateToTab, onSelectStrategy }) => {
+  const [activeSection, setActiveSection] = useState('ibkr'); // ibkr, trading, sync, display, data, health, alerts
   const [syncStatus, setSyncStatus] = useState({});
   const [platformSettings, setPlatformSettings] = useState({
     defaultCapital: 100000,
@@ -19,8 +20,6 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
   const [riskConfig, setRiskConfig] = useState({ max_drawdown: '15', min_sharpe_oos: '0.8', high_turnover: '500', low_trade_count: '20' });
   const [notifConfig, setNotifConfig] = useState({ telegram_token: '', telegram_chat_id: '', fills: true, demotes: true, stalls: true, promotions: false });
   const [saving, setSaving] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const [resetConfirm, setResetConfirm] = useState(false);
   const [dataSources, setDataSources] = useState(null);
   const [dataSourcesLoading, setDataSourcesLoading] = useState(false);
   const [clocks, setClocks] = useState(marketClock());
@@ -40,6 +39,17 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
     }, 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Header alert badge deep-link: App.jsx passes initialSection={section,n}
+  // when the badge is clicked; honour fresh clicks (<5s) and scroll the
+  // section into view. Stale tokens (e.g. remount on tab switch) are ignored
+  // so revisiting Settings never yanks the user back to Alerts.
+  useEffect(() => {
+    if (initialSection?.section && Date.now() - initialSection.n < 5000) {
+      setActiveSection(initialSection.section);
+      setTimeout(() => document.getElementById('action-center')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    }
+  }, [initialSection]);
 
   const fetchSettings = async () => {
     try {
@@ -95,33 +105,8 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
     finally { setSaving(false); }
   };
 
-  const resetSimulation = async () => {
-    setResetting(true);
-    try {
-      // Call API to reset all paper strategies and trades
-      const res = await fetchWithTimeout('/api/simulation/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      }, 30000);
-      
-      if (res.ok) {
-        const data = await res.json();
-        alert(`✅ Simulation reset complete!\n\n${data.message || 'All positions and trades cleared.'}`);
-        setResetConfirm(false);
-        // Refresh the page to show updated state
-        window.location.reload();
-      } else {
-        const error = await res.json();
-        alert(`❌ Reset failed: ${error.detail || 'Unknown error'}`);
-      }
-    } catch (e) { 
-      console.error('Failed to reset simulation:', e);
-      alert('❌ Network error during reset');
-    }
-    finally { setResetting(false); }
-  };
-
   const sections = [
+    { id: 'alerts', label: '🚨 Alerts · Action Center', icon: '🚨' },
     { id: 'ibkr', label: '🔗 IBKR Connection', icon: '🔗' },
     { id: 'trading', label: '💰 Trading Config', icon: '💰' },
     { id: 'risk', label: '⚠️ Risk Config', icon: '⚠️' },
@@ -176,7 +161,12 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
           ))}
         </div>
 
-        {/* Detail panel */}
+        {/* Detail panel — the Alerts section renders the Action Center card
+            directly (no nested frame); every other section keeps the strong
+            surface wrapper. */}
+        {activeSection === 'alerts' ? (
+          <ActionCenter navigateToTab={navigateToTab} onSelectStrategy={onSelectStrategy} />
+        ) : (
         <div className="qr-surface-strong overflow-hidden">
 
       {/* IBKR CONNECTION */}
@@ -312,49 +302,6 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
             </div>
           </div>
 
-          {/* SIMULATION RESET - Only show in SIMULATION mode */}
-          {executionMode === 'SIMULATION' && (
-            <div className="p-6 rounded-xl bg-rose-900/20 border border-rose-500/30">
-              <h3 className="text-sm font-black text-rose-400 uppercase tracking-wider mb-4">⚠️ Simulation Reset</h3>
-              
-              <p className="text-xs text-slate-400 mb-4">
-                Reset all simulation data. This will:
-              </p>
-              <ul className="text-xs text-slate-400 mb-4 space-y-1 list-disc list-inside">
-                <li>Delete all paper trading positions</li>
-                <li>Clear all trade history</li>
-                <li>Reset simulation capital to default ($100,000)</li>
-                <li>Remove all P&L data</li>
-              </ul>
-              
-              {!resetConfirm ? (
-                <button
-                  onClick={() => setResetConfirm(true)}
-                  className="px-4 py-2 bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 border border-rose-500/50 rounded-lg text-sm font-bold transition-all"
-                >
-                  🗑️ Reset Simulation Data
-                </button>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-rose-400 font-bold">Are you sure? This cannot be undone.</span>
-                  <button
-                    onClick={resetSimulation}
-                    disabled={resetting}
-                    className="px-4 py-2 bg-rose-500 hover:bg-rose-400 disabled:bg-slate-700 text-white text-sm font-bold rounded-lg transition-all"
-                  >
-                    {resetting ? 'Resetting...' : '✅ Yes, Reset Everything'}
-                  </button>
-                  <button
-                    onClick={() => setResetConfirm(false)}
-                    disabled={resetting}
-                    className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold rounded-lg transition-all"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -943,9 +890,9 @@ export const SettingsTab = ({ healthData, latencyMs, wsConnected }) => {
         </div>
       )}
         </div>
+        )}
       </div>
     </div>
   );
 };
-
 export default SettingsTab;
