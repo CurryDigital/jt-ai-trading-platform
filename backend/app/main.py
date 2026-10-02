@@ -24,6 +24,7 @@ from app.routes import market, stocks, fx, crypto, strategies, positions, resear
 from app.routes import performance, execution, ibkr, alerts, metadata, hkex, backtest, agents
 from app.routes import command, markets_v2, macro, signals, settings as settings_routes
 from app.routes import watchlist
+from app.routes import derivatives
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -113,6 +114,7 @@ app.include_router(command.router)
 app.include_router(markets_v2.router)
 app.include_router(macro.router)
 app.include_router(watchlist.router)
+app.include_router(derivatives.router)
 app.include_router(signals.router)
 # Include research router
 app.include_router(research.router)
