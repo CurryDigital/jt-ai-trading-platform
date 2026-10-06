@@ -20,6 +20,32 @@
         });
       }
     </script>
+    <script>
+      // Stale-bundle self-heal (2026-10-06): a tab left open across a deploy
+      // keeps the OLD JS bundle in memory (hashed assets never refetch until
+      // reload). Poll version.json and hard-reload once the served build hash
+      // no longer matches the entry bundle this page loaded. Dev mode (entry
+      // is /src/main.jsx, not /assets/index-*) is exempt.
+      (function () {
+        function entrySrc() {
+          var s = document.querySelector('script[type="module"][src*="/assets/index-"]');
+          return s ? s.src : null;
+        }
+        function check() {
+          var src = entrySrc();
+          if (!src) return;
+          fetch('/version.json?ts=' + Date.now(), { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (v) {
+              if (v && v.build && src.indexOf(v.build) === -1) location.reload();
+            })
+            .catch(function () {});
+        }
+        setInterval(check, 60000);
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
+        window.addEventListener('pageshow', function (e) { if (e.persisted) check(); });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
