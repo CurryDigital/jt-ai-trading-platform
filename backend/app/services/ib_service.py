@@ -10,6 +10,8 @@ from queue import Queue
 import os
 from dotenv import load_dotenv
 
+from app.services.order_guard import account_guard_error
+
 # Load environment variables
 load_dotenv()
 
@@ -781,6 +783,16 @@ class IBKRQuantService:
             logger.error("Cannot place order: IBKR not connected")
             return {"success": False, "error": "Not connected to IBKR"}
 
+        # Hard account guard (t_03f5687f): refuse any account other than the
+        # allowed one unless the user set IBKR_LIVE_TRADING_ENABLE=true.
+        guard_err = account_guard_error(
+            connected_account=get_ib_threaded_service().account,
+            requested_account=account,
+        )
+        if guard_err:
+            logger.error(f"Order refused: {guard_err}")
+            return {"success": False, "error": guard_err}
+
         # Use the threaded service's submit_order method
         return get_ib_threaded_service().submit_order(symbol, action, quantity, order_type, order_ref=order_ref)
     
@@ -909,6 +921,13 @@ class IBKRUatService:
             return {"success": False,
                     "error": "Not connected to IBKR UAT paper session",
                     "session": "uat"}
+        # Hard account guard (t_03f5687f): the UAT session must be bound to
+        # the allowed account; any other account is refused.
+        guard_err = account_guard_error(connected_account=svc.account,
+                                        requested_account=account)
+        if guard_err:
+            logger.error(f"UAT order refused: {guard_err}")
+            return {"success": False, "error": guard_err, "session": "uat"}
         result = svc.submit_order(symbol, action, quantity, order_type, order_ref=order_ref)
         result["session"] = "uat"
         return result

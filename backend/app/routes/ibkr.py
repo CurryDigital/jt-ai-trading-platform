@@ -9,6 +9,7 @@ from app.dependencies import get_db, logger
 from app.db.safe_query import safe_query_one
 from app.services.ib_service import ib_quant_service, ib_uat_service
 from app.services.ib_web_service import ib_web_service
+from app.services.order_guard import live_trading_enabled, requested_account_guard_error
 
 router = APIRouter(prefix="/api", tags=["ibkr"])
 
@@ -132,8 +133,13 @@ def api_ib_tws_uat_close_position(payload: dict, db: Session = Depends(get_db)):
                            f"({ot.get('status')}) — fills when the market opens; no duplicate placed.",
             }
 
+    # Tag the close order for fill attribution (t_03f5687f): untagged fills
+    # are the signature of the 08-25/09-23/09-28 incidents. Manual closes are
+    # book-management ops, not strategy orders — they get an explicit
+    # "manual:uat-close:<symbol>" ref instead of a strategy ref.
     result = ib_uat_service.place_order(symbol=symbol, action=action,
-                                        quantity=int(abs(qty)), order_type="MKT", account=None)
+                                        quantity=int(abs(qty)), order_type="MKT", account=None,
+                                        order_ref=f"manual:uat-close:{symbol}")
     if not result or not result.get("success"):
         err = (result or {}).get("error", "Unknown")
         raise HTTPException(status_code=500, detail=f"Close order failed on UAT session: {err}")
@@ -283,42 +289,138 @@ async def api_ib_web_status():
 def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     """Place an order through IBKR TWS API.
 
-    Per-book routing (preferred): pass `book` in the payload —
-      uat       -> dedicated UAT paper session (hard-fails 503 when
-                   disconnected, NEVER falls back to the live account)
-      live      -> primary session (manual live ticket, confirm-gated client-side)
-      paper/sim -> virtual response only (paper strategies are fired by the
-                   qr_etl rebalancer into the DB ledger, never via IBKR here)
+    HARDENED (kanban t_03f5687f, 2026-10-09) after three proven incidents of
+    defaulted/untagged orders hitting the real UAT account DUP825942:
 
-    Legacy alias: `paper_uat` is accepted and normalized to `uat`.
+    - NO DEFAULTS: symbol, action, quantity, order_type, book and strategy_id
+      are all REQUIRED; missing/empty/unknown -> 422, no order placed.
+    - `book` is REQUIRED — the legacy fallback that silently routed by
+      gold.platform_settings.global_execution_mode is removed.
+    - strategy_id must name an ACTIVE sleeve in gold.strategy_registry
+      (status='paper') whose execution_mode matches the book (uat ->
+      PAPER_UAT) and whose universe covers the symbol. Legacy signal-agent
+      ids (gold.strategy_signals smallint space) are OBSERVE-ONLY and are
+      refused. `order_ref` is stamped as strat:<strategy_id>.
+    - book='live' and any account other than DUP825942 are refused unless the
+      user set IBKR_LIVE_TRADING_ENABLE=true in the backend environment.
 
-    `strategy_id` (or explicit `order_ref`) tags the broker order with
-    orderRef="strat:<strategy_id>" so fills are attributable to the strategy.
-
-    Legacy fallback: when `book` is absent, routing follows
-    gold.platform_settings.global_execution_mode (unchanged behaviour).
+    Per-book routing:
+      uat/paper_uat -> dedicated UAT paper session (hard-fails 503 when
+                       disconnected, NEVER falls back to the live account)
+      live          -> primary session (requires the live-enable flag)
+      sim/paper     -> virtual response only (paper strategies are fired by
+                       the qr_etl rebalancer into the DB ledger, never via
+                       IBKR here)
     """
-    mode_result = db.execute(text(
-        "SELECT value FROM gold.platform_settings WHERE key = 'global_execution_mode'"
-    )).fetchone()
-    current_mode = mode_result.value if mode_result else "SIMULATION"
-
-    symbol = payload.get("symbol", "AAPL")
-    action = payload.get("action", "BUY")
-    quantity = payload.get("quantity", 1)
-    order_type = payload.get("order_type", "MKT")
-    book = (payload.get("book") or "").strip().lower() or None
+    # ------------------------------------------------------------------
+    # 1. Required fields — no defaults anywhere (t_03f5687f item 1).
+    # ------------------------------------------------------------------
+    symbol = (str(payload.get("symbol") or "")).strip().upper()
+    action = (str(payload.get("action") or "")).strip().upper()
+    order_type = (str(payload.get("order_type") or "")).strip().upper()
+    book = (str(payload.get("book") or "")).strip().lower()
     # Legacy alias: pre-rename vocabulary spelled the UAT book "paper_uat".
     if book == "paper_uat":
         book = "uat"
-    strategy_id = payload.get("strategy_id")
-    order_ref = payload.get("order_ref") or (f"strat:{strategy_id}" if strategy_id else None)
-    if book not in (None, "sim", "paper", "uat", "live"):
+    quantity = payload.get("quantity")
+
+    missing = [name for name, val in (
+        ("symbol", symbol), ("action", action), ("quantity", quantity),
+        ("order_type", order_type), ("book", book),
+    ) if val in (None, "")]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required field(s): {', '.join(missing)}. "
+                   f"Order construction has NO defaults — symbol, action, "
+                   f"quantity, order_type, book and strategy_id are all required.")
+
+    if action not in ("BUY", "SELL"):
+        raise HTTPException(status_code=422,
+                            detail=f"Invalid action '{action}' — expected BUY|SELL")
+    if order_type not in ("MKT", "LMT", "STP", "STP_LMT"):
+        raise HTTPException(status_code=422,
+                            detail=f"Invalid order_type '{order_type}' — expected MKT|LMT|STP|STP_LMT")
+    try:
+        qty_num = float(quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422,
+                            detail=f"quantity must be a positive number, got {quantity!r}")
+    if qty_num <= 0 or qty_num != int(qty_num):
+        raise HTTPException(status_code=422,
+                            detail=f"quantity must be a positive whole number, got {quantity!r}")
+    quantity = int(qty_num)
+    if book not in ("sim", "paper", "uat", "live"):
         raise HTTPException(status_code=422,
                             detail=f"Invalid book '{book}' — expected sim|paper|uat|live")
 
-    # Virtual books never touch a broker session.
-    if book in ("sim", "paper") or (book is None and current_mode == "SIMULATION"):
+    # ------------------------------------------------------------------
+    # 2. Strategy attribution — required, registry-validated (item 2).
+    # ------------------------------------------------------------------
+    strategy_id = payload.get("strategy_id")
+    order_ref = payload.get("order_ref")
+    if not strategy_id and isinstance(order_ref, str) and order_ref.startswith("strat:"):
+        strategy_id = order_ref[len("strat:"):]
+    strategy_id = (str(strategy_id or "")).strip()
+    if not strategy_id:
+        raise HTTPException(
+            status_code=422,
+            detail="strategy_id is required — NULL-strategy orders are refused "
+                   "(untagged orders created the 2026-08-25/09-23/09-28 incidents).")
+    if strategy_id.isdigit():
+        raise HTTPException(
+            status_code=422,
+            detail=f"strategy_id '{strategy_id}' is a legacy signal-agent id "
+                   f"(gold.strategy_signals smallint space) — OBSERVE-ONLY, not "
+                   f"order-attributable. Use a gold.strategy_registry sleeve id.")
+    if not order_ref:
+        order_ref = f"strat:{strategy_id}"
+
+    reg = db.execute(text(
+        "SELECT strategy_id, status, execution_mode, universe_tickers "
+        "FROM gold.strategy_registry WHERE strategy_id = :sid"
+    ), {"sid": strategy_id}).fetchone()
+    if not reg:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown strategy_id '{strategy_id}' — not registered in "
+                   f"gold.strategy_registry; order refused.")
+    if reg.status != "paper":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Strategy '{strategy_id}' is not active (status='{reg.status}'); "
+                   f"only active (status='paper') sleeves may place orders.")
+    if book == "uat" and reg.execution_mode != "PAPER_UAT":
+        raise HTTPException(
+            status_code=422,
+            detail=f"Strategy '{strategy_id}' is execution_mode='{reg.execution_mode}', "
+                   f"not PAPER_UAT — it may not fire orders to the UAT broker book.")
+    universe = [str(t).upper() for t in (reg.universe_tickers or [])]
+    if universe and symbol not in universe:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Strategy '{strategy_id}' is not allowed to trade {symbol} "
+                   f"(not in its registered universe).")
+
+    # ------------------------------------------------------------------
+    # 3. Account guard (item 5): only DUP825942 unless the user's
+    #    live-enable flag is set. book='live' requires the flag outright.
+    # ------------------------------------------------------------------
+    requested_account = payload.get("account")
+    if book == "live" and not live_trading_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="book='live' is refused: live trading is not enabled. The user "
+                   "must set IBKR_LIVE_TRADING_ENABLE=true in backend/.env and "
+                   "restart the backend.")
+    guard_err = requested_account_guard_error(requested_account)
+    if guard_err:
+        raise HTTPException(status_code=403, detail=guard_err)
+
+    # ------------------------------------------------------------------
+    # 4. Routing. Virtual books never touch a broker session.
+    # ------------------------------------------------------------------
+    if book in ("sim", "paper"):
         sim_capital = db.execute(text(
             "SELECT value FROM gold.platform_settings WHERE key = 'simulation_capital'"
         )).fetchone()
@@ -331,18 +433,15 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
 
         return {
             "success": True, "simulated": True,
-            "message": f"{(book or 'sim').upper()}: {action} {quantity} shares of {symbol} would be placed",
-            "order_id": f"SIM_{int(time.time())}", "mode": current_mode,
-            "book": book or "sim", "order_ref": order_ref,
+            "message": f"{book.upper()}: {action} {quantity} shares of {symbol} would be placed",
+            "order_id": f"SIM_{int(time.time())}", "mode": "SIMULATION",
+            "book": book, "order_ref": order_ref, "strategy_id": strategy_id,
             "simulation_balance": {"total": sim_amount, "used": sim_used, "available": sim_amount - sim_used},
         }
 
-    # Session routing:
-    #   uat (book or legacy global mode) -> dedicated UAT paper session.
-    #                    NEVER falls back to the primary session, so a UAT
-    #                    order can never reach the live account.
-    #   live / other legacy modes        -> primary session.
-    if book == "uat" or (book is None and current_mode in ("PAPER_UAT", "UAT")):
+    #   uat  -> dedicated UAT paper session (never falls back to primary).
+    #   live -> primary session (only reachable with the live-enable flag).
+    if book == "uat":
         service = ib_uat_service
         session_name = "uat"
     else:
@@ -351,18 +450,18 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
 
     try:
         order_result = service.place_order(
-            symbol=symbol, action=action, quantity=int(quantity), order_type=order_type,
+            symbol=symbol, action=action, quantity=quantity, order_type=order_type,
             account=None, order_ref=order_ref,
         )
         if order_result and order_result.get("success"):
             return {
                 "success": True, "order_id": order_result.get("order_id"),
-                "status": order_result.get("status", "Submitted"), "mode": current_mode,
+                "status": order_result.get("status", "Submitted"), "mode": "BROKER",
                 "session": session_name,
-                "book": book or ("uat" if current_mode in ("PAPER_UAT", "UAT") else "live"),
+                "book": book,
                 "order_ref": order_ref, "strategy_id": strategy_id,
                 "symbol": symbol, "action": action, "quantity": quantity,
-                "message": f"{current_mode} order submitted via {session_name} session: {action} {quantity} {symbol}",
+                "message": f"{book.upper()} order submitted via {session_name} session: {action} {quantity} {symbol}",
             }
         else:
             err = order_result.get('error', 'Unknown') if order_result else 'No result'
@@ -450,7 +549,21 @@ async def api_execute_trade(trade: TradeRequest, db: Session = Depends(get_db)):
 
 @router.post("/positions/sync-to-ibkr")
 def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
-    """Sync paper positions to IBKR by placing real orders."""
+    """Sync paper positions to IBKR by placing real orders.
+
+    HARDENED (t_03f5687f): fires real orders on the PRIMARY session, so the
+    whole endpoint is refused unless the user enabled live trading
+    (IBKR_LIVE_TRADING_ENABLE=true). Every order is tagged
+    order_ref='strat:<strategy_id>' from the position row, and the dangerous
+    current_price=100 fallback is removed — a position with no usable price
+    is skipped, never ordered at a fabricated size."""
+    if not live_trading_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="sync-to-ibkr places real orders on the primary session and is "
+                   "refused: live trading is not enabled (IBKR_LIVE_TRADING_ENABLE "
+                   "is not set by the user).")
+
     max_positions = payload.get("max_positions", 5)
 
     mode_result = db.execute(text(
@@ -489,21 +602,31 @@ def sync_positions_to_ibkr(payload: dict, db: Session = Depends(get_db)):
             failed.append({"ticker": ticker, "error": "FX pairs require special handling"})
             continue
 
-        # Use DB price to calc quantity (no yfinance)
+        # Use DB price to calc quantity (no yfinance). NO fabricated fallback
+        # price (t_03f5687f): a position with no usable price is skipped,
+        # never ordered at a made-up size.
         if pos["entry_price"] and pos["entry_price"] > 0:
             quantity = int(pos["capital"] / pos["entry_price"])
         else:
             price_row = db.execute(text("""
                 SELECT close FROM silver.unified_prices WHERE ticker = :t ORDER BY date DESC LIMIT 1
             """), {"t": ticker}).fetchone()
-            current_price = float(price_row.close) if price_row else 100
-            quantity = int(pos["capital"] / current_price)
+            if not price_row or not price_row.close or float(price_row.close) <= 0:
+                failed.append({"ticker": ticker, "error": "no usable price (no entry_price, no unified_prices close) — skipped"})
+                continue
+            quantity = int(pos["capital"] / float(price_row.close))
 
         if quantity < 1:
-            quantity = 1
+            failed.append({"ticker": ticker, "error": f"computed quantity {quantity} < 1 — skipped"})
+            continue
 
         try:
-            order_result = ib_quant_service.place_order(symbol=ticker, action="BUY", quantity=quantity, order_type="MKT", account=None)
+            # Tag every order with its strategy for fill attribution (t_03f5687f).
+            order_ref = f"strat:{pos['strategy_id']}" if pos.get("strategy_id") else None
+            if not order_ref:
+                failed.append({"ticker": ticker, "error": "position row has NULL strategy_id — refused (untagged orders are not allowed)"})
+                continue
+            order_result = ib_quant_service.place_order(symbol=ticker, action="BUY", quantity=quantity, order_type="MKT", account=None, order_ref=order_ref)
 
             if order_result and order_result.get("success"):
                 order_id = order_result.get("order_id", "UNKNOWN")

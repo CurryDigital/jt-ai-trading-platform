@@ -2,6 +2,8 @@ import requests
 import urllib3
 import logging
 
+from app.services.order_guard import account_guard_error
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,13 @@ class IBKRWebAPIService:
         """
         Iteration 52: Robust order execution with conid resolution and confirmation handling.
         """
+        # Hard account guard (t_03f5687f): the Client Portal path may only
+        # target the allowed account unless the user enabled live trading.
+        guard_err = account_guard_error(connected_account=account_id,
+                                        requested_account=account_id)
+        if guard_err:
+            logger.error(f"Web order refused: {guard_err}")
+            return {"status": "error", "message": guard_err}
         try:
             # Determine sec_type
             is_fx = any(c in ticker for c in ['.', '=', '/'])
