@@ -169,60 +169,132 @@ def _book_from_row(row):
     }
 
 
-def _combined_account(live, paper):
+def _has_column(db, schema, table, column):
+    """Adaptive schema guard (same pattern as hkex.py) — lets the backend
+    pick up qr_etl's currency columns the day they land, without a deploy
+    dependency."""
+    try:
+        row = db.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = :s AND table_name = :t AND column_name = :c
+        """), {"s": schema, "t": table, "c": column}).fetchone()
+        return row is not None
+    except Exception:
+        db.rollback()
+        return False
+
+
+def _latest_ibkr_account(db):
+    """Latest gold.ibkr_account_summary row with currency/FX labels.
+
+    Core columns (net_liquidation, cash_hkd, cash_usd, ...) are the account
+    BASE currency (HKD for DUP825942). The *_usd / base_currency / fx_rate /
+    fx_date columns exist once qr_etl's conversion layer (t_65d96f4a) lands;
+    they are read adaptively so this works before and after the migration.
+    fx_rate semantics: USD per 1 unit of base currency (0.1274 = USD/HKD).
     """
-    'My Book' aggregate over the canonical consumption.account_summary rows
-    (qr_etl, t_2b2ac824). Per-book numbers are used verbatim; the aggregate
-    only re-weights them against the combined equity base:
+    has_fx = _has_column(db, "gold", "ibkr_account_summary", "base_currency")
+    fx_cols = ("base_currency, net_liquidation_usd, available_funds_usd, "
+               "buying_power_usd, cash_total_usd, fx_rate, fx_date") if has_fx else \
+              "NULL::text AS base_currency, NULL::numeric AS net_liquidation_usd, " \
+              "NULL::numeric AS available_funds_usd, NULL::numeric AS buying_power_usd, " \
+              "NULL::numeric AS cash_total_usd, NULL::numeric AS fx_rate, NULL::date AS fx_date"
+    rows = safe_query(db, f"""
+        SELECT account, net_liquidation, available_funds, buying_power,
+               cash_hkd, cash_usd, fetched_at, {fx_cols}
+        FROM gold.ibkr_account_summary ORDER BY fetched_at DESC LIMIT 1
+    """, label="command_ibkr_account_fx")
+    if not rows:
+        return None
+    m = rows[0]._mapping
 
-      equity        = live.equity + paper.equity
-      gross_exp_pct = combined gross deployed MV / combined equity
-      net_exp_pct   = combined net deployed MV / combined equity
-      cash_pct      = (equity - net deployed MV) / equity
-      buying_power  = equity - gross deployed MV (matches the canonical paper
-                      definition; the live row's own buying_power is IBKR
-                      margin and is NOT additive, so it stays per-book only)
+    def _f(k):
+        v = m[k]
+        return float(v) if v is not None else None
 
-    If only one book row exists, it is returned verbatim. If neither exists,
-    returns {} so the UI renders '—' rather than a misleading zero.
-    """
-    books = [b for b in (live, paper) if b and b.get("equity")]
-    if not books:
-        return live or paper or {}
-    if len(books) == 1:
-        only = dict(books[0])
-        only["books"] = {"live": live, "paper": paper}
-        return only
-
-    total_equity = sum(b["equity"] for b in books)
-
-    def _deployed(b, key):
-        pct = b.get(key)
-        if pct is None:
-            return None
-        return b["equity"] * pct / 100.0
-
-    gross_parts = [v for v in (_deployed(b, "gross_exp_pct") for b in books) if v is not None]
-    net_parts = [v for v in (_deployed(b, "net_exp_pct") for b in books) if v is not None]
-    gross_mv = sum(gross_parts) if gross_parts else None
-    net_mv = sum(net_parts) if net_parts else None
-
-    def _sum(key):
-        vals = [b[key] for b in books if b.get(key) is not None]
-        return sum(vals) if vals else None
-
-    day_pnl = _sum("day_pnl")
+    fx_rate = _f("fx_rate")
+    fx = None
+    if fx_rate and m["fx_date"] and m["base_currency"]:
+        fx = {
+            "base_currency": m["base_currency"],
+            "usd_per_base": fx_rate,
+            "base_per_usd": 1.0 / fx_rate,
+            "fx_date": str(m["fx_date"]),
+            "source": "gold.ibkr_account_summary.fx_rate/fx_date (ETL stored daily rate)",
+        }
     return {
-        "equity": total_equity,
-        "day_pnl": day_pnl,
-        "day_pnl_pct": (day_pnl / total_equity * 100.0) if day_pnl is not None and total_equity else None,
-        "buying_power": max(total_equity - gross_mv, 0.0) if gross_mv is not None else _sum("buying_power"),
-        "cash_pct": ((total_equity - net_mv) / total_equity * 100.0) if net_mv is not None and total_equity else None,
-        "open_pnl": _sum("open_pnl"),
-        "gross_exp_pct": (gross_mv / total_equity * 100.0) if gross_mv is not None and total_equity else None,
-        "net_exp_pct": (net_mv / total_equity * 100.0) if net_mv is not None and total_equity else None,
-        "positions": _sum("positions"),
+        "account": m["account"],
+        "base_currency": m["base_currency"],          # None until t_65d96f4a lands
+        "net_liquidation": _f("net_liquidation"),     # native (base currency)
+        "net_liquidation_usd": _f("net_liquidation_usd"),
+        "available_funds": _f("available_funds"),
+        "available_funds_usd": _f("available_funds_usd"),
+        "buying_power": _f("buying_power"),
+        "buying_power_usd": _f("buying_power_usd"),
+        "cash_hkd": _f("cash_hkd"), "cash_usd": _f("cash_usd"),
+        "cash_total_usd": _f("cash_total_usd"),
+        "fetched_at": m["fetched_at"].isoformat() if m["fetched_at"] else None,
+        "fx": fx,
+    }
+
+
+def _assemble_account(live, paper, ibkr):
+    """'My Book' books — SEPARATE lines, never summed (t_22dee93d).
+
+    live = real IBKR paper account DUP825942 (base currency HKD; the
+    consumption view serves USD-converted values once qr_etl's conversion
+    layer lands — resolved per-request by reconciling against the gold
+    table's native vs USD columns). paper = SIM USD notional. Different
+    units AND different kinds of capital: there is no combined equity,
+    and no derived ratio ever mixes the two books.
+    """
+    if live is not None:
+        live = dict(live)
+        # Which currency is the view serving for the live book? Reconcile
+        # against gold's native vs USD columns instead of assuming.
+        currency = None
+        if ibkr and live.get("equity") is not None:
+            nl = ibkr.get("net_liquidation")
+            nl_usd = ibkr.get("net_liquidation_usd")
+            eq = live["equity"]
+            if nl_usd is not None and abs(eq - nl_usd) <= abs(eq - (nl if nl is not None else float("inf"))):
+                currency = "USD"
+            elif nl is not None:
+                currency = ibkr.get("base_currency")  # None pre-migration → stays unlabeled
+        live["currency"] = currency
+        live["open_pnl_currency"] = "USD"  # position-derived, contract currency
+        if ibkr:
+            live["account"] = ibkr["account"]
+            live["native_currency"] = ibkr["base_currency"]
+            live["equity_native"] = ibkr["net_liquidation"]
+            live["equity_usd"] = ibkr["net_liquidation_usd"]
+            live["buying_power_native"] = ibkr["buying_power"]
+            live["buying_power_usd"] = ibkr["buying_power_usd"]
+            live["cash_hkd"] = ibkr["cash_hkd"]
+            live["cash_usd"] = ibkr["cash_usd"]
+            live["fx"] = ibkr["fx"]
+            # The ETL cash writer is broken (writes 0/0) until qr_etl lands
+            # the conversion-layer fix — a 0.0 cash_pct would be a FAKE zero,
+            # not a measurement. Serve null + status instead.
+            if not (ibkr.get("cash_hkd") or 0) and not (ibkr.get("cash_usd") or 0):
+                live["cash_pct"] = None
+                live["cash_status"] = "cash writer pending (qr_etl t_65d96f4a) — 0 is not a measurement"
+        # open P&L is USD (positions); pct-of-equity only when a USD equity
+        # exists — never USD/HKD mixed.
+        if live.get("open_pnl") is not None and live.get("equity_usd"):
+            live["open_pnl_pct_of_equity"] = live["open_pnl"] / live["equity_usd"] * 100.0
+        else:
+            live["open_pnl_pct_of_equity"] = None
+    if paper is not None:
+        paper = dict(paper)
+        paper["currency"] = "USD"  # SIM notional is USD by platform convention
+    return {
         "books": {"live": live, "paper": paper},
+        "fx": (live or {}).get("fx"),
+        "combined": None,
+        "combined_note": ("live (IBKR account, HKD base) and paper (SIM USD notional) are "
+                          "different units and different kinds of capital — no combined "
+                          "total is served (t_22dee93d)."),
     }
 
 
@@ -231,8 +303,8 @@ def get_command_overview(db: Session = Depends(get_db)):
     """Single aggregator for the Command page: account, equity curve, pipeline, deployed health, attention queue."""
     # Canonical account rows (qr_etl, t_2b2ac824): book='live' is the IBKR
     # book, book='paper' is the aggregate paper book (equity = SUM of assigned
-    # capital over actively monitored PAPER strategies). Both are used
-    # verbatim; 'My Book' shows their combination.
+    # capital over actively monitored PAPER strategies). Served as SEPARATE
+    # currency-labeled books (t_22dee93d) — never summed into one number.
     account_rows = safe_query(db, """
         SELECT book, equity, day_pnl, day_pnl_pct, open_pnl, buying_power, cash_pct,
                gross_exp_pct, net_exp_pct, positions
@@ -247,7 +319,7 @@ def get_command_overview(db: Session = Depends(get_db)):
         elif r.book == 'paper':
             paper_book = _book_from_row(r)
 
-    account = _combined_account(live_book, paper_book)
+    account = _assemble_account(live_book, paper_book, _latest_ibkr_account(db))
 
     # Net Cash Flow (t_b662b4e9 delivered the source; t_98afd0f5 wires it):
     # consumption.account_cash_flow_summary is the canonical per-book ledger
@@ -290,6 +362,18 @@ def get_command_overview(db: Session = Depends(get_db)):
         WHERE book = 'live' ORDER BY d DESC LIMIT 30
     """, label="command_equity_curve")
     equity_curve = [{"d": str(r.d), "equity": float(r.equity)} for r in reversed(curve_rows)]
+
+    # The live curve is the NATIVE base-currency series (HKD for DUP825942) —
+    # history is tagged, not rewritten (t_65d96f4a). Label it explicitly so
+    # the UI never renders HKD values with a bare '$'. None pre-migration.
+    curve_currency = None
+    if _has_column(db, "gold", "account_nav_daily", "currency"):
+        cc_rows = safe_query(db, """
+            SELECT DISTINCT currency FROM gold.account_nav_daily
+            WHERE book = 'live' AND currency IS NOT NULL
+        """, label="command_equity_curve_ccy")
+        ccys = {r.currency for r in cc_rows}
+        curve_currency = ccys.pop() if len(ccys) == 1 else ("mixed" if ccys else None)
 
     # Pipeline counts source of truth: gold.v_pipeline_ui_feed, which is built from
     # gold.strategy_research and overlays the latest backtest/live metrics. This keeps
@@ -659,6 +743,7 @@ def get_command_overview(db: Session = Depends(get_db)):
         "account": account,
         "cash_flow": cash_flow,
         "equity_curve": equity_curve,
+        "equity_curve_currency": curve_currency,
         "pipeline": pipeline,
         "monthly_pnl": monthly_pnl,
         "paper_book_month": paper_book_month,
@@ -1070,3 +1155,83 @@ def get_command_regime_forecast(db: Session = Depends(get_db)):
             "updated_at": m["updated_at"],
         }
     return {"markets": out, "as_of": _now_iso()}
+
+
+# ---------------------------------------------------------------------------
+# Command page redesign (2026-09-18) — two READ-ONLY additions. No existing
+# endpoint, table, or writer is modified; both only read gold/consumption.
+# ---------------------------------------------------------------------------
+
+# Regime change vs yesterday (Command regime panel). Current label per region
+# is consumption.market_sentiment (canonical, latest-only — no history). The
+# previous distinct label + change date exist only for US, in the HMM daily
+# series gold.regime_label (SPY/VIX features; labels TREND/MEAN_REV/CARRY/
+# EVENT/FLAT). HK has no daily label history anywhere → prev_* stays null and
+# history=false so the UI says 'no daily history' instead of inventing one.
+@router.get("/command/regime-change")
+def get_command_regime_change(db: Session = Depends(get_db)):
+    sent_rows = safe_query(db, """
+        SELECT region, regime, updated_at FROM consumption.market_sentiment
+        WHERE region IN ('US', 'HK')
+    """, label="command_regime_change_sentiment")
+    sent = {r.region: r for r in sent_rows}
+
+    hmm_rows = safe_query(db, """
+        SELECT date, regime, confidence FROM gold.regime_label
+        ORDER BY date DESC LIMIT 120
+    """, label="command_regime_change_hmm")
+
+    regions = {}
+    for region in ('US', 'HK'):
+        s = sent.get(region)
+        entry = {
+            "regime": s.regime if s else None,
+            "sentiment_updated_at": s.updated_at.isoformat() if s and s.updated_at else None,
+            "history": False, "prev_regime": None, "changed_on": None,
+            "days_in_regime": None, "confidence": None, "source": None,
+        }
+        if region == 'US' and hmm_rows:
+            latest = hmm_rows[0]
+            run = 0
+            run_start = None
+            prev = None
+            for r in hmm_rows:
+                if r.regime == latest.regime:
+                    run += 1
+                    run_start = r.date
+                else:
+                    prev = r.regime
+                    break
+            entry.update({
+                "history": True,
+                "regime": (s.regime if s else None) or latest.regime,
+                "confidence": float(latest.confidence) if latest.confidence is not None else None,
+                "days_in_regime": run,
+                "prev_regime": prev,
+                "changed_on": str(run_start) if prev is not None else None,
+                "source": "gold.regime_label (HMM, SPY/VIX features, US scope)",
+            })
+        else:
+            entry["source"] = "consumption.market_sentiment (latest-only — no daily history)"
+        regions[region] = entry
+    return {"regions": regions, "as_of": _now_iso()}
+
+
+# Signal freshness for the Top Opportunities panel: the setups table stamps
+# every row with updated_at, but /api/signals/universe does not project it.
+# This read-only lookup serves the signal date for the displayed tickers.
+@router.get("/command/signal-freshness")
+def get_command_signal_freshness(tickers: str = "", db: Session = Depends(get_db)):
+    tl = [t.strip().upper() for t in tickers.split(",") if t.strip()][:50]
+    if not tl:
+        return {"dates": {}, "as_of": _now_iso()}
+    rows = safe_query(db, """
+        SELECT ticker, MAX(updated_at) AS updated_at
+        FROM consumption.signal_setups
+        WHERE UPPER(ticker) = ANY(:t)
+        GROUP BY ticker
+    """, {"t": tl}, label="command_signal_freshness")
+    return {
+        "dates": {r.ticker.upper(): r.updated_at.isoformat() for r in rows if r.updated_at},
+        "as_of": _now_iso(),
+    }

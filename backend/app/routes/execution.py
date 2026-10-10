@@ -73,27 +73,32 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                     if tws_status.get("is_connected"):
                         account_info = _svc.get_account_summary()
                         if account_info:
-                            is_hkd = account_info.get("currency") == "HKD" or account_info.get("cash_hkd", 0) > 0
-                            if is_hkd:
-                                ibkr_data = {
-                                    "ibkr_connected": True, "account_currency": "HKD",
-                                    "account_balance": account_info.get("cash_hkd", 0) or account_info.get("available_funds_hkd", 0),
-                                    "net_liquidation": account_info.get("net_liquidation_hkd", 0) or account_info.get("net_liquidation", 0),
-                                    "buying_power": account_info.get("buying_power_hkd", 0) or account_info.get("buying_power", 0),
-                                    "account": account_info.get("account", "Unknown"),
-                                    "account_type": "LIVE" if current_mode == "LIVE_TRADING" else "PAPER",
-                                    "session": session_name,
-                                }
-                            else:
-                                ibkr_data = {
-                                    "ibkr_connected": True, "account_currency": account_info.get("currency", "USD"),
-                                    "account_balance": account_info.get("available_funds", 0),
-                                    "net_liquidation": account_info.get("net_liquidation", 0),
-                                    "buying_power": account_info.get("buying_power", 0),
-                                    "account": account_info.get("account", "Unknown"),
-                                    "account_type": "LIVE" if current_mode == "LIVE_TRADING" else "PAPER",
-                                    "session": session_name,
-                                }
+                            # Currency-labeled contract (t_22dee93d): every
+                            # figure carries its own currency + a USD
+                            # conversion from the payload's ExchangeRate rows.
+                            # No `hkd or usd` cross-currency fallbacks.
+                            ibkr_data = {
+                                "ibkr_connected": True,
+                                "account_currency": account_info.get("base_currency"),
+                                "account_balance": account_info.get("available_funds"),
+                                "account_balance_currency": account_info.get("available_funds_currency"),
+                                "account_balance_usd": account_info.get("available_funds_usd"),
+                                "net_liquidation": account_info.get("net_liquidation"),
+                                "net_liquidation_currency": account_info.get("net_liquidation_currency"),
+                                "net_liquidation_usd": account_info.get("net_liquidation_usd"),
+                                "buying_power": account_info.get("buying_power"),
+                                "buying_power_currency": account_info.get("buying_power_currency"),
+                                "buying_power_usd": account_info.get("buying_power_usd"),
+                                "cash_hkd": account_info.get("cash_hkd"),
+                                "cash_usd": account_info.get("cash_usd"),
+                                "cash_total": account_info.get("cash_total"),
+                                "cash_total_currency": account_info.get("cash_total_currency"),
+                                "fx": account_info.get("fx"),
+                                "fx_error": account_info.get("fx_error"),
+                                "account": account_info.get("account", "Unknown"),
+                                "account_type": "LIVE" if current_mode == "LIVE_TRADING" else "PAPER",
+                                "session": session_name,
+                            }
                             _ibkr_balance_cache["data"] = ibkr_data
                             _ibkr_balance_cache["timestamp"] = now
                             _ibkr_balance_cache["session"] = session_name

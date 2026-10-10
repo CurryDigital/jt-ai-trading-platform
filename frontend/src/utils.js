@@ -3,6 +3,25 @@ import { useState, useEffect, useRef } from 'react';
 // Utils - Compact formatting functions
 export const fmt = (n, d = 2) => n == null || isNaN(n) ? '—' : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 export const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(0)}`;
+// Currency-aware money formatting (t_22dee93d): NEVER render an account
+// figure with '$' unless it is USD-labeled. Conversion itself is backend-only
+// (app/services/fx.py / qr_etl conversion layer); the frontend only renders
+// backend-labeled values. Unlabeled -> explicit marker, never a bare '$'.
+export const CCY_SYMBOL = { USD: '$', HKD: 'HK$', CNY: 'CN¥', EUR: '€', GBP: '£', JPY: '¥' };
+export const fmtKCcy = (n, ccy) => {
+  if (n == null) return '—';
+  const sym = CCY_SYMBOL[ccy];
+  const core = Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${Number(n).toFixed(0)}`;
+  if (sym) return `${sym}${core}`;
+  return ccy ? `${core} ${ccy}` : `${core} (ccy unlabeled)`;
+};
+export const fmtCcy = (n, ccy, d = 0) => {
+  if (n == null) return '—';
+  const sym = CCY_SYMBOL[ccy];
+  const core = Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+  if (sym) return `${sym}${core}`;
+  return ccy ? `${core} ${ccy}` : `${core} (ccy unlabeled)`;
+};
 export const fmtPct = (n) => n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 export const pnlCl = (v) => v == null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
 export const pnlBg = (v) => v == null ? 'bg-slate-800' : v >= 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10';

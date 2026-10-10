@@ -3797,37 +3797,33 @@ def get_global_execution_mode(db: Session = Depends(get_db)):
                         account_info = ib_quant_service.get_account_summary()
 
                         if account_info:
-                            # Check if this is an HKD account
-                            is_hkd = account_info.get("currency") == "HKD" or account_info.get("cash_hkd", 0) > 0
-
-                            if is_hkd:
-                                # Use HKD values for HK accounts
-                                ibkr_data = {
-                                    "ibkr_connected": True,
-                                    "account_currency": "HKD",
-                                    "account_balance": account_info.get("cash_hkd", 0) or account_info.get("available_funds_hkd", 0),
-                                    "account_balance_hkd": account_info.get("cash_hkd", 0) or account_info.get("available_funds_hkd", 0),
-                                    "account_balance_usd": account_info.get("available_funds", 0),
-                                    "net_liquidation": account_info.get("net_liquidation_hkd", 0) or account_info.get("net_liquidation", 0),
-                                    "buying_power": account_info.get("buying_power_hkd", 0) or account_info.get("buying_power", 0),
-                                    "excess_liquidity": account_info.get("excess_liquidity_hkd", 0) or account_info.get("excess_liquidity", 0),
-                                    "account": account_info.get("account", "Unknown"),
-                                    "account_type": "PAPER" if current_mode == "PAPER_TRADING" else "LIVE"
-                                }
-                            else:
-                                # Use USD values (default)
-                                ibkr_data = {
-                                    "ibkr_connected": True,
-                                    "account_currency": account_info.get("currency", "USD"),
-                                    "account_balance": account_info.get("available_funds", 0),
-                                    "account_balance_hkd": account_info.get("available_funds_hkd", 0),
-                                    "account_balance_usd": account_info.get("available_funds", 0),
-                                    "net_liquidation": account_info.get("net_liquidation", 0),
-                                    "buying_power": account_info.get("buying_power", 0),
-                                    "excess_liquidity": account_info.get("excess_liquidity", 0),
-                                    "account": account_info.get("account", "Unknown"),
-                                    "account_type": "PAPER" if current_mode == "PAPER_TRADING" else "LIVE"
-                                }
+                            # Currency-labeled contract (t_22dee93d) — mirrors
+                            # routes/execution.py global-mode. NOTE: this handler
+                            # is shadowed by the execution router (registered
+                            # first); kept consistent so it can never resurrect
+                            # the HKD-as-USD mislabel.
+                            ibkr_data = {
+                                "ibkr_connected": True,
+                                "account_currency": account_info.get("base_currency"),
+                                "account_balance": account_info.get("available_funds"),
+                                "account_balance_currency": account_info.get("available_funds_currency"),
+                                "account_balance_usd": account_info.get("available_funds_usd"),
+                                "net_liquidation": account_info.get("net_liquidation"),
+                                "net_liquidation_currency": account_info.get("net_liquidation_currency"),
+                                "net_liquidation_usd": account_info.get("net_liquidation_usd"),
+                                "buying_power": account_info.get("buying_power"),
+                                "buying_power_currency": account_info.get("buying_power_currency"),
+                                "buying_power_usd": account_info.get("buying_power_usd"),
+                                "excess_liquidity": account_info.get("excess_liquidity"),
+                                "excess_liquidity_currency": account_info.get("excess_liquidity_currency"),
+                                "excess_liquidity_usd": account_info.get("excess_liquidity_usd"),
+                                "cash_hkd": account_info.get("cash_hkd"),
+                                "cash_usd": account_info.get("cash_usd"),
+                                "fx": account_info.get("fx"),
+                                "fx_error": account_info.get("fx_error"),
+                                "account": account_info.get("account", "Unknown"),
+                                "account_type": "PAPER" if current_mode == "PAPER_TRADING" else "LIVE"
+                            }
 
                             # Update cache
                             _ibkr_balance_cache["data"] = ibkr_data

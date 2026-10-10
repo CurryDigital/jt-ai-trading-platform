@@ -221,7 +221,10 @@ def get_hkex_ipo_subscription(db: Session = Depends(get_db)):
             WHERE s.ticker = c.ticker
             ORDER BY s.listing_date DESC LIMIT 1
         ) s ON TRUE
-        WHERE (d.application_end IS NOT NULL AND d.application_end >= CURRENT_DATE)
+        -- HK public offers close at 12:00 noon HKT on the application_end date
+        -- (= 04:00 UTC). Whole-calendar-day comparison kept an IPO in the
+        -- subscription feed for ~12h after applications actually stopped.
+        WHERE (d.application_end IS NOT NULL AND d.application_end::timestamp + interval '4 hours' > now())
            OR (d.application_end IS NULL AND c.listing_date >= CURRENT_DATE)
         ORDER BY COALESCE(d.application_end, c.listing_date) ASC
         LIMIT 50

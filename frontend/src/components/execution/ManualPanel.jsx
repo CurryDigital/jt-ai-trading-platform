@@ -306,38 +306,38 @@ const MonthlyHeatmap = ({ data, sign, code }) => {
   );
 };
 
-// Unrealized P&L by month-end mark (2026-09-26, per user) — one bar per
-// calendar month from the oldest open position's entry month to now; the
-// current month marks at the latest close, past months at month-end close
-// (same quote source as the live marks). Open book only, native currency.
+// Unrealized P&L by month-end mark (2026-09-26, per user) — FIXED Jan–Dec
+// frame of the current year (12 equal slots, per user 2026-09-29: flex-fill
+// made a 2-month series render two huge bars); months before the oldest
+// entry month and future months stay empty slots. The current month marks at
+// the latest close, past months at month-end close (same quote source as the
+// live marks). Open book only, native currency.
 // Bars are emerald/rose by SIGN (signed-value convention); height is
 // relative to the max |month| in the visible series, exact value on hover.
+// NOTE: slots are the current calendar year — a position entered in a prior
+// year would have its pre-January months outside this frame (not possible
+// today; the manual book started 2026-09).
 const UnrealizedMonthlyChart = ({ data, sign, code }) => {
   const cells = data || {};
   const keys = Object.keys(cells).sort();
   if (!keys.length) return null;
   const now = new Date();
-  const curYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const curY = now.getFullYear();
+  const curYm = `${curY}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const seq = [];
-  {
-    let [y, m] = keys[0].split('-').map(Number);
-    while (`${y}-${String(m).padStart(2, '0')}` <= curYm && seq.length < 240) {
-      seq.push(`${y}-${String(m).padStart(2, '0')}`);
-      m += 1; if (m === 13) { y += 1; m = 1; }
-    }
-  }
-  const maxAbs = Math.max(...seq.map(k => Math.abs(cells[k] ?? 0)), 1e-9);
+  for (let m = 1; m <= 12; m++) seq.push(`${curY}-${String(m).padStart(2, '0')}`);
+  const maxAbs = Math.max(...keys.map(k => Math.abs(cells[k] ?? 0)), 1e-9);
   const cur = cells[curYm];
   return (
     <div className="px-2 pt-2">
       <div className="flex items-center justify-between pb-1">
         <span className="qr-label">Unrealized P&amp;L · Monthly</span>
-        <span className={`text-[9px] font-mono ${cur != null ? pnlCl(cur) : 'text-slate-600'}`}
+        <span className={`text-[9px] font-mono ${cur != null ? pnlCl(cur) : 'text-slate-400'}`}
           title={`Open book marked at each month-end close (current month = latest close), in ${code}. Reconstructed from daily closes — same quote source as the live marks.`}>
           {cur != null ? `now ${fmtCcy(cur, sign)}` : `month-end marks · ${code}`}
         </span>
       </div>
-      <div className="flex items-stretch gap-px h-14">
+      <div className="flex items-stretch gap-px h-12">
         {seq.map((k) => {
           const v = cells[k];
           const h = v != null ? Math.max(Math.abs(v) / maxAbs * 50, 2) : 0;
@@ -347,7 +347,7 @@ const UnrealizedMonthlyChart = ({ data, sign, code }) => {
               title={v != null ? `${MONTH_NAMES[m - 1]} ${y} · ${fmtCcy(v, sign)}` : `${MONTH_NAMES[m - 1]} ${y} · no mark`}>
               <div className="absolute left-0 right-0 top-1/2 border-t border-white/[0.08]" />
               {v != null && (
-                <div className={`absolute left-0 right-0 mx-px ${v >= 0 ? 'bottom-1/2 bg-emerald-500/40' : 'top-1/2 bg-rose-500/40'}`}
+                <div className={`absolute left-[15%] right-[15%] ${v >= 0 ? 'bottom-1/2 bg-emerald-500/40' : 'top-1/2 bg-rose-500/40'}`}
                   style={{ height: `${h}%` }} />
               )}
             </div>
@@ -358,8 +358,8 @@ const UnrealizedMonthlyChart = ({ data, sign, code }) => {
         {seq.map((k) => {
           const [y, m] = k.split('-').map(Number);
           return (
-            <div key={k} className="flex-1 min-w-0 text-center font-mono text-[8px] text-slate-600">
-              {MONTH_LETTERS[m - 1]}{m === 1 || k === seq[0] ? <span className="text-slate-700">{`'${String(y).slice(2)}`}</span> : null}
+            <div key={k} className={`flex-1 min-w-0 text-center font-mono text-[8px] ${k === curYm ? 'text-slate-300' : 'text-slate-400'}`}>
+              {MONTH_LETTERS[m - 1]}{m === 1 ? <span className="text-slate-500">{`'${String(y).slice(2)}`}</span> : null}
             </div>
           );
         })}

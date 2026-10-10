@@ -805,7 +805,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                     <thead className="sticky top-0 bg-slate-900 z-10">
                       <tr className="border-b border-white/[0.06]">
                         <th className="qr-label text-left py-1 px-2">Ticker</th>
-                        <th className="qr-label text-left py-1 px-2">Entry</th>
+                        <th className="qr-label text-right py-1 px-2">Entry</th>
                         <th className="qr-label text-right py-1 px-2">Entry px</th>
                         <th className="qr-label text-right py-1 px-2" title="Latest close (silver.unified_prices, gold.daily_ohlcv fallback)">Current px</th>
                         <th className="qr-label text-right py-1 px-2" title="Calendar days held at the backtest as-of date">Days</th>
@@ -841,8 +841,8 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                   <table className="w-full">
                     <thead className="sticky top-0 bg-slate-900 z-10">
                       <tr className="border-b border-white/[0.06]">
-                        <th className="qr-label text-left py-1 px-2">Entry</th>
-                        <th className="qr-label text-left py-1 px-2">Exit</th>
+                        <th className="qr-label text-right py-1 px-2">Entry</th>
+                        <th className="qr-label text-right py-1 px-2">Exit</th>
                         <th className="qr-label text-left py-1 px-2">Ticker</th>
                         <th className="qr-label text-right py-1 px-2">Entry px</th>
                         <th className="qr-label text-right py-1 px-2">Exit px</th>
@@ -885,9 +885,9 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                           <th className="qr-label text-left py-1 px-2">Decision</th>
                           <th className="qr-label text-left py-1 px-2">Ticker</th>
                           <th className="qr-label text-left py-1 px-2">Name</th>
-                          <th className="qr-label text-left py-1 px-2">Listing</th>
-                          <th className="qr-label text-left py-1 px-2" title="20th trading day after listing (measured close date; calendar estimate until then)">Entry +20td</th>
-                          <th className="qr-label text-left py-1 px-2">Exit +40td</th>
+                          <th className="qr-label text-right py-1 px-2">Listing</th>
+                          <th className="qr-label text-right py-1 px-2" title="20th trading day after listing (measured close date; calendar estimate until then)">Entry +20td</th>
+                          <th className="qr-label text-right py-1 px-2">Exit +40td</th>
                           <th className="qr-label text-right py-1 px-2" title="Retail oversubscription — the 100–500x band is the trade filter">Oversub</th>
                         </tr>
                       </thead>

@@ -1,37 +1,43 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { api, usePoll, fmtK, fmtPct, fmtAge, pnlCl, marketClock, marketStatus } from '../utils';
-import { FR, FR_NAME, PANEL_SOURCES, panelFreshness, useFreshness, fmtAgeSec, useBarQuality, barQualityView } from '../freshness';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { api, usePoll, fmtK, fmtKCcy, fmtCcy, fmtPct, fmtAge, pnlCl, marketClock, marketStatus } from '../utils';
+import { FR, FR_NAME, PANEL_SOURCES, panelFreshness, useFreshness, fmtAgeSec } from '../freshness';
 
-// Command home — 2026-08-20 redesign. Priority: what am I making/losing,
-// where's my cash, what's working, what to buy next.
-//   1) P&L by Mode (hero; 4 clickable book selectors SIM/PAPER/UAT/LIVE)
-//   2) Selected Book (per-mode stats + curve, follows the card clicked above)
-//   3) Regime Forecast + Top Opportunities
-//   4) Order Book                  5) Market Status (compact strip)
-//   6) Action Center (attention queue)
-// Cut vs. previous layout: Strategy Pipeline funnel + Deployed Health table
-// (redundant with P&L by Mode; they live on the Strategies tab), the monthly
-// P&L panel, and the paper-book-by-asset strip. 2026-09-18: strategy-name
-// chips removed from the mode cards (front-page clutter).
-
+// Command home — 2026-09-18 redesign (v2). Layout top-to-bottom:
+//   1) Market status strip (slim: indices + sparklines, VIX, US/HK F&G)
+//   2) Environment cards SIM / PAPER / UAT / LIVE (clickable book selectors)
+//   3) Selected book: full-width cumulative realized P&L chart + KPI row
+//      (win rate, open positions, today, cumulative P&L) under it
+//   4) Regime Forecast + Top Opportunities (side by side)
+//   5) Order Book
+// The Action Center moved to Settings ▸ Alerts (components/ActionCenter.jsx);
+// a severity-colored alert badge in the global header links to it.
+//
 // Restrained palette: colour carries meaning only.
 //   rose  = critical severity   emerald/rose text = signed P&L (via pnlCl)
 //   blue  = interactive links   everything else = neutral slate/white
-const SEV_STYLE = {
-  critical: { border: 'border-l-rose-500', bg: 'bg-rose-500/[0.06]', tag: 'text-rose-300 bg-rose-500/15' },
-  warning:  { border: 'border-l-slate-500', bg: '', tag: 'text-slate-300 bg-white/[0.07]' },
-  info:     { border: 'border-l-slate-700', bg: '', tag: 'text-slate-400 bg-white/[0.05]' },
-};
-const SEV_RANK = { critical: 0, warning: 1, info: 2 };
 
+// Cumulative P&L chart. Width tracks the container via ResizeObserver so the
+// chart truly spans the full page width (a fixed viewBox + preserveAspectRatio
+// would letterbox); height stays fixed.
 function EquityCurve({ data, color, emptyLabel = 'No equity history yet' }) {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(600);
+  useEffect(() => {
+    if (!ref.current) return undefined;
+    const ro = new ResizeObserver((entries) => {
+      setWidth(Math.max(320, Math.round(entries[0].contentRect.width)));
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+
   if (!data || data.length < 2) {
     return <div className="h-32 flex items-center justify-center text-[11px] text-slate-600">{emptyLabel}</div>;
   }
-  const margin = { left: 42, right: 8, top: 8, bottom: 22 };
+  const margin = { left: 46, right: 10, top: 8, bottom: 22 };
   const values = data.map(d => d.equity);
   const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
-  const w = 600, h = 172;
+  const w = width, h = 190;
   const plotW = w - margin.left - margin.right;
   const plotH = h - margin.top - margin.bottom;
   const x = (i) => margin.left + (i / (values.length - 1)) * plotW;
@@ -46,32 +52,34 @@ function EquityCurve({ data, color, emptyLabel = 'No equity history yet' }) {
     return d.date.getMonth() !== prev.getMonth() || d.date.getFullYear() !== prev.getFullYear();
   });
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" className="w-full block" style={{ height: h }}>
-      <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.28" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[0, 0.5, 1].map(f => {
-        const gy = margin.top + plotH * f;
-        return <line key={f} x1={margin.left} y1={gy} x2={margin.left + plotW} y2={gy} stroke="rgba(255,255,255,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />;
-      })}
-      <polygon points={area} fill={`url(#${id})`} />
-      <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-      <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      <line x1={margin.left} y1={margin.top + plotH} x2={margin.left + plotW} y2={margin.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      {yTicks.map((v, i) => (
-        <text key={i} x={margin.left - 5} y={y(v) + 3} textAnchor="end" fill="rgba(148,163,184,0.7)" fontSize="8" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
-          {fmtK(v)}
-        </text>
-      ))}
-      {monthTicks.map((t, i) => (
-        <text key={i} x={x(t.i)} y={h - 6} textAnchor="middle" fill="rgba(148,163,184,0.7)" fontSize="8" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
-          {t.date.toLocaleDateString('en-US', { month: 'short' })}
-        </text>
-      ))}
-    </svg>
+    <div ref={ref}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full block" style={{ height: h }}>
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, 0.5, 1].map(f => {
+          const gy = margin.top + plotH * f;
+          return <line key={f} x1={margin.left} y1={gy} x2={margin.left + plotW} y2={gy} stroke="rgba(255,255,255,0.08)" strokeWidth="1" vectorEffect="non-scaling-stroke" />;
+        })}
+        <polygon points={area} fill={`url(#${id})`} />
+        <polyline points={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        <line x1={margin.left} y1={margin.top + plotH} x2={margin.left + plotW} y2={margin.top + plotH} stroke="rgba(255,255,255,0.15)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        {yTicks.map((v, i) => (
+          <text key={i} x={margin.left - 5} y={y(v) + 3} textAnchor="end" fill="rgba(148,163,184,0.8)" fontSize="9" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+            {fmtK(v)}
+          </text>
+        ))}
+        {monthTicks.map((t, i) => (
+          <text key={i} x={x(t.i)} y={h - 6} textAnchor="middle" fill="rgba(148,163,184,0.8)" fontSize="9" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+            {t.date.toLocaleDateString('en-US', { month: 'short' })}
+          </text>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -268,94 +276,205 @@ const ModePanel = ({ label, modeKey, m, fresh, selected, onSelect }) => {
 };
 
 // ---------------------------------------------------------------------------
-// ZONE 3a — Regime Forecast (7-day risk-on bars per market)
+// ZONE 3a — Regime Forecast (redesign 2026-09-18).
+// Data truth (traced, not assumed):
+//   current regime label  — consumption.market_sentiment (canonical, US + HK)
+//   probability           — HMM posterior, gold.regime_label (US scope only,
+//                           SPY/VIX features; labels in the data: TREND,
+//                           MEAN_REV, CARRY, EVENT, FLAT — HK has no posterior)
+//   change vs yesterday   — /api/command/regime-change (US HMM daily history;
+//                           HK market_sentiment is latest-only → honest note)
+//   7-day strip           — consumption.macro_regime_7d, method=momentum_nowcast
+//                           (risk-on % per calendar day; HK currently emits a
+//                           flat carry-forward — flagged in the cell tooltip)
+// Only real labels are rendered; every panel names its model source in a
+// tooltip.
 // ---------------------------------------------------------------------------
-const REGIME_LABEL_CL = { 'Risk-On': 'text-emerald-400', 'Risk-Off': 'text-rose-400', Neutral: 'text-slate-300' };
+const REGIME_MEANING = {
+  TREND: 'Trending tape — momentum and trend-following books should keep working; fade entries get run over.',
+  MEAN_REV: 'Mean-reverting tape — moves fade; breakout entries underperform.',
+  CARRY: 'Carry / range tape — low-vol grind; income-style books favoured over breakouts.',
+  EVENT: 'Event-driven stress — expect gaps and vol spikes; gross exposure earns less.',
+  FLAT: 'No dominant regime — weak signal environment; neutral sizing.',
+};
 
-const RegimeBars = ({ region, fc }) => {
+const RISK_CELL = (v) => v == null ? 'bg-white/[0.04] text-slate-600'
+  : v >= 60 ? 'bg-emerald-500/15 text-emerald-300'
+  : v <= 40 ? 'bg-rose-500/15 text-rose-300'
+  : 'bg-white/[0.06] text-slate-300';
+
+const fmtConf = (c) => c == null ? '—' : c >= 0.99995 ? '>99.99%' : `${(c * 100).toFixed(1)}%`;
+
+const RegimeRegion = ({ region, fc, chg }) => {
   const days = fc?.days || [];
+  const regime = chg?.regime ?? null;
+  const allSame = days.length > 1 && days.every(d => d.risk_on === days[0].risk_on);
+  // What changed vs yesterday: run length 1 = changed today, 2 = changed
+  // yesterday, longer = unchanged. No history → honest note.
+  let changeLine = null;
+  if (chg) {
+    if (!chg.history) {
+      changeLine = 'no daily history — latest snapshot only';
+    } else if (chg.prev_regime == null) {
+      changeLine = `${regime} for ${chg.days_in_regime ?? '—'}+ days (120d window)`;
+    } else if (chg.days_in_regime === 1) {
+      changeLine = `changed today: ${chg.prev_regime} → ${regime}`;
+    } else {
+      changeLine = `${chg.prev_regime} → ${regime} on ${chg.changed_on} · ${chg.days_in_regime}d in regime`;
+    }
+  }
   return (
     <div className="px-3 py-2.5">
-      <div className="flex items-baseline justify-between mb-1.5">
-        <span className="flex items-center gap-2">
+      <div className="flex items-baseline justify-between flex-wrap gap-1">
+        <span className="flex items-baseline gap-2">
           <span className="font-mono text-[11px] font-black text-white">{region}</span>
-          <span className={`text-[10px] font-bold ${REGIME_LABEL_CL[fc?.label] || 'text-slate-500'}`}>{fc?.label ?? '—'}</span>
+          <span className="text-[13px] font-bold text-slate-100" title={chg?.source || ''}>
+            {regime ?? '—'}
+          </span>
         </span>
-        <span className="font-mono text-[10px] text-slate-400" title="Latest 7-day risk-on probability (momentum_nowcast)">
-          {fc?.latest != null ? `${fc.latest.toFixed(0)}% risk-on` : '—'}
+        <span className="font-mono text-[10px] text-slate-400"
+          title={region === 'US' ? 'HMM posterior probability of the current regime (gold.regime_label)' : 'No regime posterior for HK — the HMM is US-scope (SPY/VIX features)'}>
+          P {fmtConf(chg?.confidence)}
         </span>
       </div>
+      <div className="text-[10px] text-slate-400 mt-1 leading-snug">
+        {regime ? REGIME_MEANING[regime] || 'Regime label without a glossary entry.' : '—'}
+      </div>
+      <div className="text-[9px] font-mono text-slate-500 mt-1" title={chg?.source || ''}>
+        {changeLine ?? '—'}
+      </div>
       {days.length > 0 ? (
-        <div className="relative">
-          {/* neutral 50% gridline */}
-          <div className="absolute left-0 right-0 border-t border-dashed border-white/[0.15]" style={{ bottom: '50%' }} />
-          <div className="flex items-end gap-1 h-[64px]">
+        <div className="mt-2">
+          <div className="grid grid-cols-7 gap-1">
             {days.map((d, i) => (
-              <div key={d.date || i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.date ?? ''} · ${d.risk_on != null ? `${d.risk_on.toFixed(1)}%` : '—'} risk-on`}>
-                <div className={`w-full rounded-sm ${i === 0 ? 'bg-slate-200' : 'bg-slate-600'}`}
-                  style={{ height: `${Math.max(2, Math.min(100, d.risk_on ?? 0))}%` }} />
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-1 mt-1">
-            {days.map((d, i) => (
-              <div key={d.date || i} className="flex-1 text-center text-[8px] font-mono text-slate-500">
-                {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'narrow' }) : '·'}
+              <div key={d.date || i}
+                className={`rounded px-0.5 py-1 text-center ${RISK_CELL(d.risk_on)}`}
+                title={`${d.date ?? ''} · ${d.risk_on != null ? `${d.risk_on.toFixed(1)}%` : '—'} risk-on — momentum_nowcast (consumption.macro_regime_7d)${allSame ? ' · flat carry-forward nowcast' : ''}`}>
+                <div className="text-[8px] font-mono opacity-80">
+                  {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }) : '·'}
+                </div>
+                <div className="text-[8px] font-mono opacity-60">
+                  {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
+                </div>
+                <div className="text-[10px] font-mono font-bold mt-0.5">
+                  {d.risk_on != null ? `${d.risk_on.toFixed(0)}%` : '—'}
+                </div>
               </div>
             ))}
           </div>
         </div>
       ) : (
-        <div className="h-[64px] flex items-center justify-center text-[10px] text-slate-600">no forecast</div>
+        <div className="h-[52px] flex items-center justify-center text-[10px] text-slate-600">no forecast</div>
       )}
     </div>
   );
 };
 
-// ---------------------------------------------------------------------------
-// ZONE 3b — Top Opportunities
-// ---------------------------------------------------------------------------
-const MARKET_LABEL = { US: 'US Equity', HK: 'HK Equity', CRYPTO: 'Crypto', FX: 'FX', METAL: 'Metals' };
-
-const Opportunities = ({ picks, navigateToTab, fresh }) => (
-  <Panel title="Top Opportunities" fresh={fresh} action={
-    <span className="flex items-center gap-2">
-      <span className="text-[9px] text-slate-600" title="Best BUY candidate per asset class, ranked by conviction score (consumption.signal_setups)">best per class</span>
-      <LinkBtn onClick={() => navigateToTab('research')}>Signals →</LinkBtn>
+const RegimePanel = ({ fc, chg, fresh }) => (
+  <Panel title="Regime Forecast" fresh={fresh} action={
+    <span className="text-[9px] text-slate-600"
+      title="Current regime: consumption.market_sentiment (canonical) + HMM posterior from gold.regime_label (US, SPY/VIX features). 7-day strip: momentum_nowcast (consumption.macro_regime_7d). Legend: ≥60% risk-on = emerald · ≤40% = rose · else neutral.">
+      HMM daily + 7d nowcast · ≥60% on / ≤40% off
     </span>
   }>
-    <div className="divide-y divide-white/[0.05]">
-      {picks.map((p, i) => (
-        <button key={`${p.market}-${p.ticker}`} onClick={() => navigateToTab('execution')}
-          className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03] text-left"
-          title="Jump to Execution">
-          <span className="font-mono text-[10px] text-slate-600 w-4 flex-none">#{i + 1}</span>
-          <div className="flex-none w-[92px]">
-            <div className="font-mono text-[13px] font-black text-white leading-tight">{p.ticker}</div>
-            <div className="text-[9px] text-slate-500">{MARKET_LABEL[p.market] || p.market}</div>
-          </div>
-          <div className="flex-none w-[86px]">
-            <div className="flex items-baseline gap-1">
-              <span className="font-mono text-[13px] font-bold text-slate-100">{p.potential != null ? p.potential.toFixed(0) : '—'}</span>
-              <span className="text-[8px] text-slate-500">/ 100</span>
-            </div>
-            <div className="h-1 mt-0.5 rounded bg-white/[0.06] overflow-hidden" title="Conviction score (signal_setups.potential)">
-              <div className="h-full bg-slate-300" style={{ width: `${Math.max(0, Math.min(100, p.potential ?? 0))}%` }} />
-            </div>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-bold text-slate-200 truncate">{p.strategyName || '—'}</div>
-            <div className="text-[9px] text-slate-500 truncate">{p.reason}</div>
-          </div>
-          <span className="text-slate-600 flex-none text-[10px]">→</span>
-        </button>
-      ))}
-      {picks.length === 0 && (
-        <div className="py-6 text-center text-[11px] text-slate-600">No active BUY candidates across asset classes</div>
-      )}
+    <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.05]">
+      <RegimeRegion region="US" fc={fc?.US} chg={chg?.US} />
+      <RegimeRegion region="HK" fc={fc?.HK} chg={chg?.HK} />
     </div>
   </Panel>
 );
+
+// ---------------------------------------------------------------------------
+// ZONE 3b — Top Opportunities (redesign 2026-09-18).
+// Score honesty: the displayed score is the signal engine's raw 'potential'
+// field (consumption.signal_setups, 0–100). The pipeline publishes NO formula
+// or component breakdown for it (the note column is empty engine-side), so the
+// UI shows the raw context fields and says what the score is — a heuristic
+// ranking — instead of inventing a decomposition.
+// Held / pending-order flags are a client-side join against the sim book
+// positions (data prop) and the Command order book — no new backend state.
+// ---------------------------------------------------------------------------
+const MARKET_LABEL = { US: 'US Equity', HK: 'HK Equity', CRYPTO: 'Crypto', FX: 'FX', METAL: 'Metals' };
+
+const SCORE_TIP = 'Engine conviction score (consumption.signal_setups.potential, 0–100). '
+  + 'The signal pipeline publishes no formula or component breakdown for this field — '
+  + 'treat it as a heuristic ranking, not a decomposable model output.';
+
+const Opportunities = ({ picks, positions, orders, navigateToTab, fresh }) => {
+  const [open, setOpen] = useState(null);
+  const held = useMemo(() => new Set((positions || []).map(p => p.ticker)), [positions]);
+  const pending = useMemo(() => new Set((orders || []).map(o => o.ticker)), [orders]);
+  return (
+    <Panel title="Top Opportunities" fresh={fresh} action={
+      <span className="flex items-center gap-2">
+        <span className="text-[9px] text-slate-600" title={SCORE_TIP}>best per class · heuristic score ⓘ</span>
+        <LinkBtn onClick={() => navigateToTab('research')}>Signals →</LinkBtn>
+      </span>
+    }>
+      <div className="divide-y divide-white/[0.05]">
+        {picks.map((p, i) => {
+          const isOpen = open === p.ticker;
+          const isHeld = held.has(p.ticker);
+          const hasPending = pending.has(p.ticker);
+          return (
+            <div key={`${p.market}-${p.ticker}`}>
+              <button onClick={() => setOpen(isOpen ? null : p.ticker)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03] text-left"
+                title={isOpen ? 'Collapse detail' : 'Expand score context'}>
+                <span className="font-mono text-[10px] text-slate-600 w-4 flex-none">#{i + 1}</span>
+                <div className="flex-none w-[110px] min-w-0">
+                  <div className="font-mono text-[13px] font-black text-white leading-tight">{p.ticker}</div>
+                  <div className="text-[9px] text-slate-500 truncate" title={p.name || ''}>{p.name || MARKET_LABEL[p.market] || p.market}</div>
+                </div>
+                <div className="flex-none w-[86px]">
+                  <div className="flex items-baseline gap-1" title={SCORE_TIP}>
+                    <span className="font-mono text-[13px] font-bold text-slate-100">{p.potential != null ? p.potential.toFixed(0) : '—'}</span>
+                    <span className="text-[8px] text-slate-500">/ 100</span>
+                  </div>
+                  <div className="h-1 mt-0.5 rounded bg-white/[0.06] overflow-hidden">
+                    <div className="h-full bg-slate-300" style={{ width: `${Math.max(0, Math.min(100, p.potential ?? 0))}%` }} />
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[10px] font-bold text-slate-200 truncate">{p.strategyName || '—'}</div>
+                  <div className="text-[9px] text-slate-500 truncate">{p.reason}</div>
+                </div>
+                <span className="flex-none flex items-center gap-1">
+                  {isHeld && <span className="qr-chip qr-chip-slate" title="Already held in the sim book">held</span>}
+                  {hasPending && <span className="qr-chip qr-chip-slate" title="A working order for this ticker is in the order book">order pending</span>}
+                  <span className="text-slate-600 text-[10px]">{isOpen ? '▾' : '▸'}</span>
+                </span>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-2.5 pt-0.5 pl-9">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded overflow-hidden bg-white/[0.05]">
+                    {[
+                      ['Direction', p.direction || '—'],
+                      ['Signal date', p.signalDate ? `${p.signalDate.slice(0, 10)} ${p.signalDate.slice(11, 16)}Z` : '—'],
+                      ['Price', p.price != null ? `${fmtK(p.price)}` : '—'],
+                      ['1d change', p.changePct != null ? fmtPct(p.changePct) : '—'],
+                    ].map(([l, v]) => (
+                      <div key={l} className="px-2.5 py-1.5 bg-[#10141f]">
+                        <div className="text-[8px] uppercase tracking-wide text-slate-500">{l}</div>
+                        <div className="font-mono text-[11px] font-bold text-white mt-0.5 truncate">{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[9px] text-slate-500 mt-1.5 leading-snug">
+                    <span className="font-bold text-slate-400">Score:</span> {SCORE_TIP}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {picks.length === 0 && (
+          <div className="py-6 text-center text-[11px] text-slate-600">No active BUY candidates across asset classes</div>
+        )}
+      </div>
+    </Panel>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // ZONE 4 — Order Book
@@ -412,7 +531,9 @@ const OrderBook = ({ orders, fresh }) => (
 );
 
 // ---------------------------------------------------------------------------
-// ZONE 5 — Market Status (compact strip; visually quieter than the zones above)
+// ZONE 1 — Market Status strip (slim, top of page): clocks · indices with
+// sparklines · VIX · US + HK Fear & Greed. Breadth detail lives on
+// Research ▸ Macro.
 // ---------------------------------------------------------------------------
 const StripSpark = ({ values }) => {
   if (!values || values.length < 2) return null;
@@ -464,64 +585,40 @@ function MarketStrip({ navigateToTab, fresh }) {
   const indices = Array.isArray(rawIdx) ? rawIdx : [];
   const us = indices.filter(i => i.region === 'US').slice(0, 3);
   const hk = indices.filter(i => i.region === 'HK').slice(0, 2);
-  const breadth = ov?.breadth || {};
   const sentiment = ov?.sentiment || {};
   const usS = sentiment?.us || sentiment;
   const hkS = sentiment?.hk;
-
-  const BreadthMini = ({ label, bd }) => {
-    const total = bd ? (bd.advancing || 0) + (bd.declining || 0) + (bd.unchanged || 0) : 0;
-    return (
-      <span className="flex items-center gap-1.5" title={`${label} breadth: ${bd ? `${bd.advancing || 0} adv / ${bd.declining || 0} dec / ${bd.unchanged || 0} unch` : 'no data'}`}>
-        <span className="text-slate-500">{label}</span>
-        <span className="flex h-1.5 w-16 rounded overflow-hidden bg-white/5">
-          {total > 0 ? (
-            <>
-              <span className="bg-emerald-500/70" style={{ width: `${(bd.advancing / total) * 100}%` }} />
-              <span className="bg-slate-600" style={{ width: `${(bd.unchanged / total) * 100}%` }} />
-              <span className="bg-rose-500/70" style={{ width: `${(bd.declining / total) * 100}%` }} />
-            </>
-          ) : <span className="w-full bg-slate-800" />}
-        </span>
-        <span className="font-mono text-slate-400">{bd ? `${bd.advancing || 0}/${bd.declining || 0}` : '—'}</span>
-      </span>
-    );
-  };
 
   const Divider = () => <span className="w-px self-stretch bg-white/[0.07] flex-none" />;
 
   return (
     <Panel title="Market Status" fresh={fresh} action={<LinkBtn onClick={() => navigateToTab('research')}>Markets →</LinkBtn>}>
-      <div className="flex items-center gap-4 px-3 py-2 overflow-x-auto text-[10px]">
+      <div className="flex items-center gap-4 px-3 py-1.5 overflow-x-auto text-[10px]">
         <Clocks />
         <Divider />
         {[...us, ...hk].map(i => (
           <span key={i.sym} className="flex items-center gap-1.5 flex-none" title={i.name}>
             <span className="font-bold text-slate-200">{i.sym}</span>
-            <span className="font-mono text-slate-300">{i.last != null ? i.last.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'}</span>
+            <span className="font-mono text-slate-200">{i.last != null ? i.last.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'}</span>
             <span className={`font-mono ${pnlCl(i.change_pct ?? i.change_1d)}`}>{fmtPct(i.change_pct ?? i.change_1d)}</span>
             <StripSpark values={i.spark} />
           </span>
         ))}
         <Divider />
-        <BreadthMini label="US" bd={breadth.us} />
-        <BreadthMini label="HK" bd={breadth.hk} />
-        <Divider />
         <span className="flex items-center gap-1.5 flex-none" title="CNN Fear & Greed (US)">
-          <span className="text-slate-500">F&amp;G</span>
+          <span className="text-slate-400">US F&amp;G</span>
           <span className="font-mono text-slate-200">{usS?.fear_greed ?? '—'}</span>
           <span className="text-slate-500">{usS?.fear_greed_label || ''}</span>
         </span>
+        <span className="flex items-center gap-1.5 flex-none" title="Fear & Greed (HK)">
+          <span className="text-slate-400">HK F&amp;G</span>
+          <span className="font-mono text-slate-200">{hkS?.fear_greed ?? '—'}</span>
+          <span className="text-slate-500">{hkS?.fear_greed_label || ''}</span>
+        </span>
         <span className="flex items-center gap-1.5 flex-none" title="CBOE VIX (US)">
-          <span className="text-slate-500">VIX</span>
+          <span className="text-slate-400">VIX</span>
           <span className="font-mono text-slate-200">{usS?.vix ?? '—'}</span>
         </span>
-        {hkS?.fear_greed != null && (
-          <span className="flex items-center gap-1.5 flex-none" title="Fear & Greed (HK)">
-            <span className="text-slate-500">HK F&amp;G</span>
-            <span className="font-mono text-slate-200">{hkS.fear_greed}</span>
-          </span>
-        )}
       </div>
     </Panel>
   );
@@ -544,8 +641,7 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   // book it was fetched for so a stale payload never shows under a new mode.
   const [bookOv, setBookOv] = useState(null);
   const registry = useFreshness();
-  const barQ = useBarQuality();
-  const bqView = barQualityView(barQ.loaded, barQ.bq);
+  const [regimeChg, setRegimeChg] = useState(null);
 
   usePoll(async () => {
     const res = await api.get('/api/command/overview');
@@ -581,6 +677,13 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
     if (res) setRegimeFc(res.markets || {});
   }, 300000);
 
+  // Change-vs-yesterday per region (read-only addition, 2026-09-18): US from
+  // the HMM daily series, HK honestly reports no daily history.
+  usePoll(async () => {
+    const res = await api.get('/api/command/regime-change');
+    if (res) setRegimeChg(res.regions || {});
+  }, 300000);
+
   usePoll(async () => {
     const [u, fams] = await Promise.all([
       api.get('/api/signals/universe?markets=US,HK,CRYPTO,FX,METAL&limit=10'),
@@ -602,130 +705,38 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
       picks.push({
         market: mkt,
         ticker: top.ticker,
+        name: top.name || null,
         potential: top.potential ?? null,
+        direction: top.direction || null,
+        price: top.price ?? null,
+        changePct: top.change_pct ?? null,
         strategyName: fam?.strategy_name || null,
         reason: note || (fam ? `${fam.label} family signal` : `${MARKET_LABEL[mkt] || mkt} BUY signal`),
       });
     }
     picks.sort((a, b) => (b.potential ?? -1) - (a.potential ?? -1));
-    setOppPicks(picks.slice(0, 3));
+    const top3 = picks.slice(0, 3);
+    // Signal dates: the universe endpoint does not project updated_at — the
+    // read-only /api/command/signal-freshness lookup serves it per ticker.
+    const dates = top3.length
+      ? await api.get(`/api/command/signal-freshness?tickers=${top3.map(p => encodeURIComponent(p.ticker)).join(',')}`)
+      : null;
+    const dateMap = dates?.dates || {};
+    setOppPicks(top3.map(p => ({ ...p, signalDate: dateMap[p.ticker.toUpperCase()] || null })));
   }, 120000);
 
   const positions = data?.positions || [];
-  const longMV = positions.filter(p => p.side === 'LONG').reduce((s, p) => s + (p.market_value || 0), 0);
-  const shortMV = positions.filter(p => p.side === 'SHORT').reduce((s, p) => s + (p.market_value || 0), 0);
+  // (longMV/shortMV removed t_22dee93d: `positions` is the all-book list —
+  // a live-book L/S ratio from it mixed books and currencies.)
   const openPnl = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
 
   const account = overview?.account;
   const eqCurve = overview?.equity_curve || [];
   const ret30 = eqCurve.length > 1 ? ((eqCurve[eqCurve.length - 1].equity - eqCurve[0].equity) / eqCurve[0].equity) * 100 : null;
 
-  const strategyRisks = useMemo(() => overview?.strategy_risks || [], [overview]);
-  const monitoringGap = overview?.monitoring_gap || 0;
-
-  // Merged attention queue: strategy risks + monitoring gap + platform items
-  // in ONE panel, sorted by severity then recency. Every item carries a
-  // stable ackKey for server-side ack/snooze, a real action verb, and a
-  // dedup class so same-class rows collapse to one.
-  const attentionItems = useMemo(() => {
-    const items = [];
-    for (const s of strategyRisks) items.push({
-      kind: 'risk', sev: s.sev, tag: 'RISK', title: s.name,
-      triggers: s.triggers || null,
-      fullMetrics: `PF ${s.paper_pf != null ? s.paper_pf.toFixed(2) : '—'} · P&L ${s.paper_pnl >= 0 ? '+' : ''}${fmtK(s.paper_pnl)} · WR ${s.paper_wr}% · ${s.closed_trades} closed`,
-      impact: `PF ${s.paper_pf != null ? s.paper_pf.toFixed(2) : '—'} · P&L ${s.paper_pnl >= 0 ? '+' : ''}${fmtK(s.paper_pnl)} · WR ${s.paper_wr}% · ${s.closed_trades} closed`,
-      ts: null, age: null, strategyId: s.strategy_id, action: 'open',
-      key: `risk-${s.strategy_id}`, ackKey: `risk:${s.strategy_id}`,
-    });
-    if (monitoringGap > 0) items.push({
-      kind: 'gap', sev: 'info', tag: 'GAPS',
-      title: `${monitoringGap} paper strateg${monitoringGap === 1 ? 'y' : 'ies'} not actively monitored`,
-      impact: 'Registry says PAPER but no ACTIVE paper deployment — no live signal tracking running.',
-      ts: null, age: null, target: 'strategies', action: 'open', key: 'gap', ackKey: 'gap:monitoring',
-    });
-    for (const a of (overview?.attention || [])) {
-      const raw = a.created_at;
-      const ts = raw ? new Date(/Z|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw + 'Z').getTime() : null;
-      items.push({
-        kind: 'platform', sev: a.sev, tag: a.tag, title: a.title, impact: a.impact,
-        ts, age: a.age || fmtAge(a.created_at), target: a.target,
-        action: a.action || 'open', refId: a.ref_id,
-        key: `plat-${a.id || a.ref_id || a.title}`, ackKey: a.id ? String(a.id) : null,
-      });
-    }
-    // Yahoo suspect-bar guard (bar_quality, t_285be732): YELLOW is a SOFT
-    // warning — never critical, episodes can self-heal as Yahoo backfills
-    // real bars. Client-side item (no ackKey → not dismissible; it clears
-    // itself when the 30d window heals). UNKNOWN/null is NOT surfaced here —
-    // the Settings badge carries that state; the queue stays for real signal.
-    if (bqView.level === 'YELLOW') {
-      const bq = barQ.bq || {};
-      const tickers = bq.recent_30d_tickers || [];
-      items.push({
-        kind: 'platform', sev: 'warning', tag: 'DATA',
-        title: `Yahoo suspect bars — ${tickers.join(', ') || 'unknown tickers'}`,
-        impact: `${bq.recent_30d_rows ?? 0} unresolved synthetic zero-volume flat-bar suspects in 30d (latest ${bq.latest_suspect_date ?? '—'}): ${bq.recent_30d_gold_rows ?? 0} pre-guard gold rows + ${bq.recent_30d_quarantined_rows ?? 0} quarantined post-guard. Soft warning — can self-heal as Yahoo backfills. Source: gold.v_us_equity_bar_quality (qr_etl).`,
-        ts: null, age: null, target: 'settings', action: 'open',
-        key: 'bar-quality', ackKey: null,
-      });
-    }
-    items.sort((x, y) => (SEV_RANK[x.sev] ?? 9) - (SEV_RANK[y.sev] ?? 9) || (y.ts ?? -1) - (x.ts ?? -1));
-    return items;
-  }, [overview, strategyRisks, monitoringGap, bqView.level, barQ.bq]);
-
-  // Server-side dismissals filter the payload already; this set is the
-  // optimistic local removal after the user acks/snoozes in THIS session.
-  const [dismissed, setDismissed] = useState(() => new Set());
-  const [actBusy, setActBusy] = useState(null);   // ackKey currently executing
-  const [actMsg, setActMsg] = useState(null);     // {ackKey, ok, text}
-  const visibleItems = useMemo(
-    () => attentionItems.filter(a => !a.ackKey || !dismissed.has(a.ackKey)),
-    [attentionItems, dismissed],
-  );
-
-  // Dedup by class: '<source> feed is stale' rows collapse into one group row
-  // with a disclosure triangle; other classes stay individual.
-  const alertClass = (a) =>
-    (a.kind === 'platform' && / feed is stale$/i.test(a.title)) ? 'feed-stale' : `solo:${a.key}`;
-  const attentionGroups = useMemo(() => {
-    const order = [], byClass = new Map();
-    for (const a of visibleItems) {
-      const k = alertClass(a);
-      if (!byClass.has(k)) { byClass.set(k, []); order.push(k); }
-      byClass.get(k).push(a);
-    }
-    return order.map(k => byClass.get(k));
-  }, [visibleItems]);
-  const [openGroups, setOpenGroups] = useState(() => new Set());
-  const toggleGroup = (k) => setOpenGroups(prev => {
-    const n = new Set(prev);
-    n.has(k) ? n.delete(k) : n.add(k);
-    return n;
-  });
-
-  const dismissAlert = async (targets, action) => {
-    const keys = targets.map(a => a.ackKey).filter(Boolean);
-    if (!keys.length) return;
-    for (const k of keys) {
-      await api.post('/api/command/alerts/ack', { alert_key: k, action, snooze_minutes: 60 });
-    }
-    setDismissed(prev => new Set([...prev, ...keys]));
-  };
-
-  const ACT_LABEL = { reconnect: 'Reconnect', flatten: 'Flatten', open: 'Open' };
-  const runAction = async (a) => {
-    if (a.action === 'reconnect') {
-      setActBusy(a.ackKey || a.key);
-      const res = await api.post('/api/ib/tws/connect', {});
-      setActBusy(null);
-      setActMsg({ key: a.ackKey || a.key, ok: !!(res && res.success !== false), text: res && (res.message || res.status) ? String(res.message || res.status) : (res ? 'connect requested' : 'request failed') });
-      return;
-    }
-    if (a.strategyId) onSelectStrategy?.(a.strategyId);
-    else navigateToTab(a.target || 'command');
-  };
-
-  const sevCounts = visibleItems.reduce((m, a) => ({ ...m, [a.sev]: (m[a.sev] || 0) + 1 }), {});
+  // The Action Center (alerts, data quality, approvals/gates) moved to
+  // Settings ▸ Alerts — components/ActionCenter.jsx. The global header badge
+  // in App.jsx surfaces the live alert count.
 
   // Per-panel freshness from the source→panel dependency map (never tagged
   // by hand — panels inherit the worst state of their upstream sources).
@@ -734,7 +745,6 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   const fPnlMode = panelFreshness(PANEL_SOURCES.pnlByMode, registry);
   const fOrders = panelFreshness(PANEL_SOURCES.orderBook, registry);
   const fOpps = panelFreshness(PANEL_SOURCES.opportunities, registry);
-  const fAttention = panelFreshness(PANEL_SOURCES.attention, registry);
   const fRegime = panelFreshness(PANEL_SOURCES.regime, registry);
 
   return (
@@ -746,7 +756,10 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
         </div>
       </div>
 
-      {/* ZONE 1 — P&L by Mode: the most important information on the page.
+      {/* ZONE 1 — Market Status strip (slim, always first) */}
+      <MarketStrip navigateToTab={navigateToTab} fresh={fMarket} />
+
+      {/* ZONE 2 — Environment cards: the most important information on the page.
           Cards are selectors — clicking one re-scopes the book zone below. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {MODE_DEFS.map(md => (
@@ -755,7 +768,8 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
         ))}
       </div>
 
-      {/* ZONE 2 — selected Book: every figure follows the card clicked above */}
+      {/* ZONE 3 — selected Book: full-width chart, KPI row under it.
+          Every figure follows the card clicked above. */}
       {(() => {
         const modeTitle = MODE_DEFS.find(md => md.key === selMode)?.title || selMode;
         const isLive = selMode === 'live';
@@ -763,6 +777,13 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
         // Live book: canonical consumption.account_summary row (verbatim),
         // falling back to the combined aggregate when the live row is absent.
         const acctLive = account?.books?.live || account;
+        // Currency-labeled live book (t_22dee93d): equity_native = account
+        // base currency (HKD), equity_usd = backend-converted via the stored
+        // daily rate (fx_date). The frontend never converts — it only renders
+        // backend-labeled values; missing labels render unlabeled-marked,
+        // never a bare '$'.
+        const liveFx = acctLive?.fx || account?.fx;
+        const curveCcy = overview?.equity_curve_currency;
         // Sim/Paper/UAT: per-book overview (stats + YTD realized curve).
         const bo = bookOv && bookOv.book === selMode ? bookOv.payload : null;
         const st = bo?.stats;
@@ -773,14 +794,17 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
           <span className="qr-label flex items-center gap-2">{modeTitle} Book <FreshTag fresh={fBook} /></span>
           <LinkBtn onClick={() => navigateToTab('execution')}>Portfolio →</LinkBtn>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-3">
+        <div className="space-y-2">
           {isLive ? (
-          <Panel title="Last 30 Sessions" fresh={{ ...fBook, lastKnown: acctLive?.equity != null ? fmtK(acctLive.equity) : '—' }} action={
+          <Panel title={`Last 30 Sessions${curveCcy ? ` · ${curveCcy}` : ''}`} fresh={{ ...fBook, lastKnown: acctLive?.equity != null ? fmtKCcy(acctLive.equity, acctLive.currency) : '—' }} action={
             ret30 != null ? <span className={`qr-num text-[11px] font-bold ${pnlCl(ret30)}`}>{fmtPct(ret30)}</span> : null
           }>
             <div className="px-3.5 pt-2.5 pb-1 flex items-end justify-between">
               <div>
-                <div className="font-mono text-2xl font-black text-white leading-none">{acctLive?.equity != null ? fmtK(acctLive.equity) : '—'}</div>
+                <div className="font-mono text-2xl font-black text-white leading-none">{acctLive?.equity_native != null ? fmtKCcy(acctLive.equity_native, acctLive.native_currency) : acctLive?.equity != null ? fmtKCcy(acctLive.equity, acctLive.currency) : '—'}</div>
+                {acctLive?.equity_usd != null && (
+                  <div className="text-[9px] text-slate-500 mt-0.5">≈ {fmtKCcy(acctLive.equity_usd, 'USD')}{liveFx?.base_per_usd ? ` @ ${Number(liveFx.base_per_usd).toFixed(4)} ${liveFx.base_currency}/USD` : ''}{liveFx?.fx_date ? ` · rate ${liveFx.fx_date}` : ''}</div>
+                )}
                 <div className="text-[10px] text-slate-500 mt-1">{acctLive?.positions ?? positions.length} open positions{acctLive?.cash_pct != null ? ` · ${Math.round(acctLive.cash_pct)}% cash` : ''}</div>
               </div>
               <div className="text-right">
@@ -843,15 +867,15 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
           )}
 
           {isLive ? (
-          /* 2x2 KPI grid: Open P&L · Net Cash Flow · Buying Power · Net Exposure */
-          <FreshWrap fresh={fBook} lastKnown={acctLive?.open_pnl != null ? fmtK(acctLive.open_pnl) : fmtK(openPnl)} className="grid grid-cols-2 gap-2">
+          /* KPI row under the chart: Open P&L · Net Cash Flow · Buying Power · Net Exposure */
+          <FreshWrap fresh={fBook} lastKnown={acctLive?.open_pnl != null ? fmtK(acctLive.open_pnl) : fmtK(openPnl)} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="qr-surface p-2.5 flex flex-col justify-center">
-              <div className="qr-label">Open P&amp;L</div>
+              <div className="qr-label">Open P&amp;L{acctLive?.open_pnl_currency ? ` · ${acctLive.open_pnl_currency}` : ''}</div>
               <div className={`font-mono text-lg font-bold mt-0.5 ${pnlCl(acctLive?.open_pnl ?? openPnl)}`}>
-                {acctLive?.open_pnl != null ? fmtK(acctLive.open_pnl) : fmtK(openPnl)}
+                {acctLive?.open_pnl != null ? fmtKCcy(acctLive.open_pnl, acctLive.open_pnl_currency || acctLive.currency) : fmtKCcy(openPnl, 'USD')}
               </div>
-              {acctLive?.equity ? (
-                <div className="text-[9px] text-slate-500 mt-0.5">{fmtPct(((acctLive.open_pnl ?? openPnl) / acctLive.equity) * 100)}</div>
+              {acctLive?.open_pnl_pct_of_equity != null ? (
+                <div className="text-[9px] text-slate-500 mt-0.5" title="Open P&L (USD, position-derived) ÷ USD equity — same-unit ratio">{fmtPct(acctLive.open_pnl_pct_of_equity)} of equity</div>
               ) : null}
             </div>
 
@@ -887,29 +911,35 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
             })()}
 
             <div className="qr-surface p-2.5 flex flex-col justify-center">
-              <div className="qr-label">Buying Power</div>
+              <div className="qr-label">Buying Power{acctLive?.currency ? ` · ${acctLive.currency}` : ''}</div>
               <div className="font-mono text-lg font-bold mt-0.5 text-white">
-                {acctLive?.buying_power != null ? fmtK(acctLive.buying_power) : '—'}
+                {acctLive?.buying_power != null ? fmtKCcy(acctLive.buying_power, acctLive.currency) : '—'}
               </div>
+              {acctLive?.buying_power_usd != null && acctLive?.currency !== 'USD' && (
+                <div className="text-[9px] text-slate-500 mt-0.5">≈ {fmtKCcy(acctLive.buying_power_usd, 'USD')}{liveFx?.fx_date ? ` · rate ${liveFx.fx_date}` : ''}</div>
+              )}
               {acctLive?.cash_pct != null && (
                 <div className="text-[9px] text-slate-500 mt-0.5">{Number(acctLive.cash_pct).toFixed(1)}% cash</div>
               )}
             </div>
 
             <div className="qr-surface p-2.5 flex flex-col justify-center"
-              title={`Long ${acctLive?.equity ? ((longMV / acctLive.equity) * 100).toFixed(1) : '—'}% vs short ${acctLive?.equity ? ((shortMV / acctLive.equity) * 100).toFixed(1) : '—'}% of equity · gross ${acctLive?.gross_exp_pct != null ? acctLive.gross_exp_pct.toFixed(1) : '—'}%`}>
+              title={`Canonical per-book exposures (consumption.account_summary, live book only) · gross ${acctLive?.gross_exp_pct != null ? acctLive.gross_exp_pct.toFixed(1) : '—'}%`}>
               <div className="qr-label">Net Exposure</div>
               <div className={`font-mono text-lg font-bold mt-0.5 ${acctLive?.net_exp_pct != null ? pnlCl(acctLive.net_exp_pct) : 'text-slate-600'}`}>
                 {acctLive?.net_exp_pct != null ? `${acctLive.net_exp_pct >= 0 ? '+' : ''}${acctLive.net_exp_pct.toFixed(1)}%` : '—'}
               </div>
+              {/* No L/S split here: the positions prop is the ALL-book list
+                  (77 paper + 7 live), so a client-side long/short ÷ live
+                  equity mixes books AND currencies — the old '88%' was an
+                  accident of the combined-equity denominator (t_22dee93d). */}
               <div className="text-[9px] text-slate-500 mt-0.5">
-                gross {acctLive?.gross_exp_pct != null ? `${acctLive.gross_exp_pct.toFixed(1)}%` : '—'}
-                {acctLive?.equity ? ` · L ${((longMV / acctLive.equity) * 100).toFixed(0)}% / S ${((shortMV / acctLive.equity) * 100).toFixed(0)}%` : ''}
+                gross {acctLive?.gross_exp_pct != null ? `${acctLive.gross_exp_pct.toFixed(1)}%` : '—'} · live book only
               </div>
             </div>
           </FreshWrap>
           ) : isUat ? (
-          <FreshWrap fresh={fBook} className="grid grid-cols-2 gap-2">
+          <FreshWrap fresh={fBook} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <KpiTile label="Total Fills" value={st?.total_fills ?? '—'} sub={`${st?.ytd_trades ?? 0} this year`}
               tip="Broker-rehearsal fills (gold.paper_uat_fills) — fills, not round-trips" />
             <KpiTile label="Fills Today" value={st?.today?.trades ?? 0} />
@@ -918,7 +948,7 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
               tip="A per-strategy UAT round-trip P&L ledger is qr_etl's domain — never derived serve-time" />
           </FreshWrap>
           ) : (
-          <FreshWrap fresh={fBook} lastKnown={st?.cum_pnl != null ? fmtK(st.cum_pnl) : '—'} className="grid grid-cols-2 gap-2">
+          <FreshWrap fresh={fBook} lastKnown={st?.cum_pnl != null ? fmtK(st.cum_pnl) : '—'} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <KpiTile label="Win Rate" value={st?.win_rate != null ? `${st.win_rate}%` : '—'}
               valueCl={st?.win_rate != null ? 'text-white' : 'text-slate-600'}
               sub={`${st?.closed_trades ?? 0} closed all-time`} tip="Wins / closed trades" />
@@ -935,113 +965,15 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
         );
       })()}
 
-      {/* ZONE 3 — Regime Forecast + Top Opportunities (~45/55) */}
-      <div className="grid grid-cols-1 lg:grid-cols-[0.82fr_1fr] gap-3">
-        <Panel title="Regime Forecast" fresh={fRegime} action={
-          <span className="text-[9px] text-slate-600" title="7-day risk-on probability, momentum_nowcast (consumption.macro_regime_7d). Dashed line = neutral 50%.">7d risk-on · 50% = neutral</span>
-        }>
-          <div className="grid grid-cols-2 divide-x divide-white/[0.05]">
-            <RegimeBars region="US" fc={regimeFc?.US} />
-            <RegimeBars region="HK" fc={regimeFc?.HK} />
-          </div>
-        </Panel>
-        <Opportunities picks={oppPicks} navigateToTab={navigateToTab} fresh={fOpps} />
+      {/* ZONE 4 — Regime Forecast + Top Opportunities, side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <RegimePanel fc={regimeFc} chg={regimeChg} fresh={fRegime} />
+        <Opportunities picks={oppPicks} positions={positions} orders={orders || []} navigateToTab={navigateToTab} fresh={fOpps} />
       </div>
 
-      {/* ZONE 4 — Order Book */}
+      {/* ZONE 5 — Order Book */}
       <OrderBook orders={orders || []} fresh={fOrders} />
 
-      {/* ZONE 5 — Market Status (compact strip) */}
-      <MarketStrip navigateToTab={navigateToTab} fresh={fMarket} />
-
-      {/* ZONE 6 — Action Center: merged strategy risks + monitoring gap +
-          platform alerts in a single panel, severity then recency. */}
-      <Panel title="Action Center" fresh={fAttention} action={
-        <span className="flex items-center gap-2 whitespace-nowrap">
-          {/* Bar-quality badge (bar_quality from /api/system/freshness).
-              Always rendered so UNKNOWN/PENDING are visible — never
-              silently treated as GREEN. */}
-          <span className={`text-[9px] font-bold ${bqView.badgeCl}`} title={bqView.tip}>
-            Bar quality {bqView.label}
-          </span>
-          {sevCounts.critical > 0 && <span className="text-[9px] font-bold text-rose-400">{sevCounts.critical} critical</span>}
-          {sevCounts.warning > 0 && <span className="text-[9px] font-bold text-slate-400">{sevCounts.warning} warning</span>}
-          {sevCounts.info > 0 && <span className="text-[9px] text-slate-500">{sevCounts.info} info</span>}
-          {visibleItems.length === 0 && <span className="text-[9px] text-slate-500">clear</span>}
-        </span>
-      }>
-        {attentionGroups.map((group, gi) => {
-          const lead = group[0];
-          const isCrit = lead.sev === 'critical';
-          const sv = SEV_STYLE[lead.sev] || SEV_STYLE.info;
-          const grouped = group.length > 1;
-          const gKey = grouped ? alertClass(lead) : null;
-          const expanded = gKey != null && openGroups.has(gKey);
-          const leadId = lead.ackKey || lead.key;
-          const groupTitle = grouped && gKey === 'feed-stale'
-            ? `${group.length} feeds stale — ${group.map(a => a.refId || a.title).join(', ')}`
-            : lead.title;
-          return (
-            <div key={gKey || lead.key} className={gi > 0 ? 'border-t border-t-white/[0.05]' : ''}>
-              <div className={`flex items-center gap-3 px-3 ${isCrit ? 'py-3 border-l-4' : 'py-2 border-l-2'} ${sv.border} ${sv.bg}`}>
-                {grouped && (
-                  <button onClick={() => toggleGroup(gKey)} className="flex-none w-3 text-[10px] text-slate-500 hover:text-slate-300" title="Show individual alerts">{expanded ? '▾' : '▸'}</button>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-[8px] font-black tracking-wide px-1.5 py-0.5 rounded ${sv.tag}`}>{lead.tag}</span>
-                    <button onClick={() => grouped ? toggleGroup(gKey) : runAction(lead)} className={`${isCrit ? 'text-[13px]' : 'text-[12px]'} font-bold text-white truncate hover:opacity-80 text-left`}>{groupTitle}</button>
-                  </div>
-                  {lead.kind === 'risk' && lead.triggers && lead.triggers.length > 0 ? (
-                    <div className="flex items-center gap-1 mt-1 flex-wrap" title={lead.fullMetrics}>
-                      {lead.triggers.map(t => (
-                        <span key={t} className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300">{t}</span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className={`${isCrit ? 'text-[11px]' : 'text-[10px]'} text-slate-500 mt-0.5 truncate`} title={lead.impact}>{lead.impact}</div>
-                  )}
-                  {actMsg && actMsg.key === leadId && (
-                    <div className={`text-[9px] font-mono mt-0.5 ${actMsg.ok ? 'text-teal-400' : 'text-rose-400'}`}>{actMsg.text}</div>
-                  )}
-                </div>
-                <span className="font-mono text-[10px] text-slate-600 flex-none">{lead.age || '—'}</span>
-                <div className="flex-none flex items-center gap-1">
-                  <button onClick={() => runAction(lead)} disabled={actBusy === leadId}
-                    className="text-[10px] font-bold px-2.5 py-1 rounded bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 disabled:opacity-50">
-                    {actBusy === leadId ? '…' : (ACT_LABEL[lead.action] || 'Open')}
-                  </button>
-                  {lead.ackKey && (
-                    <>
-                      <button onClick={() => dismissAlert(group, 'acknowledge')} title="Acknowledge — persists server-side (actor + timestamp)"
-                        className="text-[9px] px-1.5 py-1 rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.05]">Ack</button>
-                      <button onClick={() => dismissAlert(group, 'snooze')} title="Snooze 1h — persists server-side, auto-returns"
-                        className="text-[9px] px-1.5 py-1 rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.05]">Snooze 1h</button>
-                    </>
-                  )}
-                </div>
-              </div>
-              {grouped && expanded && group.map(m => {
-                const mid = m.ackKey || m.key;
-                return (
-                  <div key={m.key} className="flex items-center gap-3 py-1.5 px-3 pl-8 border-l-2 border-l-white/[0.08]">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-mono text-slate-300 truncate">{m.title}</div>
-                      <div className="text-[9px] text-slate-600 truncate" title={m.impact}>{m.impact}</div>
-                    </div>
-                    <span className="font-mono text-[9px] text-slate-600 flex-none">{m.age || '—'}</span>
-                    <button onClick={() => runAction(m)} className="flex-none text-[9px] font-bold px-2 py-0.5 rounded bg-white/[0.05] hover:bg-white/[0.09] text-slate-300">{ACT_LABEL[m.action] || 'Open'}</button>
-                    {m.ackKey && <button onClick={() => dismissAlert([m], 'acknowledge')} className="flex-none text-[9px] px-1.5 py-0.5 rounded text-slate-600 hover:text-slate-300">Ack</button>}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-        {visibleItems.length === 0 && (
-          <div className="py-6 text-center text-[11px] text-slate-600">Nothing needs attention right now</div>
-        )}
-      </Panel>
     </div>
   );
 };

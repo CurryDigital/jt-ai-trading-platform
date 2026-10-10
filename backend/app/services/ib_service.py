@@ -632,7 +632,15 @@ def get_ib_uat_service():
 
 # Legacy compatibility
 def _fetch_account_summary(threaded_svc):
-    """Shared account-summary fetch against a threaded service's IB instance."""
+    """Shared account-summary fetch against a threaded service's IB instance.
+
+    Currency-audit fix (t_22dee93d, 2026-10-10): every value is extracted by
+    explicit (tag, currency) match — no last-row-wins, no unlabeled values.
+    Each figure carries a `*_currency` label, plus a `*_usd` conversion via
+    the shared fx helper (app.services.fx) from the payload's own
+    $LEDGER-ExchangeRate rows. Missing/undetectable rate -> fx=None +
+    fx_error set + logger.error (alert); NEVER a default rate.
+    """
     if not threaded_svc.is_connected:
         logger.warning("Cannot fetch account summary: IBKR not connected")
         return None
@@ -659,41 +667,90 @@ def _fetch_account_summary(threaded_svc):
             logger.error(f"Error fetching account values: {av_err}")
             return None
 
+        from app.services.fx import quote_from_account_values, FxRateUnavailable
+
+        # FX first: the ExchangeRate rows also tell us the account's BASE
+        # currency (the non-BASE row with rate == 1.0). No rate -> error +
+        # alert, no silent USD default.
+        fx_quote = None
+        fx_error = None
+        try:
+            fx_quote = quote_from_account_values(values)
+        except FxRateUnavailable as fx_err:
+            fx_error = str(fx_err)
+            logger.error(f"FX ALERT: account summary has no usable ExchangeRate payload: {fx_err}")
+
+        # Bucket rows by (tag, currency) — explicit, no overwrite-by-iteration.
+        by_pair = {}
+        for v in values:
+            if v.currency:
+                by_pair[(v.tag, v.currency.upper())] = v.value
+
+        def _pick(tag):
+            """Return (value, currency) for a value tag: the BASE-currency row
+            when known, else the sole currency row, else (None, None)."""
+            rows = {c: val for (t, c), val in by_pair.items() if t == tag}
+            if not rows:
+                return None, None
+            if fx_quote and fx_quote.base_currency in rows:
+                c = fx_quote.base_currency
+                return float(rows[c]), c
+            if len(rows) == 1:
+                c, val = next(iter(rows.items()))
+                return float(val), c
+            # Multiple currency rows and no detected base: refuse to guess.
+            logger.error(f"FX ALERT: {tag} has rows in {sorted(rows)} but base currency is unknown")
+            return None, None
+
+        def _usd(value, currency):
+            if value is None or currency is None or fx_quote is None:
+                return None
+            try:
+                return fx_quote.to_usd(value, currency)
+            except FxRateUnavailable:
+                return None
+
+        def _cash(ccy):
+            val = by_pair.get(("$LEDGER-CashBalance", ccy))
+            return float(val) if val is not None else None
+
+        nl, nl_ccy = _pick("NetLiquidation")
+        af, af_ccy = _pick("AvailableFunds")
+        bp, bp_ccy = _pick("BuyingPower")
+        el, el_ccy = _pick("ExcessLiquidity")
+        cash_hkd = _cash("HKD")
+        cash_usd = _cash("USD")
+        cash_total_base = None
+        if fx_quote and (cash_hkd is not None or cash_usd is not None):
+            try:
+                cash_total_base = sum(
+                    fx_quote.convert(v, c, fx_quote.base_currency)
+                    for c, v in (("HKD", cash_hkd), ("USD", cash_usd)) if v is not None
+                )
+            except FxRateUnavailable:
+                cash_total_base = None
+
         result = {
             "account": account,
-            "currency": "USD",
-            "available_funds": 0, "available_funds_hkd": 0,
-            "net_liquidation": 0, "net_liquidation_hkd": 0,
-            "buying_power": 0, "buying_power_hkd": 0,
-            "excess_liquidity": 0, "excess_liquidity_hkd": 0,
-            "cash_hkd": 0,
+            # base currency detected from the payload's ExchangeRate rows;
+            # None when undetectable (fx_error set) — never assumed.
+            "base_currency": fx_quote.base_currency if fx_quote else None,
+            "currency": fx_quote.base_currency if fx_quote else None,
+            "net_liquidation": nl, "net_liquidation_currency": nl_ccy,
+            "available_funds": af, "available_funds_currency": af_ccy,
+            "buying_power": bp, "buying_power_currency": bp_ccy,
+            "excess_liquidity": el, "excess_liquidity_currency": el_ccy,
+            "cash_hkd": cash_hkd, "cash_usd": cash_usd,
+            "cash_total": cash_total_base,
+            "cash_total_currency": fx_quote.base_currency if fx_quote else None,
+            "net_liquidation_usd": _usd(nl, nl_ccy),
+            "available_funds_usd": _usd(af, af_ccy),
+            "buying_power_usd": _usd(bp, bp_ccy),
+            "excess_liquidity_usd": _usd(el, el_ccy),
+            "cash_total_usd": _usd(cash_total_base, fx_quote.base_currency) if fx_quote else None,
+            "fx": fx_quote.public_dict() if fx_quote else None,
+            "fx_error": fx_error,
         }
-        for v in values:
-            if v.tag == "AvailableFunds":
-                result["available_funds"] = float(v.value)
-            elif v.tag == "NetLiquidation":
-                result["net_liquidation"] = float(v.value)
-            elif v.tag == "BuyingPower":
-                result["buying_power"] = float(v.value)
-            elif v.tag == "ExcessLiquidity":
-                result["excess_liquidity"] = float(v.value)
-            elif v.tag == "Currency":
-                result["currency"] = v.value
-            elif v.tag == "AvailableFunds" and v.currency == "HKD":
-                result["available_funds_hkd"] = float(v.value)
-            elif v.tag == "NetLiquidation" and v.currency == "HKD":
-                result["net_liquidation_hkd"] = float(v.value)
-            elif v.tag == "BuyingPower" and v.currency == "HKD":
-                result["buying_power_hkd"] = float(v.value)
-            elif v.tag == "ExcessLiquidity" and v.currency == "HKD":
-                result["excess_liquidity_hkd"] = float(v.value)
-            elif v.tag == "CashBalance" and v.currency == "HKD":
-                result["cash_hkd"] = float(v.value)
-
-        if result["currency"] == "HKD" or result["cash_hkd"] > 0:
-            result["currency"] = "HKD"
-            if result["available_funds_hkd"] == 0 and result["available_funds"] > 0:
-                result["available_funds_hkd"] = result["available_funds"]
         return result
     except Exception as e:
         logger.error(f"Failed to get account summary: {e}")

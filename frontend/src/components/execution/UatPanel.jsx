@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ExecScaffold, ExecStat, ExecTabs, CloseButton } from './ExecScaffold';
 import { BookOverview } from './BookOverview';
 import { PositionsByReturn, normUatPosition } from './BookPositions';
-import { api, usePoll } from '../../utils';
+import { api, usePoll, fmtCcy } from '../../utils';
 
 // UAT — IBKR paper account book: real gateway, real order firing, paper money.
 // Backend landed in qr_etl t_8d32721e (verified t_1fbd9d7c): UAT mode (registry
@@ -208,9 +208,20 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
 
   const uatSess = gw?.sessions?.uat;
   const uatLive = uat?.is_connected ?? uatSess?.live?.connected ?? null;
-  // Per-book equity: NetLiquidation straight from the UAT paper session.
-  // connected=false + data=null → render '—', never a fake $0.
-  const netLiq = acct?.connected && acct?.data?.net_liquidation != null ? acct.data.net_liquidation : null;
+  // Per-book equity: NetLiquidation straight from the UAT paper session,
+  // currency-LABELED (t_22dee93d — the 2026-10-02 incident was HKD rendered
+  // as '$'). USD figure is backend-converted from the payload's own
+  // ExchangeRate rows; absent rate → no USD line, never a default rate.
+  const acctData = acct?.connected ? acct?.data : null;
+  const netLiq = acctData?.net_liquidation != null ? acctData.net_liquidation : null;
+  const netLiqCcy = acctData?.net_liquidation_currency || acctData?.base_currency || null;
+  const netLiqUsd = acctData?.net_liquidation_usd ?? null;
+  const fxBasePerUsd = acctData?.fx?.rates?.USD ?? null;   // HKD per USD when base=HKD
+  const fxAsOf = acctData?.fx?.as_of || null;
+  const netLiqSub = netLiq == null ? null
+    : netLiqUsd != null
+      ? `≈ ${fmtCcy(netLiqUsd, 'USD')}${fxBasePerUsd ? ` @ ${Number(fxBasePerUsd).toFixed(4)} ${acctData?.fx?.base_currency || ''}/USD` : ''}${fxAsOf ? ` · ${fxAsOf.slice(5, 16)}Z` : ''}`
+      : 'USD n/a — no FX rate in payload';
 
   // Blotter = REAL session fills (ib.fills()) merged with DB rows (manual
   // ticket / endpoint-booked closes). Session fills win on (ticker|side|qty)
@@ -250,7 +261,7 @@ ${side} ${Math.abs(p.qty)} @ MKT — real order, paper money.`)) return;
         />
         <ExecStat l="Endpoint" v={uat ? `${uat.host}:${uat.port} · c${uat.client_id}` : '—'} tone="text-slate-400" />
         <ExecStat l="Account" v={uatLive ? (uat?.account || uatSess?.live?.account || '…') : '—'} tone="text-slate-400" />
-        <ExecStat l="Net Liq" v={netLiq != null ? `$${Number(netLiq).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'} tone="text-slate-200" />
+        <ExecStat l="Net Liq" v={netLiq != null ? fmtCcy(netLiq, netLiqCcy) : '—'} tone="text-slate-200" sub={netLiqSub} />
       </>}
     >
       {/* Per-book overview: strategy activity · fill stats · YTD curve

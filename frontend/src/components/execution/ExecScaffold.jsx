@@ -16,10 +16,11 @@ export const EXEC_MODE_META = {
   manual: { badge: 'MANUAL', title: 'Manual Book',   note: 'discretionary hand-entered positions · ledger only · no IBKR' },
 };
 
-export const ExecStat = ({ l, v, tone }) => (
+export const ExecStat = ({ l, v, tone, sub }) => (
   <div className="text-right">
     <div className="qr-label">{l}</div>
     <div className={`qr-num text-[12px] font-bold leading-tight ${tone || 'text-white'}`}>{v}</div>
+    {sub != null && <div className="text-[8px] text-slate-500 leading-tight">{sub}</div>}
   </div>
 );
 
