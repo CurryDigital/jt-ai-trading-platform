@@ -22,6 +22,20 @@ import {
 const TRUNC = { maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'bottom' };
 const TRUNC_W = { maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'bottom' };
 
+// Render a timestamp unambiguously: full ISO-8601 seconds + explicit UTC
+// marker ('2026-10-15T05:15:50Z'). Accepts 'T' or space separators and a
+// missing zone (assumed UTC); unparseable input is shown verbatim, never
+// silently truncated (the old slice(0,16)+'Z' read as '05:15Z' ~ '05:152').
+function fmtIsoUtc(s) {
+  if (!s) return '—';
+  let iso = String(s).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(iso)) iso = iso.replace(' ', 'T');
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(iso)) iso += 'Z';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(s);
+  return d.toISOString().slice(0, 19) + 'Z';
+}
+
 // OOS metric columns — only mounted when at least one strategy has a run.
 const OOS_COLS = [
   { label: 'Sharpe OOS', tip: 'Out-of-sample Sharpe from gold.derivatives_backtest_runs', render: r => fmtNum(r.sharpe_oos), cl: 'text-slate-400 font-mono' },
@@ -122,7 +136,7 @@ function KatLiveBlock({ kat, katLoaded }) {
           </button>
         ))}
         <span className="text-[9px] text-slate-600 font-mono">
-          live · deriv.kat_runs · latest {latestAt ? latestAt.slice(0, 16).replace('T', ' ') + 'Z' : '—'}
+          live · deriv.kat_runs · latest {fmtIsoUtc(latestAt)}
         </span>
       </div>
       {expanded && (
@@ -135,7 +149,7 @@ function KatLiveBlock({ kat, katLoaded }) {
                   <span className={`qr-chip ${katIsPass(r.verdict) ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{r.verdict || '—'}</span>
                   <span className="text-slate-300">{r.index_name} · fill {r.fill_frac}</span>
                   <span>run {String(r.run_id).slice(0, 8)}</span>
-                  <span>{r.created_at ? r.created_at.slice(0, 16).replace('T', ' ') + 'Z' : '—'}</span>
+                  <span>{fmtIsoUtc(r.created_at)}</span>
                   {r.symbol && <span>{r.symbol}</span>}
                   {r.bug_fix && <span className="text-slate-600">{r.bug_fix}</span>}
                   {r.gold_data_tag && <span className="text-slate-600" title="Gold data snapshot tag this run validated against">gold: {r.gold_data_tag}</span>}
