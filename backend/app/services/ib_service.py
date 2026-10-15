@@ -84,6 +84,7 @@ class IBKRThreadedService:
                 self._ref_registry["orders"] = {str(k): str(v) for k, v in (data.get("orders") or {}).items() if v}
                 self._ref_registry["execs"] = {str(k): str(v) for k, v in (data.get("execs") or {}).items() if v}
                 self._ref_registry["perms"] = {str(k): str(v) for k, v in (data.get("perms") or {}).items() if v}
+                self._ref_registry["idempotency"] = {str(k): v for k, v in (data.get("idempotency") or {}).items() if isinstance(v, dict)}
         except FileNotFoundError:
             pass
         except Exception as e:
@@ -93,10 +94,13 @@ class IBKRThreadedService:
         try:
             import json
             os.makedirs(os.path.dirname(self._ref_registry_path), exist_ok=True)
-            # Bound growth: keep the most recent 5000 exec entries.
+            # Bound growth: keep the most recent 5000 exec/idempotency entries.
             execs = self._ref_registry["execs"]
             if len(execs) > 5000:
                 self._ref_registry["execs"] = dict(list(execs.items())[-5000:])
+            idem = self._ref_registry["idempotency"]
+            if len(idem) > 5000:
+                self._ref_registry["idempotency"] = dict(list(idem.items())[-5000:])
             tmp = self._ref_registry_path + ".tmp"
             with open(tmp, "w") as fh:
                 json.dump(self._ref_registry, fh)
@@ -123,6 +127,30 @@ class IBKRThreadedService:
             self._save_ref_registry()
         except Exception as e:
             logger.warning(f"orderRef registry record failed: {e}")
+
+    def _idempotency_lookup(self, key, params):
+        """Return ('replay', stored_result) when the key was already used with
+        identical params; ('conflict', None) when reused with different params;
+        (None, None) when new. Persisted in the orderRef registry sidecar so a
+        retry after a backend restart cannot duplicate a broker order."""
+        if not key:
+            return None, None
+        prior = self._ref_registry.get("idempotency", {}).get(str(key))
+        if not prior:
+            return None, None
+        if prior.get("params") == params:
+            return "replay", prior.get("result") or {}
+        return "conflict", None
+
+    def _idempotency_store(self, key, params, result):
+        if not key:
+            return
+        try:
+            self._ref_registry["idempotency"][str(key)] = {
+                "params": params, "result": result}
+            self._save_ref_registry()
+        except Exception as e:
+            logger.warning(f"idempotency registry store failed: {e}")
 
     def _process_refresh_completed_orders(self, cmd):
         """(IB thread) Refresh BOTH halves of cross-client fill visibility:
@@ -563,14 +591,34 @@ class IBKRThreadedService:
 
     def _process_order_request(self, cmd):
         """Process an order request in the IB thread"""
-        from ib_insync import Stock, Forex, MarketOrder
+        from ib_insync import Stock, Forex, MarketOrder, LimitOrder
         import time
-        
+
         request_id = cmd.get('request_id')
         symbol = cmd.get('symbol')
         action = cmd.get('action')
         quantity = cmd.get('quantity')
         order_type = cmd.get('order_type', 'MKT')
+        limit_price = cmd.get('limit_price')
+        time_in_force = cmd.get('time_in_force') or cmd.get('tif')
+        outside_rth = cmd.get('outside_rth')
+        idempotency_key = cmd.get('idempotency_key')
+        idem_params = {
+            'symbol': symbol, 'action': action, 'quantity': quantity,
+            'order_type': order_type, 'limit_price': limit_price,
+            'time_in_force': time_in_force, 'outside_rth': outside_rth,
+            'order_ref': cmd.get('order_ref'),
+        }
+        replay, stored = self._idempotency_lookup(idempotency_key, idem_params)
+        if replay == 'replay':
+            self._results[request_id] = {**stored, 'success': True,
+                                         'idempotent_replay': True}
+            return
+        if replay == 'conflict':
+            self._results[request_id] = {
+                'success': False,
+                'error': f'idempotency key {idempotency_key!r} already used with different order params'}
+            return
         
         try:
             ib = self._ib
@@ -601,6 +649,13 @@ class IBKRThreadedService:
             if order_type == "MKT":
                 order = MarketOrder(action, quantity)
                 order.tif = 'GTC'
+            elif order_type == "LMT":
+                if limit_price is None:
+                    self._results[request_id] = {"success": False, "error": "LMT order requires limit_price"}
+                    return
+                order = LimitOrder(action, quantity, float(limit_price))
+                order.tif = time_in_force or 'DAY'
+                order.outsideRth = bool(outside_rth) if outside_rth is not None else False
             else:
                 self._results[request_id] = {"success": False, "error": f"Order type {order_type} not implemented"}
                 return
@@ -620,6 +675,12 @@ class IBKRThreadedService:
                 # are attributable even if this connection drops before the
                 # fill arrives.
                 self._record_order_ref(trade.order.orderId, order.orderRef or None)
+                if idempotency_key:
+                    self._idempotency_store(idempotency_key, idem_params, {
+                        'order_id': trade.order.orderId,
+                        'perm_id': getattr(trade.order, 'permId', None),
+                        'status': trade.orderStatus.status if trade.orderStatus else 'Pending',
+                    })
 
                 # Wait for fill and get actual execution price (golden source)
                 fill_price = None
@@ -661,20 +722,24 @@ class IBKRThreadedService:
 
                 status = trade.orderStatus.status if trade.orderStatus else "Pending"
                 if status in ('Cancelled', 'Inactive', 'ApiCancelled'):
-                    self._results[request_id] = {
+                    result = {
                         "success": False,
                         "error": f"Order {status}",
                         "order_id": trade.order.orderId,
                         "status": status,
                     }
                 else:
-                    self._results[request_id] = {
+                    result = {
                         "success": True,
                         "order_id": trade.order.orderId,
+                        "perm_id": getattr(trade.order, 'permId', None),
                         "status": status,  # PreSubmitted/Submitted = working, not yet filled
                         "fill_price": fill_price,  # IBKR golden source price (None while working)
                         "avg_fill_price": fill_price
                     }
+                if idempotency_key:
+                    self._idempotency_store(idempotency_key, idem_params, result)
+                self._results[request_id] = result
             else:
                 self._results[request_id] = {"success": False, "error": "Failed to place order"}
                 
@@ -724,7 +789,9 @@ class IBKRThreadedService:
             self._connected = False
             return False
     
-    def submit_order(self, symbol, action, quantity, order_type="MKT", order_ref=None):
+    def submit_order(self, symbol, action, quantity, order_type="MKT", order_ref=None,
+                     limit_price=None, time_in_force=None, outside_rth=None,
+                     idempotency_key=None):
         """
         Submit an order to the IBKR queue and wait for result.
         Returns the order result.
@@ -750,6 +817,10 @@ class IBKRThreadedService:
             'quantity': quantity,
             'order_type': order_type,
             'order_ref': order_ref,
+            'limit_price': limit_price,
+            'time_in_force': time_in_force,
+            'outside_rth': outside_rth,
+            'idempotency_key': idempotency_key,
         }
         
         # Submit to queue
@@ -1040,7 +1111,8 @@ class IBKRQuantService:
             return {"status": "error", "message": "Not connected"}
         return {"status": "success", "message": "Trade execution requires full implementation"}
     
-    def place_order(self, symbol, action, quantity, order_type="MKT", account=None, order_ref=None):
+    def place_order(self, symbol, action, quantity, order_type="MKT", account=None, order_ref=None,
+                    limit_price=None, time_in_force=None, outside_rth=None, idempotency_key=None):
         """
         Place an order through IBKR TWS API.
         Uses the threaded service to ensure proper event loop handling.
@@ -1071,7 +1143,10 @@ class IBKRQuantService:
             return {"success": False, "error": guard_err}
 
         # Use the threaded service's submit_order method
-        return get_ib_threaded_service().submit_order(symbol, action, quantity, order_type, order_ref=order_ref)
+        return get_ib_threaded_service().submit_order(
+            symbol, action, quantity, order_type, order_ref=order_ref,
+            limit_price=limit_price, time_in_force=time_in_force,
+            outside_rth=outside_rth, idempotency_key=idempotency_key)
     
     def get_price(self, symbol):
         """Get current market price for a symbol from IBKR"""
@@ -1186,7 +1261,8 @@ class IBKRUatService:
         """Account summary from the UAT paper session."""
         return _fetch_account_summary(get_ib_uat_service())
 
-    def place_order(self, symbol, action, quantity, order_type="MKT", account=None, order_ref=None):
+    def place_order(self, symbol, action, quantity, order_type="MKT", account=None, order_ref=None,
+                    limit_price=None, time_in_force=None, outside_rth=None, idempotency_key=None):
         """Place an order on the UAT paper session. Never falls back to the
         primary session — a disconnected UAT session is a hard failure.
 
@@ -1205,7 +1281,10 @@ class IBKRUatService:
         if guard_err:
             logger.error(f"UAT order refused: {guard_err}")
             return {"success": False, "error": guard_err, "session": "uat"}
-        result = svc.submit_order(symbol, action, quantity, order_type, order_ref=order_ref)
+        result = svc.submit_order(
+            symbol, action, quantity, order_type, order_ref=order_ref,
+            limit_price=limit_price, time_in_force=time_in_force,
+            outside_rth=outside_rth, idempotency_key=idempotency_key)
         result["session"] = "uat"
         return result
 

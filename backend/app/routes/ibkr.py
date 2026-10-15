@@ -323,6 +323,10 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     if book == "paper_uat":
         book = "uat"
     quantity = payload.get("quantity")
+    limit_price = payload.get("limit_price")
+    time_in_force = (str(payload.get("time_in_force") or payload.get("tif") or "")).strip().upper()
+    outside_rth = payload.get("outside_rth")
+    idempotency_key = (str(payload.get("idempotency_key") or "")).strip()
 
     missing = [name for name, val in (
         ("symbol", symbol), ("action", action), ("quantity", quantity),
@@ -353,12 +357,29 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     if book not in ("sim", "paper", "uat", "live"):
         raise HTTPException(status_code=422,
                             detail=f"Invalid book '{book}' — expected sim|paper|uat|live")
+    if order_type == "LMT":
+        try:
+            limit_price = float(limit_price)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422,
+                                detail=f"LMT order requires numeric limit_price, got {limit_price!r}")
+        if limit_price <= 0:
+            raise HTTPException(status_code=422, detail="limit_price must be > 0 for LMT")
+        if not time_in_force:
+            raise HTTPException(status_code=422, detail="LMT order requires time_in_force (e.g. DAY)")
+        if outside_rth is None:
+            raise HTTPException(status_code=422, detail="LMT order requires outside_rth true/false")
+        outside_rth = bool(outside_rth)
+    elif limit_price is not None:
+        raise HTTPException(status_code=422,
+                            detail="limit_price is only valid for order_type='LMT'")
 
     # ------------------------------------------------------------------
     # 2. Strategy attribution — required, registry-validated (item 2).
     # ------------------------------------------------------------------
     strategy_id = payload.get("strategy_id")
     order_ref = payload.get("order_ref")
+    explicit_order_ref = order_ref
     if not strategy_id and isinstance(order_ref, str) and order_ref.startswith("strat:"):
         strategy_id = order_ref[len("strat:"):]
     strategy_id = (str(strategy_id or "")).strip()
@@ -376,31 +397,49 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     if not order_ref:
         order_ref = f"strat:{strategy_id}"
 
-    reg = db.execute(text(
-        "SELECT strategy_id, status, execution_mode, universe_tickers "
-        "FROM gold.strategy_registry WHERE strategy_id = :sid"
-    ), {"sid": strategy_id}).fetchone()
-    if not reg:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown strategy_id '{strategy_id}' — not registered in "
-                   f"gold.strategy_registry; order refused.")
-    if reg.status != "paper":
-        raise HTTPException(
-            status_code=422,
-            detail=f"Strategy '{strategy_id}' is not active (status='{reg.status}'); "
-                   f"only active (status='paper') sleeves may place orders.")
-    if book == "uat" and reg.execution_mode != "PAPER_UAT":
-        raise HTTPException(
-            status_code=422,
-            detail=f"Strategy '{strategy_id}' is execution_mode='{reg.execution_mode}', "
-                   f"not PAPER_UAT — it may not fire orders to the UAT broker book.")
-    universe = [str(t).upper() for t in (reg.universe_tickers or [])]
-    if universe and symbol not in universe:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Strategy '{strategy_id}' is not allowed to trade {symbol} "
-                   f"(not in its registered universe).")
+    if strategy_id == "OPS_RECON":
+        # User-approved reconciliation covers (e.g. RECON_FLATTEN_t_*). These
+        # are account-management orders owned by no sleeve; they still route
+        # through the guarded UAT path, require an explicit RECON_FLATTEN ref,
+        # a persisted idempotency key, and a marketable-limit order spec.
+        if book != "uat":
+            raise HTTPException(status_code=422,
+                                detail="OPS_RECON may only route to book='uat'.")
+        if not isinstance(explicit_order_ref, str) or not explicit_order_ref.startswith("RECON_FLATTEN_"):
+            raise HTTPException(status_code=422,
+                                detail="OPS_RECON requires explicit order_ref='RECON_FLATTEN_<task_id>'.")
+        if not idempotency_key:
+            raise HTTPException(status_code=422,
+                                detail="OPS_RECON requires idempotency_key.")
+        if order_type != "LMT":
+            raise HTTPException(status_code=422,
+                                detail="OPS_RECON reconciliation covers are LMT-only.")
+    else:
+        reg = db.execute(text(
+            "SELECT strategy_id, status, execution_mode, universe_tickers "
+            "FROM gold.strategy_registry WHERE strategy_id = :sid"
+        ), {"sid": strategy_id}).fetchone()
+        if not reg:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown strategy_id '{strategy_id}' — not registered in "
+                       f"gold.strategy_registry; order refused.")
+        if reg.status != "paper":
+            raise HTTPException(
+                status_code=422,
+                detail=f"Strategy '{strategy_id}' is not active (status='{reg.status}'); "
+                       f"only active (status='paper') sleeves may place orders.")
+        if book == "uat" and reg.execution_mode != "PAPER_UAT":
+            raise HTTPException(
+                status_code=422,
+                detail=f"Strategy '{strategy_id}' is execution_mode='{reg.execution_mode}', "
+                       f"not PAPER_UAT — it may not fire orders to the UAT broker book.")
+        universe = [str(t).upper() for t in (reg.universe_tickers or [])]
+        if universe and symbol not in universe:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Strategy '{strategy_id}' is not allowed to trade {symbol} "
+                       f"(not in its registered universe).")
 
     # ------------------------------------------------------------------
     # 3. Account guard (item 5): only DUP825942 unless the user's
@@ -452,6 +491,10 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
         order_result = service.place_order(
             symbol=symbol, action=action, quantity=quantity, order_type=order_type,
             account=None, order_ref=order_ref,
+            limit_price=limit_price,
+            time_in_force=time_in_force or None,
+            outside_rth=outside_rth,
+            idempotency_key=idempotency_key or None,
         )
         if order_result and order_result.get("success"):
             return {
