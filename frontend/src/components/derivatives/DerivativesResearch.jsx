@@ -138,6 +138,7 @@ function KatLiveBlock({ kat, katLoaded }) {
                   <span>{r.created_at ? r.created_at.slice(0, 16).replace('T', ' ') + 'Z' : '—'}</span>
                   {r.symbol && <span>{r.symbol}</span>}
                   {r.bug_fix && <span className="text-slate-600">{r.bug_fix}</span>}
+                  {r.gold_data_tag && <span className="text-slate-600" title="Gold data snapshot tag this run validated against">gold: {r.gold_data_tag}</span>}
                   {Array.isArray(r.window) && r.window.length === 2 && <span>window {r.window[0]} → {r.window[1]}</span>}
                   {r.n_months != null && <span>{Math.round(r.n_months)} months</span>}
                 </div>

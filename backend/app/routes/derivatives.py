@@ -170,6 +170,7 @@ def get_kat_status(db: Session = Depends(get_db)):
                run_id, index_name, verdict, status, created_at,
                params->>'symbol' AS symbol, params->>'bug_fix' AS bug_fix,
                params->>'fill_frac' AS fill_frac, params->'tolerances' AS tolerances,
+               params->>'gold_data_tag' AS gold_data_tag,
                metrics->>'monthly_corr' AS monthly_corr,
                metrics->>'cagr_diff' AS cagr_diff,
                metrics->>'maxdd_diff' AS maxdd_diff,
@@ -191,6 +192,7 @@ def get_kat_status(db: Session = Depends(get_db)):
             "created_at": _iso(r.created_at),
             "symbol": r.symbol,
             "bug_fix": r.bug_fix,
+            "gold_data_tag": r.gold_data_tag,
             "fill_frac": _num(r.fill_frac),
             "tolerances": r.tolerances if isinstance(r.tolerances, dict) else {},
             "monthly_corr": _num(r.monthly_corr),
@@ -203,6 +205,9 @@ def get_kat_status(db: Session = Depends(get_db)):
         })
 
     latest = max((x["created_at"] for x in runs if x["created_at"]), default=None)
+    # Response ordered newest-first so the latest round's runs lead the list;
+    # selection per (index, fill_frac) is already handled by DISTINCT ON.
+    runs.sort(key=lambda x: x["created_at"] or "", reverse=True)
     return {"as_of": _now_iso(), "latest_run_at": latest, "runs": runs}
 
 
