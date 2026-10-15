@@ -107,9 +107,9 @@ function KatLiveBlock({ kat, katLoaded }) {
       <div className="flex items-center gap-2 flex-wrap">
         <span
           className={`qr-chip ${gateOpen ? 'qr-chip-emerald' : 'qr-chip-rose'}`}
-          title="OPEN only when the latest deriv.kat_runs run per (index, fill_frac) is verdict PASS for both BXM and PUT; otherwise BLOCKED."
+          title="KAT status only: PASS when the latest deriv.kat_runs run per (index, fill_frac) is verdict PASS for both BXM and PUT; otherwise FAIL. Other gates (regime wf_v2, sleeve evidence, promotion) remain open — KAT: PASS is not a go."
         >
-          GATE {gateOpen ? 'OPEN' : 'BLOCKED'}
+          KAT: {gateOpen ? 'PASS' : 'FAIL'}
         </span>
         {byIndex.map(({ idx, verdict }) => (
           <button
