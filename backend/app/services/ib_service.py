@@ -22,12 +22,13 @@ IB = None
 Forex = None
 Stock = None
 MarketOrder = None
+LimitOrder = None
 
 def _ensure_ib_insync():
     """Lazy-load ib_insync classes only when needed (inside a running thread)."""
-    global IB, Forex, Stock, MarketOrder
+    global IB, Forex, Stock, MarketOrder, LimitOrder
     if IB is None:
-        from ib_insync import IB, Forex, Stock, MarketOrder
+        from ib_insync import IB, Forex, Stock, MarketOrder, LimitOrder
 
 class IBKRThreadedService:
     """
@@ -51,6 +52,163 @@ class IBKRThreadedService:
         self._results = {}  # Store order results
         self._account = None  # Real managed account id, captured on connect
         self._last_connect_attempt = 0  # throttle for auto-reconnect
+        # Persistent orderId/execId -> orderRef registry (kanban t_02e14081).
+        # ib.trades() only knows orders seen by THIS client connection, while
+        # ib.fills() is populated account-wide via reqExecutions — fills from
+        # orders placed by other clients (qr_etl direct-gateway scripts) or
+        # before a reconnect used to surface with order_ref NULL. The registry
+        # is stamped at placeOrder time and enriched via reqCompletedOrders,
+        # then persisted to a JSON sidecar so it survives backend restarts.
+        self._ref_registry = {"orders": {}, "execs": {}, "perms": {}, "idempotency": {}}
+        # Account-wide execution cache (t_02e14081): ib.fills() only carries
+        # execDetails seen by THIS client connection in real time, so fills
+        # from other clients' orders are invisible until a reconnect. The
+        # refresh command repopulates this via reqExecutions().
+        self._exec_cache = {}
+        self._ref_registry_path = os.getenv(
+            'IBKR_ORDER_REF_REGISTRY',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
+                         'data',
+                         f'ib_order_ref_registry_{self.port}_{self.client_id}.json'))
+        self._load_ref_registry()
+
+    # ------------------------------------------------------------------
+    # orderRef registry (t_02e14081)
+    # ------------------------------------------------------------------
+    def _load_ref_registry(self):
+        try:
+            import json
+            with open(self._ref_registry_path) as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                self._ref_registry["orders"] = {str(k): str(v) for k, v in (data.get("orders") or {}).items() if v}
+                self._ref_registry["execs"] = {str(k): str(v) for k, v in (data.get("execs") or {}).items() if v}
+                self._ref_registry["perms"] = {str(k): str(v) for k, v in (data.get("perms") or {}).items() if v}
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"orderRef registry load failed ({self._ref_registry_path}): {e}")
+
+    def _save_ref_registry(self):
+        try:
+            import json
+            os.makedirs(os.path.dirname(self._ref_registry_path), exist_ok=True)
+            # Bound growth: keep the most recent 5000 exec entries.
+            execs = self._ref_registry["execs"]
+            if len(execs) > 5000:
+                self._ref_registry["execs"] = dict(list(execs.items())[-5000:])
+            tmp = self._ref_registry_path + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump(self._ref_registry, fh)
+            os.replace(tmp, self._ref_registry_path)
+        except Exception as e:
+            logger.warning(f"orderRef registry save failed ({self._ref_registry_path}): {e}")
+
+    def _record_order_ref(self, order_id, order_ref, exec_ids=None, perm_id=None):
+        """Stamp orderId (and optionally execIds / permId) -> orderRef into the
+        registry and persist. Called at placeOrder time and after fills are
+        observed. permId is the ONLY stable cross-client join key: execDetails
+        and completedOrders report orderId=0 for orders placed by other API
+        clients (observed 2026-10-15, t_02e14081)."""
+        if not order_ref:
+            return
+        try:
+            if order_id is not None and int(order_id) > 0:
+                self._ref_registry["orders"][str(int(order_id))] = str(order_ref)
+            if perm_id:
+                self._ref_registry["perms"][str(int(perm_id))] = str(order_ref)
+            for eid in (exec_ids or []):
+                if eid:
+                    self._ref_registry["execs"][str(eid)] = str(order_ref)
+            self._save_ref_registry()
+        except Exception as e:
+            logger.warning(f"orderRef registry record failed: {e}")
+
+    def _process_refresh_completed_orders(self, cmd):
+        """(IB thread) Refresh BOTH halves of cross-client fill visibility:
+
+        1. reqCompletedOrders(apiOnly=False) — today's completed orders for the
+           whole account (including orders placed by OTHER clients, e.g. qr_etl
+           direct-gateway scripts); merge orderId/execId -> orderRef into the
+           persistent registry.
+        2. reqExecutions() — account-wide executions; merge into the exec
+           cache. ib.fills() alone only accumulates execDetails seen by THIS
+           connection in real time, so foreign-client fills never appear until
+           reconnect without this.
+        """
+        request_id = cmd.get('request_id')
+        try:
+            trades = self._ib.reqCompletedOrders(apiOnly=False) or []
+            refs = 0
+            for t in trades:
+                try:
+                    ref = getattr(t.order, 'orderRef', None)
+                    if not ref:
+                        continue
+                    # orderId is 0 for orders placed by OTHER API clients —
+                    # permId is the reliable join key against execDetails.
+                    perm = getattr(t.order, 'permId', 0)
+                    if perm:
+                        self._ref_registry["perms"][str(int(perm))] = str(ref)
+                        refs += 1
+                    if t.order.orderId:
+                        self._ref_registry["orders"][str(int(t.order.orderId))] = str(ref)
+                    for f in (t.fills or []):
+                        eid = getattr(f.execution, 'execId', None)
+                        if eid:
+                            self._ref_registry["execs"][str(eid)] = str(ref)
+                except Exception:
+                    continue
+            self._save_ref_registry()
+            execs = self._ib.reqExecutions() or []
+            # reqExecutions returns the full current-day set — replace, don't
+            # accumulate, so the cache can't grow across days.
+            self._exec_cache = {}
+            for f in execs:
+                try:
+                    e = f.execution
+                    if not e.execId:
+                        continue
+                    self._exec_cache[str(e.execId)] = {
+                        "exec_id": e.execId,
+                        "order_id": e.orderId,
+                        "perm_id": e.permId or None,
+                        "order_ref_direct": getattr(e, 'orderRef', '') or None,
+                        "symbol": f.contract.symbol,
+                        "local_symbol": f.contract.localSymbol,
+                        "side": {"BOT": "BUY", "SLD": "SELL"}.get(e.side, e.side),
+                        "qty": float(e.shares),
+                        "price": float(e.price),
+                        "time": e.time.isoformat() if e.time else None,
+                        "account": e.acctNumber,
+                        "currency": getattr(f.contract, 'currency', None),
+                    }
+                except Exception:
+                    continue
+            self._results[request_id] = {
+                "success": True, "completed_orders": len(trades), "refs": refs,
+                "executions": len(execs)}
+        except Exception as e:
+            logger.error(f"refresh_completed_orders failed: {e}")
+            self._results[request_id] = {"success": False, "error": str(e)}
+
+    def _refresh_completed_order_refs(self, timeout=5):
+        """Best-effort cross-thread trigger of a completed-orders ref refresh.
+        Bounded wait; on timeout/disconnect the caller proceeds with whatever
+        refs are already in the registry."""
+        import uuid
+        import time
+        if not self._connected or self._ib is None:
+            return
+        request_id = str(uuid.uuid4())
+        self._queue.put({'type': 'refresh_completed_orders', 'request_id': request_id})
+        start = time.time()
+        while time.time() - start < timeout:
+            if request_id in self._results:
+                self._results.pop(request_id)
+                return
+            time.sleep(0.1)
+        self._results.pop(request_id, None)
 
     def _try_connect(self):
         """(Re)connect to the gateway. MUST run inside the IB thread — ib_insync
@@ -183,6 +341,8 @@ class IBKRThreadedService:
                             self._process_order_request(cmd)
                         elif isinstance(cmd, dict) and cmd.get('type') == 'cancel':
                             self._process_cancel_request(cmd)
+                        elif isinstance(cmd, dict) and cmd.get('type') == 'refresh_completed_orders':
+                            self._process_refresh_completed_orders(cmd)
                         elif isinstance(cmd, dict) and cmd.get('type') == 'reconnect':
                             if not self._connected:
                                 logger.info("IBKR Thread: reconnect requested")
@@ -315,29 +475,68 @@ class IBKRThreadedService:
         return {"success": False, "error": "Cancel timeout - no response from IB thread"}
 
     def get_fills(self):
-        """Today's real executions on THIS session (ib.fills() — cached wrapper
-        state, safe cross-thread read). Returns None when disconnected.
+        """Today's real executions on the UAT account — union of this
+        connection's ib.fills() cache and an account-wide reqExecutions()
+        refresh (fills from orders placed by OTHER clients never reach this
+        connection's fills() in real time, t_02e14081). Returns None when
+        disconnected.
 
-        Each fill is annotated with `order_ref` (from the originating order's
+        Each fill is annotated with `order_ref` (the originating order's
         orderRef, e.g. "strat:<strategy_id>") so callers can attribute fills
-        back to the firing strategy. None when the order carried no tag."""
+        back to the firing strategy. Resolution order (t_02e14081):
+          1. live trades() cache of this connection (freshest),
+          2. completed-orders refresh via reqCompletedOrders(apiOnly=False) —
+             recovers refs for orders placed by OTHER clients on the account,
+          3. persistent registry sidecar stamped at placeOrder time.
+        None only when the order genuinely carried no tag."""
         if not self._connected or self._ib is None:
             return None
         try:
-            # orderId -> orderRef map from this session's trades
+            # Refresh refs from the gateway's completed-orders log (bounded,
+            # best-effort) so cross-client fills are attributable.
+            self._refresh_completed_order_refs(timeout=5)
+            # orderId -> orderRef: registry base, live trades() override
+            # (only when the live value is non-empty).
             ref_by_order = {}
+            for k, v in self._ref_registry["orders"].items():
+                try:
+                    ref_by_order[int(k)] = v
+                except (TypeError, ValueError):
+                    continue
+            ref_by_exec = dict(self._ref_registry["execs"])
+            ref_by_perm = {int(k): v for k, v in self._ref_registry["perms"].items()
+                           if k.isdigit()}
+
+            def _resolve_ref(order_id, perm_id, exec_id, direct):
+                # 1. orderRef carried on the execution itself (TWS execDetails
+                #    includes it; simplest truthful source)
+                # 2. live trades() cache / registry orderId map (same-client)
+                # 3. registry permId map (cross-client — orderId is 0 there)
+                # 4. registry execId map
+                return (direct
+                        or ref_by_order.get(order_id)
+                        or (ref_by_perm.get(int(perm_id)) if perm_id else None)
+                        or ref_by_exec.get(exec_id))
+
             for t in (self._ib.trades() or []):
                 try:
-                    ref_by_order[t.order.orderId] = t.order.orderRef or None
+                    if t.order.orderRef:
+                        ref_by_order[t.order.orderId] = t.order.orderRef
+                        if getattr(t.order, 'permId', 0):
+                            ref_by_perm[int(t.order.permId)] = t.order.orderRef
                 except Exception:
                     continue
             out = []
+            seen_execs = set()
             for f in (self._ib.fills() or []):
                 e = f.execution
+                seen_execs.add(str(e.execId))
                 out.append({
                     "exec_id": e.execId,
                     "order_id": e.orderId,
-                    "order_ref": ref_by_order.get(e.orderId),
+                    "perm_id": e.permId or None,
+                    "order_ref": _resolve_ref(e.orderId, e.permId, e.execId,
+                                              getattr(e, 'orderRef', '') or None),
                     "symbol": f.contract.symbol,
                     "local_symbol": f.contract.localSymbol,
                     "side": {"BOT": "BUY", "SLD": "SELL"}.get(e.side, e.side),
@@ -345,7 +544,18 @@ class IBKRThreadedService:
                     "price": float(e.price),
                     "time": e.time.isoformat() if e.time else None,
                     "account": e.acctNumber,
+                    "currency": getattr(f.contract, 'currency', None),
                 })
+            # Account-wide executions recovered via reqExecutions (t_02e14081)
+            # — fills from orders placed by OTHER clients never reach this
+            # connection's fills() list in real time.
+            for eid, d in self._exec_cache.items():
+                if eid in seen_execs:
+                    continue
+                d = dict(d)
+                d["order_ref"] = _resolve_ref(d.get("order_id"), d.get("perm_id"),
+                                              eid, d.pop("order_ref_direct", None))
+                out.append(d)
             return out
         except Exception as e:
             logger.error(f"IBKR get_fills failed: {e}")
@@ -406,6 +616,11 @@ class IBKRThreadedService:
             if trade:
                 logger.info(f"Order placed: {symbol} {action} {quantity} - Order ID: {trade.order.orderId}")
 
+                # Persist orderId -> orderRef immediately (t_02e14081) so fills
+                # are attributable even if this connection drops before the
+                # fill arrives.
+                self._record_order_ref(trade.order.orderId, order.orderRef or None)
+
                 # Wait for fill and get actual execution price (golden source)
                 fill_price = None
                 max_wait = 30  # Max 30 seconds to fill
@@ -427,6 +642,11 @@ class IBKRThreadedService:
                                 total_shares += exec_shares
                             fill_price = total_cost / total_shares if total_shares > 0 else None
                             logger.info(f"Order filled: {symbol} at ${fill_price:.2f} (IBKR golden source)")
+                            # Persist execId/permId -> orderRef too (t_02e14081).
+                            self._record_order_ref(
+                                trade.order.orderId, order.orderRef or None,
+                                exec_ids=[fl.execution.execId for fl in trade.fills],
+                                perm_id=getattr(trade.order, 'permId', None))
                         break
 
                     # Stop waiting on terminal non-fill states (rejected/cancelled)
