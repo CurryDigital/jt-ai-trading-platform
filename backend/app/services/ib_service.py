@@ -30,6 +30,31 @@ def _ensure_ib_insync():
     if IB is None:
         from ib_insync import IB, Forex, Stock, MarketOrder, LimitOrder
 
+
+# ---------------------------------------------------------------------------
+# orderRef/idempotency registry durability (kanban t_a374fbeb item 4)
+#
+# The registry is attribution-critical state: the uat_registry_guard's permId
+# attribution and OPS_RECON idempotency both depend on it. It must therefore
+# live OUTSIDE the git checkout (a redeploy / git clean must not wipe it) and
+# keep rotating backups. The legacy repo-local backend/data/ file is migrated
+# forward on first load, never abandoned.
+# ---------------------------------------------------------------------------
+_REGISTRY_BACKUP_KEEP = 10
+
+# Legacy pre-durable location (repo-local, wiped by redeploys). Module-level
+# so tests can point it at a tmp dir.
+_LEGACY_REGISTRY_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', '..', 'data')
+
+
+def _default_registry_dir():
+    """Durable, per-user data dir outside the checkout. Env var
+    IBKR_ORDER_REF_REGISTRY still overrides the full file path."""
+    return os.path.join(os.path.expanduser('~'), '.local', 'share',
+                        'jtcml', 'ibkr')
+
+
 class IBKRThreadedService:
     """
     Thread-safe IBKR service that runs in its own thread with isolated event loop.
@@ -67,8 +92,7 @@ class IBKRThreadedService:
         self._exec_cache = {}
         self._ref_registry_path = os.getenv(
             'IBKR_ORDER_REF_REGISTRY',
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
-                         'data',
+            os.path.join(_default_registry_dir(),
                          f'ib_order_ref_registry_{self.port}_{self.client_id}.json'))
         self._load_ref_registry()
 
@@ -76,19 +100,40 @@ class IBKRThreadedService:
     # orderRef registry (t_02e14081)
     # ------------------------------------------------------------------
     def _load_ref_registry(self):
+        import json
+        data = None
+        migrated_from = None
         try:
-            import json
             with open(self._ref_registry_path) as fh:
                 data = json.load(fh)
+        except FileNotFoundError:
+            # Adopt the legacy repo-local registry (pre-durable path) if one
+            # exists — attribution history must survive the move.
+            legacy = os.path.join(
+                _LEGACY_REGISTRY_DIR, os.path.basename(self._ref_registry_path))
+            try:
+                with open(legacy) as fh:
+                    data = json.load(fh)
+                migrated_from = legacy
+            except FileNotFoundError:
+                return
+            except Exception as e:
+                logger.warning(f"orderRef legacy registry load failed ({legacy}): {e}")
+                return
+        except Exception as e:
+            logger.warning(f"orderRef registry load failed ({self._ref_registry_path}): {e}")
+            return
+        try:
             if isinstance(data, dict):
                 self._ref_registry["orders"] = {str(k): str(v) for k, v in (data.get("orders") or {}).items() if v}
                 self._ref_registry["execs"] = {str(k): str(v) for k, v in (data.get("execs") or {}).items() if v}
                 self._ref_registry["perms"] = {str(k): str(v) for k, v in (data.get("perms") or {}).items() if v}
                 self._ref_registry["idempotency"] = {str(k): v for k, v in (data.get("idempotency") or {}).items() if isinstance(v, dict)}
-        except FileNotFoundError:
-            pass
+            if migrated_from:
+                logger.info(f"orderRef registry migrated {migrated_from} -> {self._ref_registry_path}")
+                self._save_ref_registry()
         except Exception as e:
-            logger.warning(f"orderRef registry load failed ({self._ref_registry_path}): {e}")
+            logger.warning(f"orderRef registry parse failed ({self._ref_registry_path}): {e}")
 
     def _save_ref_registry(self):
         try:
@@ -105,8 +150,38 @@ class IBKRThreadedService:
             with open(tmp, "w") as fh:
                 json.dump(self._ref_registry, fh)
             os.replace(tmp, self._ref_registry_path)
+            self._backup_ref_registry()
         except Exception as e:
             logger.warning(f"orderRef registry save failed ({self._ref_registry_path}): {e}")
+
+    def _backup_ref_registry(self):
+        """Rotating timestamped snapshot of the registry next to the live
+        file (backups/ subdir, newest _REGISTRY_BACKUP_KEEP kept). Best-effort:
+        a failed backup must never block an order."""
+        try:
+            import json
+            from datetime import datetime, timezone
+            backup_dir = os.path.join(
+                os.path.dirname(self._ref_registry_path), 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            stem = os.path.splitext(
+                os.path.basename(self._ref_registry_path))[0]
+            ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+            dest = os.path.join(backup_dir, f"{stem}.{ts}.json")
+            tmp = dest + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump(self._ref_registry, fh)
+            os.replace(tmp, dest)
+            backups = sorted(
+                f for f in os.listdir(backup_dir)
+                if f.startswith(stem + ".") and f.endswith(".json"))
+            for stale in backups[:-_REGISTRY_BACKUP_KEEP]:
+                try:
+                    os.remove(os.path.join(backup_dir, stale))
+                except OSError:
+                    pass
+        except Exception as e:
+            logger.warning(f"orderRef registry backup failed: {e}")
 
     def _record_order_ref(self, order_id, order_ref, exec_ids=None, perm_id=None):
         """Stamp orderId (and optionally execIds / permId) -> orderRef into the

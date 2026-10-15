@@ -1,4 +1,6 @@
 """IBKR endpoints — TWS/Web status, connect, place order, sync."""
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -285,6 +287,61 @@ async def api_ib_web_status():
         return {"error": str(e), "is_authenticated": False}
 
 
+def _signed_position_qty(positions, symbol):
+    """Signed share quantity for `symbol` from a UAT positions payload, or
+    None when the symbol is not held. Order symbols may carry a venue suffix
+    ('3988.HK') while positions report the bare code — match both."""
+    sym = str(symbol).upper()
+    bare = re.sub(r"\.(HK|SI)$", "", sym)
+    for p in positions or []:
+        for key in ("symbol", "ticker"):
+            v = str(p.get(key) or "").upper()
+            if v and (v == sym or v == bare):
+                return float(p.get("qty") or 0.0)
+    return None
+
+
+def _enforce_ops_recon_reduce_only(symbol, action, quantity):
+    """OPS_RECON covers are REDUCE-ONLY (kanban t_a374fbeb): they exist to
+    flatten residual exposure, so a cover may never open a position, extend
+    one, or flip the book through zero. Fail closed when positions are
+    unreadable — a cover we cannot verify is not a cover."""
+    positions = ib_uat_service.get_positions()
+    if positions is None:
+        raise HTTPException(
+            status_code=503,
+            detail="OPS_RECON refused: UAT positions unavailable (session "
+                   "disconnected) — cannot verify this order reduces an "
+                   "existing position.")
+    pos_qty = _signed_position_qty(positions, symbol)
+    if action == "BUY":
+        if pos_qty is None or pos_qty >= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"OPS_RECON BUY refused: no short position in {symbol} "
+                       f"to cover — a reconciliation cover must never open or "
+                       f"extend a long.")
+        if quantity > abs(pos_qty):
+            raise HTTPException(
+                status_code=422,
+                detail=f"OPS_RECON BUY qty {quantity} exceeds the short "
+                       f"{int(abs(pos_qty))} in {symbol} — covering more than "
+                       f"the short would flip the book long.")
+    else:  # SELL
+        if pos_qty is None or pos_qty <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"OPS_RECON SELL refused: no long position in {symbol} "
+                       f"to flatten — a reconciliation cover must never open "
+                       f"or extend a short.")
+        if quantity > pos_qty:
+            raise HTTPException(
+                status_code=422,
+                detail=f"OPS_RECON SELL qty {quantity} exceeds the long "
+                       f"{int(pos_qty)} in {symbol} — selling more than the "
+                       f"long would flip the book short.")
+
+
 @router.post("/ib/place-order")
 def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
     """Place an order through IBKR TWS API.
@@ -414,6 +471,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
         if order_type != "LMT":
             raise HTTPException(status_code=422,
                                 detail="OPS_RECON reconciliation covers are LMT-only.")
+        _enforce_ops_recon_reduce_only(symbol, action, quantity)
     else:
         reg = db.execute(text(
             "SELECT strategy_id, status, execution_mode, universe_tickers "
@@ -497,7 +555,7 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
             idempotency_key=idempotency_key or None,
         )
         if order_result and order_result.get("success"):
-            return {
+            resp = {
                 "success": True, "order_id": order_result.get("order_id"),
                 "status": order_result.get("status", "Submitted"), "mode": "BROKER",
                 "session": session_name,
@@ -506,9 +564,17 @@ def place_ibkr_order(payload: dict, db: Session = Depends(get_db)):
                 "symbol": symbol, "action": action, "quantity": quantity,
                 "message": f"{book.upper()} order submitted via {session_name} session: {action} {quantity} {symbol}",
             }
+            if order_result.get("idempotent_replay"):
+                # Retry with an already-used key: the ORIGINAL order's result,
+                # no second broker order was placed.
+                resp["idempotent_replay"] = True
+            return resp
         else:
             err = order_result.get('error', 'Unknown') if order_result else 'No result'
             is_uat = session_name == "uat"
+            if "idempotency key" in str(err):
+                # Same key reused with different params — client conflict.
+                raise HTTPException(status_code=409, detail=str(err))
             status_code = 503 if (is_uat and "not connected" in str(err).lower()) else 500
             raise HTTPException(status_code=status_code, detail=f"Order failed ({session_name} session): {err}")
     except HTTPException:
