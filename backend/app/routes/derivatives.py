@@ -153,6 +153,60 @@ def get_derivative_strategies(db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
+# KAT validation status (kanban t_83758f8e)
+# ---------------------------------------------------------------------------
+
+@router.get("/kat-status")
+def get_kat_status(db: Session = Depends(get_db)):
+    """Latest KAT run per (index_name, fill_frac), LIVE from deriv.kat_runs.
+
+    The Derivatives banner renders its KAT verdicts from this feed on every
+    load — never from gold.derivatives_strategies.data_blocker text, which
+    goes stale the moment a new run lands. No aggregation beyond DISTINCT ON;
+    empty table -> empty runs list. Missing table degrades via safe_query.
+    """
+    rows = safe_query(db, """
+        SELECT DISTINCT ON (index_name, params->>'fill_frac')
+               run_id, index_name, verdict, status, created_at,
+               params->>'symbol' AS symbol, params->>'bug_fix' AS bug_fix,
+               params->>'fill_frac' AS fill_frac, params->'tolerances' AS tolerances,
+               metrics->>'monthly_corr' AS monthly_corr,
+               metrics->>'cagr_diff' AS cagr_diff,
+               metrics->>'maxdd_diff' AS maxdd_diff,
+               metrics->>'n_months' AS n_months,
+               metrics->>'worst_month_diff' AS worst_month_diff,
+               metrics->>'n_months_over_band' AS n_months_over_band,
+               metrics->'window' AS window
+        FROM deriv.kat_runs
+        ORDER BY index_name, params->>'fill_frac', created_at DESC
+    """, label="derivatives.kat_status")
+
+    runs = []
+    for r in rows or []:
+        runs.append({
+            "run_id": str(r.run_id),
+            "index_name": r.index_name,
+            "verdict": r.verdict,
+            "status": r.status,
+            "created_at": _iso(r.created_at),
+            "symbol": r.symbol,
+            "bug_fix": r.bug_fix,
+            "fill_frac": _num(r.fill_frac),
+            "tolerances": r.tolerances if isinstance(r.tolerances, dict) else {},
+            "monthly_corr": _num(r.monthly_corr),
+            "cagr_diff": _num(r.cagr_diff),
+            "maxdd_diff": _num(r.maxdd_diff),
+            "n_months": _num(r.n_months),
+            "worst_month_diff": _num(r.worst_month_diff),
+            "n_months_over_band": _num(r.n_months_over_band),
+            "window": r.window if isinstance(r.window, list) else None,
+        })
+
+    latest = max((x["created_at"] for x in runs if x["created_at"]), default=None)
+    return {"as_of": _now_iso(), "latest_run_at": latest, "runs": runs}
+
+
+# ---------------------------------------------------------------------------
 # Backtests
 # ---------------------------------------------------------------------------
 

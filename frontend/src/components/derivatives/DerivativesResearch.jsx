@@ -50,6 +50,113 @@ function ProseBlock({ label, text }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Live KAT status (kanban t_83758f8e) — verdicts render from
+// GET /api/derivatives/kat-status (deriv.kat_runs) on every page load, never
+// from stored data_blocker text. Empty/missing feed -> "KAT status
+// unavailable" badge + the stored blocker text carries the qualitative gate.
+// ---------------------------------------------------------------------------
+
+const KAT_INDEXES = ['BXM', 'PUT'];
+const katIsPass = v => (v || '').toUpperCase() === 'PASS';
+
+function KatMetric({ label, tip, value, tol, cmp = 'lte', int = false }) {
+  const fmt = v => int ? String(Math.round(Number(v))) : Number(v).toFixed(4);
+  const known = value != null && tol != null;
+  const ok = known && (cmp === 'gte' ? Number(value) >= Number(tol) : Number(value) <= Number(tol));
+  return (
+    <span className="flex items-baseline gap-1" title={tip}>
+      <span className="text-slate-500">{label}</span>
+      <span className={`font-mono ${!known ? 'text-slate-500' : ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+        {value != null ? fmt(value) : '—'}
+      </span>
+      <span className="text-slate-600 font-mono">{cmp === 'gte' ? '≥' : '≤'}{tol != null ? fmt(tol) : '—'}</span>
+    </span>
+  );
+}
+
+function KatLiveBlock({ kat, katLoaded }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!katLoaded) {
+    return <div className="mt-1.5"><span className="qr-chip qr-chip-slate">KAT …loading</span></div>;
+  }
+  const runs = kat?.runs || [];
+  if (!runs.length) {
+    return (
+      <div className="mt-1.5">
+        <span className="qr-chip qr-chip-slate" title="GET /api/derivatives/kat-status returned no runs — stored blocker text above is the only gate info available. Never a hardcoded verdict.">
+          KAT status unavailable
+        </span>
+      </div>
+    );
+  }
+
+  const covered = KAT_INDEXES.every(i => runs.some(r => r.index_name === i));
+  // Gate OPEN only when the latest run per (index, fill) is PASS for both indexes.
+  const gateOpen = covered && runs.every(r => katIsPass(r.verdict));
+  const byIndex = KAT_INDEXES.map(idx => {
+    const ir = runs.filter(r => r.index_name === idx);
+    if (!ir.length) return { idx, verdict: null };
+    const failRun = ir.find(r => !katIsPass(r.verdict));
+    return { idx, verdict: failRun ? failRun.verdict : 'PASS' };
+  });
+  const latestAt = kat.latest_run_at;
+
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className={`qr-chip ${gateOpen ? 'qr-chip-emerald' : 'qr-chip-rose'}`}
+          title="OPEN only when the latest deriv.kat_runs run per (index, fill_frac) is verdict PASS for both BXM and PUT; otherwise BLOCKED."
+        >
+          GATE {gateOpen ? 'OPEN' : 'BLOCKED'}
+        </span>
+        {byIndex.map(({ idx, verdict }) => (
+          <button
+            key={idx}
+            onClick={() => setExpanded(e => !e)}
+            className={`qr-chip cursor-pointer ${verdict == null ? 'qr-chip-slate' : katIsPass(verdict) ? 'qr-chip-emerald' : 'qr-chip-rose'}`}
+            title="Latest KAT verdict for this index (live from deriv.kat_runs) — click to expand run detail vs tolerances"
+          >
+            {idx} KAT: RUN · {verdict || 'NO RUN'}
+          </button>
+        ))}
+        <span className="text-[9px] text-slate-600 font-mono">
+          live · deriv.kat_runs · latest {latestAt ? latestAt.slice(0, 16).replace('T', ' ') + 'Z' : '—'}
+        </span>
+      </div>
+      {expanded && (
+        <div className="mt-2 space-y-1.5">
+          {runs.map(r => {
+            const t = r.tolerances || {};
+            return (
+              <div key={r.run_id} className="rounded border border-white/[0.06] bg-white/[0.02] px-2 py-1.5">
+                <div className="flex items-center gap-2 flex-wrap text-[9px] font-mono text-slate-500">
+                  <span className={`qr-chip ${katIsPass(r.verdict) ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{r.verdict || '—'}</span>
+                  <span className="text-slate-300">{r.index_name} · fill {r.fill_frac}</span>
+                  <span>run {String(r.run_id).slice(0, 8)}</span>
+                  <span>{r.created_at ? r.created_at.slice(0, 16).replace('T', ' ') + 'Z' : '—'}</span>
+                  {r.symbol && <span>{r.symbol}</span>}
+                  {r.bug_fix && <span className="text-slate-600">{r.bug_fix}</span>}
+                  {Array.isArray(r.window) && r.window.length === 2 && <span>window {r.window[0]} → {r.window[1]}</span>}
+                  {r.n_months != null && <span>{Math.round(r.n_months)} months</span>}
+                </div>
+                <div className="flex items-center gap-3 flex-wrap mt-1 text-[9px]">
+                  <KatMetric label="corr" tip="monthly_corr vs tolerance (min)" value={r.monthly_corr} tol={t.monthly_corr} cmp="gte" />
+                  <KatMetric label="cagrΔ" tip="cagr_diff vs tolerance (abs max)" value={r.cagr_diff} tol={t.cagr_abs} />
+                  <KatMetric label="maxddΔ" tip="maxdd_diff vs tolerance (abs max)" value={r.maxdd_diff} tol={t.maxdd_abs} />
+                  <KatMetric label="mo>band" tip={`months with |monthly diff| over the ${t.month_over_band ?? '—'} band, vs tolerance (max)`} value={r.n_months_over_band} tol={t.n_months_over} int />
+                  <KatMetric label="worstΔ" tip="worst_month_diff vs tolerance (max)" value={r.worst_month_diff} tol={t.worst_month} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Full verbatim research card for the selected candidate (thesis / entry /
 // exit / kill conditions / provenance) — replaces the old always-on prose
 // wall; content renders on demand, straight from the registry.
@@ -102,6 +209,8 @@ export function DerivativesResearch() {
   const [fVenue, setFVenue] = useState('ALL');
   const [fStage, setFStage] = useState('ALL');
   const [selectedId, setSelectedId] = useState(null);
+  const [kat, setKat] = useState(null);        // null = feed failed/empty
+  const [katLoaded, setKatLoaded] = useState(false);
 
   useEffect(() => {
     let dead = false;
@@ -110,6 +219,18 @@ export function DerivativesResearch() {
       // Defensive shape guard — accept only the documented contract.
       setData(d && Array.isArray(d.strategies) ? d : null);
       setLoaded(true);
+    });
+    return () => { dead = true; };
+  }, []);
+
+  // Live KAT verdicts (t_83758f8e) — refetched with the page, never cached
+  // into any static feed; the banner reads deriv.kat_runs via the endpoint.
+  useEffect(() => {
+    let dead = false;
+    api.get('/api/derivatives/kat-status').then(d => {
+      if (dead) return;
+      setKat(d && Array.isArray(d.runs) ? d : null);
+      setKatLoaded(true);
     });
     return () => { dead = true; };
   }, []);
@@ -191,8 +312,11 @@ export function DerivativesResearch() {
 
       {data && noRuns && rank1Blocker && (
         <div className="qr-surface px-3 py-2 border-l-2 border-slate-500">
-          <span className="qr-label mr-2">Blocking decision · rank 1</span>
-          <span className="text-[10px] text-slate-400">{rank1Blocker}</span>
+          <div className="flex items-baseline gap-2">
+            <span className="qr-label mr-2 shrink-0">Blocking decision · rank 1</span>
+            <span className="text-[10px] text-slate-400">{rank1Blocker}</span>
+          </div>
+          <KatLiveBlock kat={kat} katLoaded={katLoaded} />
         </div>
       )}
 
