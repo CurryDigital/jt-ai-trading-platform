@@ -1,9 +1,12 @@
 // Shared primitives for the Derivatives vertical.
 // Containment contract: this folder is the ONLY place derivatives UI lives.
-// It must not import from other tabs' components and other tabs must not
-// import from here. Data comes exclusively from /api/derivatives/* (Phase 2);
-// until those endpoints serve real rows every panel renders an honest
-// PENDING state — never synthetic data.
+// Data separation is absolute: /api/derivatives/* and gold.derivatives_*
+// only — nothing feeds or reads the equity books. Presentation, per the
+// user's derivatives_page_alignment_v1 goal (2026-10-17), deliberately
+// REUSES the platform kit (jtkit Chip/Button/KpiTile, YearlyBars + Metric
+// from StrategiesWorkspace) so the tab looks like IPO/Performance; that
+// import direction is sanctioned by that goal and supersedes the earlier
+// no-cross-imports note (which was about data, not look).
 
 // Blocking data tasks (kanban, trading board) — named in tooltips per the
 // data-honesty rule, never as inline clutter:
@@ -112,18 +115,29 @@ export function DerivKpiStrip({ tiles, task }) {
 }
 
 // Real-row table: same header contract as DerivTableShell, but renders rows.
-// cols: [{label, tip, render(row) | key, cl(row)}]. Rows are already
-// normalized by the caller; absent cells render '—', never a fake zero.
-export function DerivTable({ cols, rows, empty, sub, rowKey, onRowClick, selectedId }) {
+// cols: [{label, tip, render(row) | key, cl(row), width (fixed px max-width,
+// truncated), sortKey}]. Rows are already normalized by the caller; absent
+// cells render '—', never a fake zero. Sorting: pass sort={key,dir} + onSort
+// and mark sortable columns with sortKey — header becomes a toggle button.
+export function DerivTable({ cols, rows, empty, sub, rowKey, onRowClick, selectedId, sort, onSort }) {
   return (
     <div className="rounded border border-white/[0.06] overflow-hidden">
       <div style={DERIV_SCROLL}>
-        <table className="w-full text-left border-collapse">
+        <table className="w-full text-left border-collapse table-fixed">
           <thead>
             <tr className="border-b border-white/[0.06]">
               {cols.map(c => (
-                <th key={c.label} className="qr-label px-2 py-1.5 whitespace-nowrap" title={c.tip || c.label}>
+                <th
+                  key={c.label}
+                  className={`qr-label px-2 py-1.5 whitespace-nowrap ${c.sortKey && onSort ? 'cursor-pointer select-none hover:text-slate-300' : ''} ${c.num ? 'text-right' : ''}`}
+                  title={c.tip || c.label}
+                  style={c.width ? { width: c.width, maxWidth: c.width } : undefined}
+                  onClick={c.sortKey && onSort ? () => onSort(c.sortKey) : undefined}
+                >
                   {c.label}
+                  {c.sortKey && sort?.key === c.sortKey && (
+                    <span className="ml-0.5 text-slate-400">{sort.dir === 'desc' ? '▼' : '▲'}</span>
+                  )}
                 </th>
               ))}
             </tr>
@@ -151,8 +165,9 @@ export function DerivTable({ cols, rows, empty, sub, rowKey, onRowClick, selecte
                   return (
                     <td
                       key={c.label}
-                      className={`px-2 py-1.5 text-[11px] whitespace-nowrap ${c.cl ? (typeof c.cl === 'function' ? c.cl(r) : c.cl) : 'text-slate-300'}`}
-                      title={c.cellTip ? c.cellTip(r) : undefined}
+                      className={`px-2 py-1.5 text-[11px] whitespace-nowrap overflow-hidden text-ellipsis ${c.num ? 'text-right' : ''} ${c.cl ? (typeof c.cl === 'function' ? c.cl(r) : c.cl) : 'text-slate-300'}`}
+                      style={c.width ? { maxWidth: c.width } : undefined}
+                      title={c.cellTip ? c.cellTip(r) : (typeof v === 'string' && c.width ? v : undefined)}
                     >
                       {v == null || v === '' ? '—' : v}
                     </td>
@@ -244,4 +259,64 @@ export function DerivChipSkeleton({ groups }) {
       ))}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// derivatives_page_alignment_v1 (2026-10-17) — shared labels & formatters
+// ---------------------------------------------------------------------------
+
+// RESEARCH-ONLY provenance chip — mounts wherever a performance number shows
+// (evidence_class on every stored run is RESEARCH-ONLY; the label must travel
+// with the number, per the goal's labels section). Slate, never emerald:
+// this is a caveat, not a pass.
+export function DerivResearchOnlyChip({ tip }) {
+  return (
+    <span
+      className="qr-chip qr-chip-slate"
+      title={tip || 'Evidence class RESEARCH-ONLY (gold.derivatives_backtest_runs.parameters_used.evidence_class): research backtest metrics — not paper, not UAT, not live; no capital attached.'}
+    >
+      Research-only
+    </span>
+  );
+}
+
+// Thin-sample badge under the platform's publishable gate: a strategy is
+// publishable to the equity pipeline only with OOS trades >= 30
+// (backend strategies.py researcher gate: sharpe>=0.5, |mdd|<=20%,
+// trades>=30, returns present). Below that the sample is too thin to read.
+export const PUBLISHABLE_MIN_TRADES = 30;
+export function DerivThinSampleChip({ trades }) {
+  if (trades == null || trades >= PUBLISHABLE_MIN_TRADES) return null;
+  return (
+    <span
+      className="qr-chip qr-chip-slate"
+      title={`Thin sample: ${trades} OOS trades < ${PUBLISHABLE_MIN_TRADES} — the platform's publishable gate (Strategies researcher feed) requires at least ${PUBLISHABLE_MIN_TRADES} OOS trades before metrics are readable.`}
+    >
+      Thin sample · {trades}&lt;{PUBLISHABLE_MIN_TRADES}
+    </span>
+  );
+}
+
+// Derivatives run metrics are stored as FRACTIONS (verified live 2026-10-17:
+// returns_oos 0.01783, win_rate 0.533, max_drawdown 0.02499). Deterministic
+// per-field conversion — never magnitude-sniffing.
+export const fpct = (v, d = 1) => v == null ? null : `${(Number(v) * 100) >= 0 ? '+' : ''}${(Number(v) * 100).toFixed(d)}%`;
+export const fpctBare = (v, d = 1) => v == null ? null : `${(Number(v) * 100).toFixed(d)}%`;
+// Drawdowns are stored positive; display as a negative (a drawdown is a loss).
+export const fmdd = (v, d = 1) => v == null ? null : `−${Math.abs(Number(v) * 100).toFixed(d)}%`;
+
+// Variant display labels (parameters_used.variant: twin / v1 / v2).
+export const VARIANT_LABEL = { twin: 'twin', v1: 'V1', v2: 'V2' };
+export const variantLabel = (v) => VARIANT_LABEL[(v || '').toLowerCase()] || (v ? String(v).toUpperCase() : '—');
+
+// Named stress windows used for the OOS-coverage note: if a run's OOS window
+// overlaps none of these, the page must say so (stress evidence then accrues
+// forward only — 2026-10-17 no-paid-data policy).
+export const NAMED_STRESS_WINDOWS = [
+  { name: 'COVID crash', start: '2020-02-19', end: '2020-04-30' },
+  { name: '2022 bear', start: '2022-01-03', end: '2022-10-31' },
+];
+export function oosCoversNamedStress(oosStart, oosEnd) {
+  if (!oosStart || !oosEnd) return false;
+  return NAMED_STRESS_WINDOWS.some(w => oosStart <= w.end && oosEnd >= w.start);
 }

@@ -76,7 +76,7 @@ def get_derivative_strategies(db: Session = Depends(get_db)):
                s.research_rank, s.expression_template, s.baseline_spec,
                s.max_loss_per_position_usd, s.max_pct_nav_at_risk, s.nav_basis,
                s.kill_conditions, s.data_blocker, s.source_doc,
-               s.structure_params, s.risk_template,
+               s.structure_params, s.risk_template, s.evidence_class,
                s.updated_at,
                r.run_id AS latest_run_id,
                r.sharpe_oos, r.returns_oos, r.win_rate_oos,
@@ -89,11 +89,26 @@ def get_derivative_strategies(db: Session = Depends(get_db)):
                    oos_start, oos_end
             FROM gold.derivatives_backtest_runs r
             WHERE r.strategy_id = s.strategy_id
-            ORDER BY r.created_at DESC
+            -- deterministic: variant rows of one run share created_at, so
+            -- tie-break on run_number (the headline row = lowest run_number,
+            -- the structure-consistent 'twin' variant when one exists)
+            ORDER BY r.created_at DESC, r.run_number ASC
             LIMIT 1
         ) r ON TRUE
         ORDER BY s.research_rank ASC NULLS LAST, s.strategy_id
     """, label="derivatives.strategies")
+
+    # All runs per strategy (every variant, both bases) for the candidate
+    # card's variants mini-table — response-only enrichment, nothing stored.
+    run_rows = safe_query(db, """
+        SELECT * FROM gold.derivatives_backtest_runs
+        ORDER BY strategy_id, run_number ASC
+        LIMIT 2000
+    """, label="derivatives.strategies.runs")
+    episodes = _episodes_by_run(db)
+    runs_by_strategy = {}
+    for rr in run_rows or []:
+        runs_by_strategy.setdefault(rr.strategy_id, []).append(_run_row(rr, episodes))
 
     strategies = []
     counts = {"options": 0, "futures": 0, "us": 0, "hk": 0, "backtested": 0}
@@ -131,6 +146,7 @@ def get_derivative_strategies(db: Session = Depends(get_db)):
             "kill_conditions": list(r.kill_conditions) if r.kill_conditions else [],
             "data_blocker": r.data_blocker,
             "source_doc": r.source_doc,
+            "evidence_class": r.evidence_class,
             "updated_at": _iso(r.updated_at),
             # Latest-run OOS metrics — null until the backtest ledger lands.
             "latest_run_id": str(r.latest_run_id) if r.latest_run_id else None,
@@ -142,6 +158,8 @@ def get_derivative_strategies(db: Session = Depends(get_db)):
             "profit_factor_oos": _num(r.profit_factor_oos),
             "oos_start": _iso(r.oos_start),
             "oos_end": _iso(r.oos_end),
+            # Every run/variant for this strategy, both bases (see _run_row).
+            "runs": runs_by_strategy.get(r.strategy_id, []),
         })
 
     return {
@@ -215,7 +233,61 @@ def get_kat_status(db: Session = Depends(get_db)):
 # Backtests
 # ---------------------------------------------------------------------------
 
-def _run_row(r):
+def _params(r):
+    """parameters_used jsonb → dict (never raises)."""
+    p = getattr(r, "parameters_used", None)
+    return p if isinstance(p, dict) else {}
+
+
+def _episodes_by_run(db):
+    """Independent-episode count per run from the trade ledger.
+
+    An episode = maximal cluster of overlapping trades: a new episode starts
+    when a trade's entry_date falls AFTER every currently-open trade's exit
+    (open trades count as open through the run's OOS end). None per run when
+    the ledger has no rows for it — 'not computable', never a fake 0.
+    """
+    rows = safe_query(db, """
+        SELECT run_id, entry_date, exit_date
+        FROM gold.derivatives_backtest_trades
+        ORDER BY run_id, entry_date NULLS LAST
+    """, label="derivatives.backtests.episodes")
+    if not rows:
+        return {}
+    oos_end = {}
+    for r in safe_query(db, "SELECT run_id, oos_end FROM gold.derivatives_backtest_runs",
+                        label="derivatives.backtests.episodes.windows") or []:
+        oos_end[str(r.run_id)] = r.oos_end
+    by_run = {}
+    for t in rows:
+        by_run.setdefault(str(t.run_id), []).append((t.entry_date, t.exit_date))
+    out = {}
+    for rid, ivs in by_run.items():
+        end_fallback = oos_end.get(rid)
+        ivs = sorted(ivs, key=lambda x: (x[0] is None, x[0]))
+        episodes = 0
+        cur_end = None        # max exit date of the current episode
+        open_ended = False    # current episode holds a trade with no exit
+        for entry, exit_ in ivs:
+            if entry is None:
+                continue
+            eff_exit = exit_ or end_fallback
+            if cur_end is None and not open_ended:
+                episodes += 1
+            elif open_ended or entry <= cur_end:
+                pass          # overlaps the current episode
+            else:
+                episodes += 1
+            open_ended = open_ended or eff_exit is None
+            if eff_exit is not None:
+                cur_end = eff_exit if cur_end is None else max(cur_end, eff_exit)
+        out[rid] = episodes
+    return out
+
+
+def _run_row(r, episodes=None):
+    p = _params(r)
+    oo = p.get("option_only") if isinstance(p.get("option_only"), dict) else None
     return {
         "run_id": str(r.run_id),
         "strategy_id": r.strategy_id,
@@ -237,6 +309,19 @@ def _run_row(r):
         "all_risk_gates_passed": r.all_risk_gates_passed,
         "notes": r.notes,
         "created_at": _iso(r.created_at),
+        # Run-params passthrough (derivatives_page_alignment_v1): variant +
+        # basis split. Headline sharpe/returns/mdd above are TOTAL-BASIS
+        # (rf=0, T-bill carry included) per parameters_used.basis_label;
+        # option_only carries the carry-free option-leg figures per window.
+        "variant": p.get("variant"),
+        "run_label": p.get("run_label"),
+        "basis_label": p.get("basis_label"),
+        "evidence_class": p.get("evidence_class"),
+        "gold_data_tag": p.get("gold_data_tag"),
+        "option_only": oo,
+        # Independent episode count from the trade ledger; None when the
+        # ledger has no rows for this run (not computable, not zero).
+        "episodes_oos": (episodes or {}).get(str(r.run_id)),
     }
 
 
@@ -245,12 +330,14 @@ def get_derivative_backtests(db: Session = Depends(get_db)):
     """All derivative backtest runs + summary KPIs for the Backtest strip."""
     rows = safe_query(db, """
         SELECT * FROM gold.derivatives_backtest_runs
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, run_number ASC
         LIMIT 500
     """, label="derivatives.backtests")
 
-    runs = [_run_row(r) for r in rows or []]
+    episodes = _episodes_by_run(db)
+    runs = [_run_row(r, episodes) for r in rows or []]
     sharpes = [r["sharpe_oos"] for r in runs if r["sharpe_oos"] is not None]
+    pfs = [r["profit_factor_oos"] for r in runs if r["profit_factor_oos"] is not None]
     return {
         "runs": runs,
         "count": len(runs),
@@ -259,6 +346,9 @@ def get_derivative_backtests(db: Session = Depends(get_db)):
             "strategies": len({r["strategy_id"] for r in runs}),
             "latest_run": runs[0]["created_at"] if runs else None,
             "best_sharpe_oos": max(sharpes) if sharpes else None,
+            # PF is stored once per run (total-basis); not split by basis.
+            "best_pf_oos": max(pfs) if pfs else None,
+            "pf_ge_1": sum(1 for p in pfs if p >= 1.0),
         },
         "as_of": _now_iso(),
     }
@@ -321,7 +411,7 @@ def get_derivative_backtest_detail(run_id: str, db: Session = Depends(get_db)):
         a["trades"] += 1
 
     return {
-        "run": _run_row(run),
+        "run": _run_row(run, _episodes_by_run(db)),
         "trades": trade_rows,
         "trade_count": len(trade_rows),
         "curve": {"source": "derived_from_trades", "points": curve},

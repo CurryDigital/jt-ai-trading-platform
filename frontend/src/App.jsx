@@ -954,7 +954,7 @@ export default function App() {
         )}
 
         {/* Derivatives tab — contained vertical; own components, own API namespace */}
-        {currentTab === 'derivatives' && <DerivativesTab sub={activeSubTab} />}
+        {currentTab === 'derivatives' && <DerivativesTab sub={activeSubTab} onSub={(s) => setSubTab('derivatives', s)} />}
 
         {currentTab === 'strategy_detail'  && (
           selectedStrategyId

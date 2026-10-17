@@ -1,26 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, fmtNum } from '../../utils.js';
+import { api } from '../../utils.js';
 import {
-  DerivPanel, DerivKpiStrip, DerivTable, DerivChipFilter,
+  DerivPanel, DerivKpiStrip, DerivTable, DerivChipFilter, DerivResearchOnlyChip,
+  fmdd,
   TASK_RESEARCH_REGISTRY,
 } from './shared.jsx';
+import { DerivCandidateCard } from './DerivCandidateCard.jsx';
 
 // Derivatives ▸ Research — rank-ordered research queue for derivative
 // strategy candidates.
 // Phase 2 (2026-10-02, t_d67907e4): LIVE on GET /api/derivatives/strategies
-// (gold.derivatives_strategies, qr_research t_736850c6 — 9 rows).
+// (gold.derivatives_strategies, qr_research t_736850c6).
 //
-// 2026-10-09 rework (user: 'page is useless — all zeros, wall of text'):
-// the registry rows are rich (rank / structure / risk budget / baseline /
-// kill conditions) but the old layout led with 5 permanently-null OOS
-// metric columns plus a second prose-wall panel. Now: one queue table with
-// the actionable fields up front; clicking a row opens the full verbatim
-// research card below the table. OOS metric columns are added automatically
-// once gold.derivatives_backtest_runs has its first row (any latest_run_id
-// != null) — until then they are absent, not a wall of dashes.
-
-const TRUNC = { maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'bottom' };
-const TRUNC_W = { maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'bottom' };
+// derivatives_page_alignment_v1 (2026-10-17): platform-aligned look.
+// - Queue table fits 1280px: 'Must beat' moved out of the row (it stays in
+//   the expanded card), 'Blocked on' is a fixed truncated width, and
+//   Sharpe/PF/MDD/Trades are sortable columns off the headline run
+//   (lowest run_number = the twin variant; both bases live on the card).
+//   Default sort = research rank.
+// - The rank-1 blocking-decision banner and the live KAT chip row render
+//   ALWAYS. (They used to be gated on zero backtested candidates, so they
+//   vanished the moment the first runs landed on 2026-10-17 — an emergent
+//   condition of the 2026-10-09 design, not a deliberate removal.)
+// - A candidate with runs expands into DerivCandidateCard (IPO-card anatomy:
+//   six metrics + episodes, variants mini-table with both bases, SIM/PAPER/
+//   UAT/LIVE ladder, verbatim rules, next-gate line, View detail only).
+//   Candidates without runs keep the verbatim prose ResearchCard.
 
 // Render a timestamp unambiguously: full ISO-8601 seconds + explicit UTC
 // marker ('2026-10-15T05:15:50Z'). Accepts 'T' or space separators and a
@@ -35,15 +40,6 @@ function fmtIsoUtc(s) {
   if (Number.isNaN(d.getTime())) return String(s);
   return d.toISOString().slice(0, 19) + 'Z';
 }
-
-// OOS metric columns — only mounted when at least one strategy has a run.
-const OOS_COLS = [
-  { label: 'Sharpe OOS', tip: 'Out-of-sample Sharpe from gold.derivatives_backtest_runs', render: r => fmtNum(r.sharpe_oos), cl: 'text-slate-400 font-mono' },
-  { label: 'Ret OOS', tip: 'Out-of-sample return — per-field unit contract pins with the first run', render: r => fmtNum(r.returns_oos), cl: 'text-slate-400 font-mono' },
-  { label: 'Win %', tip: 'Out-of-sample win rate', render: r => fmtNum(r.win_rate_oos), cl: 'text-slate-400 font-mono' },
-  { label: 'MDD', tip: 'Out-of-sample max drawdown', render: r => fmtNum(r.max_drawdown_oos), cl: 'text-slate-400 font-mono' },
-  { label: 'Trades', tip: 'Out-of-sample trade count', key: 'trade_count_oos', cl: 'text-slate-400 font-mono' },
-];
 
 function riskBudget(r) {
   const ml = r.max_loss_per_position_usd, nav = r.max_pct_nav_at_risk;
@@ -172,9 +168,9 @@ function KatLiveBlock({ kat, katLoaded }) {
   );
 }
 
-// Full verbatim research card for the selected candidate (thesis / entry /
-// exit / kill conditions / provenance) — replaces the old always-on prose
-// wall; content renders on demand, straight from the registry.
+// Full verbatim research card for candidates WITHOUT runs (thesis / entry /
+// exit / kill conditions / provenance). Candidates with runs expand into
+// DerivCandidateCard instead (IPO-card anatomy).
 function ResearchCard({ r }) {
   const kills = Array.isArray(r.kill_conditions) ? r.kill_conditions : [];
   return (
@@ -204,20 +200,32 @@ function ResearchCard({ r }) {
           </ul>
         </div>
       )}
-      {r.data_blocker && <ProseBlock label="Data blocker" text={r.data_blocker} />}
+      {r.data_blocker && <ProseBlock label="Next gate (display only)" text={r.data_blocker} />}
       <div className="text-[9px] text-slate-600 font-mono">
         {[
           r.source_doc,
           r.nav_basis ? `NAV basis ${r.nav_basis}` : null,
           r.updated_at ? `updated ${String(r.updated_at).slice(0, 10)}` : null,
-          r.latest_run_id ? `run ${r.latest_run_id}` : 'no backtest run yet',
+          'no backtest run yet',
         ].filter(Boolean).join(' · ')}
       </div>
     </div>
   );
 }
 
-export function DerivativesResearch() {
+// Headline run per candidate (backend orders runs by run_number ASC — the
+// twin/structure-consistent variant leads). Queue metric columns read from it.
+const headlineOf = (r) => (r.runs && r.runs.length ? r.runs[0] : null);
+
+const SORTERS = {
+  rank:   { get: r => r.research_rank ?? 999, dir: 'asc' },
+  sharpe: { get: r => headlineOf(r)?.sharpe_oos ?? null, dir: 'desc' },
+  pf:     { get: r => headlineOf(r)?.profit_factor_oos ?? null, dir: 'desc' },
+  mdd:    { get: r => headlineOf(r)?.max_drawdown_oos ?? null, dir: 'asc' },
+  trades: { get: r => headlineOf(r)?.trade_count_oos ?? null, dir: 'desc' },
+};
+
+export function DerivativesResearch({ onViewRuns }) {
   const [data, setData] = useState(null);       // null = not loaded / failed
   const [loaded, setLoaded] = useState(false);
   const [fInst, setFInst] = useState('ALL');
@@ -226,6 +234,7 @@ export function DerivativesResearch() {
   const [selectedId, setSelectedId] = useState(null);
   const [kat, setKat] = useState(null);        // null = feed failed/empty
   const [katLoaded, setKatLoaded] = useState(false);
+  const [sort, setSort] = useState({ key: 'rank', dir: 'asc' });
 
   useEffect(() => {
     let dead = false;
@@ -250,86 +259,112 @@ export function DerivativesResearch() {
     return () => { dead = true; };
   }, []);
 
-  // Rank-ordered canonical list (research_rank asc, nulls last).
-  const all = useMemo(() => [...(data?.strategies || [])].sort((a, b) => {
-    const ra = a.research_rank ?? 999, rb = b.research_rank ?? 999;
-    return ra - rb;
-  }), [data]);
+  const all = useMemo(() => [...(data?.strategies || [])], [data]);
 
-  const rows = useMemo(() => all.filter(r => {
-    if (fInst !== 'ALL' && (r.instrument || '').toUpperCase() !== fInst) return false;
-    if (fVenue !== 'ALL' && (r.venue || '').toUpperCase() !== fVenue) return false;
-    if (fStage === 'BACKTESTED') return r.latest_run_id != null;
-    if (fStage === 'RESEARCH') return r.latest_run_id == null;
-    return true;
-  }), [all, fInst, fVenue, fStage]);
+  const rows = useMemo(() => {
+    const filtered = all.filter(r => {
+      if (fInst !== 'ALL' && (r.instrument || '').toUpperCase() !== fInst) return false;
+      if (fVenue !== 'ALL' && (r.venue || '').toUpperCase() !== fVenue) return false;
+      if (fStage === 'BACKTESTED') return r.latest_run_id != null;
+      if (fStage === 'RESEARCH') return r.latest_run_id == null;
+      return true;
+    });
+    const s = SORTERS[sort.key] || SORTERS.rank;
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const va = s.get(a), vb = s.get(b);
+      // Nulls always last, whichever direction.
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return va === vb ? 0 : (va < vb ? -1 : 1) * dir;
+    });
+  }, [all, fInst, fVenue, fStage, sort]);
 
-  const hasRuns = all.some(r => r.latest_run_id != null);
+  const onSort = (key) => setSort(prev =>
+    prev.key === key
+      ? { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+      : { key, dir: (SORTERS[key] || SORTERS.rank).dir });
 
   const cols = useMemo(() => [
-    { label: '#', tip: 'Research priority rank (qr_research ordering)',
-      render: r => r.research_rank ?? '—', cl: 'text-slate-500 font-mono' },
+    { label: '#', tip: 'Research priority rank (qr_research ordering) — default sort',
+      render: r => r.research_rank ?? '—', cl: 'text-slate-500 font-mono', width: 26, num: true },
     { label: 'Candidate', tip: 'Registry display name + id (research-owned prose)',
       render: r => (
         <span>
           <span className="text-slate-100 font-semibold">{r.name || r.strategy_id}</span>
           <span className="block text-[9px] text-slate-500 font-mono">{r.strategy_id}</span>
         </span>
-      ) },
+      ), width: 168 },
     { label: 'Structure', tip: 'Expression template (option/future structure)',
       render: r => <span className="font-mono text-[10px]">{r.expression_template || '—'}</span>,
-      cl: 'text-slate-400' },
+      cl: 'text-slate-400', width: 96, cellTip: r => r.expression_template },
     { label: 'Underlying', tip: 'Underlying universe',
       render: r => (r.underlyings || []).length
-        ? <span style={TRUNC} title={(r.underlyings || []).join(', ')}>{(r.underlyings || []).join(', ')}</span>
-        : '—' },
+        ? (r.underlyings || []).join(', ')
+        : '—', width: 78, cellTip: r => (r.underlyings || []).join(', ') },
     { label: 'Stage', tip: 'Registry status + research phase',
       render: r => (
         <span className="flex items-center gap-1">
           <span className={`qr-chip qr-chip-slate ${r.status === 'parked' ? 'opacity-60' : ''}`}>{r.status || '—'}</span>
           {r.phase && r.phase !== r.status && <span className="text-[9px] text-slate-500">{r.phase}</span>}
         </span>
-      ) },
+      ), width: 108 },
     { label: 'Risk budget', tip: 'Max loss per position and max % of NAV at risk (registry-declared sizing)',
-      render: r => riskBudget(r), cl: 'text-slate-300 font-mono' },
-    { label: 'Must beat', tip: 'Pre-declared baseline the strategy must outperform to survive',
-      render: r => r.baseline_spec
-        ? <span style={TRUNC_W} title={r.baseline_spec}>{r.baseline_spec}</span>
-        : '—',
-      cl: 'text-slate-400' },
-    { label: 'Blocked on', tip: 'Data blocker standing between this candidate and its first backtest',
-      render: r => r.data_blocker
-        ? <span style={TRUNC_W} title={r.data_blocker}>{r.data_blocker}</span>
-        : '—',
-      cl: 'text-slate-400' },
+      render: r => riskBudget(r), cl: 'text-slate-300 font-mono', width: 92, cellTip: r => riskBudget(r) },
+    { label: 'Blocked on', tip: 'Next gate — data blocker standing between this candidate and promotion (display only, research-owned verbatim)',
+      render: r => r.data_blocker || null, cl: 'text-slate-400', width: 190, cellTip: r => r.data_blocker },
+    { label: 'Sharpe', tip: 'Headline run (twin variant) OOS Sharpe — TOTAL basis (carry-inclusive). Option-only per variant on the card below. RESEARCH-ONLY.',
+      sortKey: 'sharpe', num: true, width: 58,
+      render: r => headlineOf(r)?.sharpe_oos != null ? Number(headlineOf(r).sharpe_oos).toFixed(2) : null,
+      cl: 'text-slate-300 font-mono' },
+    { label: 'PF', tip: 'Headline run OOS profit factor (total-basis, as stored). Never green below 1.0. RESEARCH-ONLY.',
+      sortKey: 'pf', num: true, width: 50,
+      render: r => headlineOf(r)?.profit_factor_oos != null ? Number(headlineOf(r).profit_factor_oos).toFixed(2) : null,
+      cl: r => (headlineOf(r)?.profit_factor_oos != null && headlineOf(r).profit_factor_oos >= 1 ? 'text-emerald-400' : 'text-slate-300') + ' font-mono' },
+    { label: 'MDD', tip: 'Headline run OOS max drawdown, TOTAL basis (fraction → %). RESEARCH-ONLY.',
+      sortKey: 'mdd', num: true, width: 62,
+      render: r => fmdd(headlineOf(r)?.max_drawdown_oos, 1),
+      cl: 'text-rose-400 font-mono' },
+    { label: 'Trades', tip: 'Headline run OOS trade count (publishable gate ≥ 30). Episodes on the card below.',
+      sortKey: 'trades', num: true, width: 52,
+      render: r => headlineOf(r)?.trade_count_oos ?? null,
+      cl: 'text-slate-300 font-mono' },
   ], []);
-
-  const fullCols = useMemo(() => hasRuns ? [...cols, ...OOS_COLS] : cols, [cols, hasRuns]);
 
   const sum = data?.summary || {};
   const failed = loaded && !data;
   const inResearch = all.filter(r => (r.status || '').toLowerCase() === 'research').length;
   const parked = all.filter(r => (r.status || '').toLowerCase() === 'parked').length;
-  const rank1Blocker = all.find(r => r.data_blocker)?.data_blocker;
-  const noRuns = (sum.backtested ?? 0) === 0;
+  const runRows = all.reduce((n, r) => n + (r.runs?.length || 0), 0);
+  const rank1 = all.find(r => (r.research_rank ?? 999) === Math.min(...all.map(x => x.research_rank ?? 999)));
+  const rank1Blocker = rank1?.data_blocker || null;
   const selected = rows.find(r => r.strategy_id === selectedId) || null;
+  const selectedHasRuns = (selected?.runs?.length || 0) > 0;
 
   return (
     <div className="space-y-3">
       <DerivKpiStrip
         tiles={[
-          { label: 'Candidates', tip: 'Registered derivative strategy candidates (gold.derivatives_strategies)', value: sum.total ?? null, sub: 'research registry' },
-          { label: 'In research', tip: 'Status = research (actively being worked)', value: data ? inResearch : null, sub: 'queue' },
-          { label: 'Parked', tip: 'Status = parked (set aside, reason in the research card)', value: data ? parked : null, sub: 'queue' },
-          { label: 'Backtested', tip: 'Candidates with at least one OOS run in gold.derivatives_backtest_runs — 0 until each data blocker clears', value: data ? `${sum.backtested ?? 0} / ${sum.total ?? all.length}` : null, sub: noRuns ? 'blocked on data' : 'runs live' },
+          { label: 'Candidates', tip: 'Registered derivative strategy candidates (gold.derivatives_strategies)', value: sum.total ?? null,
+            sub: data ? `${sum.options ?? 0} option · ${sum.futures ?? 0} future · ${sum.us ?? 0} US / ${sum.hk ?? 0} HK` : 'loading' },
+          { label: 'In research', tip: 'Status = research (actively being worked)', value: data ? inResearch : null,
+            sub: data ? `of ${sum.total ?? all.length} registered` : 'loading' },
+          { label: 'Parked', tip: 'Status = parked (set aside, reason in the research card)', value: data ? parked : null,
+            sub: data ? `of ${sum.total ?? all.length} registered` : 'loading' },
+          { label: 'Backtested', tip: 'Candidates with at least one run in gold.derivatives_backtest_runs (variant rows count separately on the card)', value: data ? `${sum.backtested ?? 0} / ${sum.total ?? all.length}` : null,
+            sub: data ? (runRows ? `${runRows} variant rows` : 'no runs yet') : 'loading' },
         ]}
       />
 
-      {data && noRuns && rank1Blocker && (
+      {/* Rank-1 blocking decision + live KAT chips — ALWAYS visible (they were
+          previously gated on zero backtested candidates and vanished when the
+          first runs landed; that was emergent, not intended). */}
+      {data && rank1Blocker && (
         <div className="qr-surface px-3 py-2 border-l-2 border-slate-500">
           <div className="flex items-baseline gap-2">
             <span className="qr-label mr-2 shrink-0">Blocking decision · rank 1</span>
-            <span className="text-[10px] text-slate-400">{rank1Blocker}</span>
+            <span className="text-[10px] text-slate-400 whitespace-pre-wrap">{rank1Blocker}</span>
           </div>
           <KatLiveBlock kat={kat} katLoaded={katLoaded} />
         </div>
@@ -349,18 +384,23 @@ export function DerivativesResearch() {
         task={TASK_RESEARCH_REGISTRY}
         live={!!data}
         failed={failed}
-        note="Rank-ordered derivative strategy candidates — kept out of the equity strategy universe (Lab / Pipeline / Performance) by design. Click a row for the full research card (thesis / entry / exit / kill conditions, verbatim from the registry). OOS metric columns appear once the first backtest run lands."
+        note="Rank-ordered derivative strategy candidates — kept out of the equity strategy universe (Lab / Pipeline / Performance) by design. Click a row: candidates with runs expand into the strategy card (metrics, variants, ladder, rules); others show the verbatim research card. Metric columns read the headline (twin) run, total basis; click Sharpe / PF / MDD / Trades to sort (default = research rank)."
+        right={<DerivResearchOnlyChip />}
       >
         <DerivTable
-          cols={fullCols}
+          cols={cols}
           rows={rows}
           rowKey={r => r.strategy_id}
           empty={failed ? 'Feed unavailable — see badge tooltip.' : 'No candidates match the active filters.'}
           sub={data ? `${data.count ?? all.length} registered · ${rows.length} shown` : undefined}
           onRowClick={r => setSelectedId(id => id === r.strategy_id ? null : r.strategy_id)}
           selectedId={selectedId}
+          sort={sort}
+          onSort={onSort}
         />
-        {selected && <ResearchCard r={selected} />}
+        {selected && (selectedHasRuns
+          ? <DerivCandidateCard r={selected} onViewRuns={onViewRuns} />
+          : <ResearchCard r={selected} />)}
       </DerivPanel>
     </div>
   );

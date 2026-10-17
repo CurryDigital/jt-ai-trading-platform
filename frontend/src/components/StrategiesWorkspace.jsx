@@ -93,7 +93,9 @@ function AssetSeg({ asset, setAsset, opts, counts }) {
   );
 }
 
-function Metric({ label, value, color, big, tip, sub }) {
+// Exported 2026-10-17 (derivatives_page_alignment_v1): the Derivatives tab
+// reuses this exact Performance-card metric cell — no lookalike copies.
+export function Metric({ label, value, color, big, tip, sub }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }} title={tip || undefined}>
       <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>{label}</span>
