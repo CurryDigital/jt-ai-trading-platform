@@ -23,9 +23,11 @@ import { fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress, PUBLISHABLE_M
 // absent: annual returns derive from gold.derivatives_backtest_trades, which
 // is empty (aggregate-only runs) — bars mount once real per-year data exists.
 
-// Headline run = lowest run_number (the structure-consistent 'twin' variant
-// when one exists; backend orders runs by run_number ASC).
-const headlineRun = (r) => (r.runs && r.runs.length ? r.runs[0] : null);
+// Headline run = the V1 variant (candidate under evaluation). The twin is the
+// baseline — it stays in the variants table, never the headline (2026-10-18,
+// operator). Falls back to lowest run_number when no V1 exists.
+const headlineRun = (r) =>
+  (r.runs || []).find(v => (v.variant || '').toLowerCase() === 'v1') || (r.runs || [])[0] || null;
 
 const money = (v) => v == null ? '—' : `${Number(v) >= 0 ? '+' : '−'}$${Math.abs(Number(v)).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
@@ -79,10 +81,11 @@ function Ladder({ hasRuns }) {
   );
 }
 
-export function DerivCandidateCard({ r, onViewRuns }) {
+export function DerivCandidateCard({ r, onViewRuns, basis = 'opt' }) {
   const h = headlineRun(r);
   const kills = Array.isArray(r.kill_conditions) ? r.kill_conditions : [];
   const optOos = h?.option_only?.OOS || {};
+  const opt = basis === 'opt';
   const noStress = h ? !oosCoversNamedStress(h.oos_start, h.oos_end) : false;
   // Thin-sample keying: the MINIMUM episode count across variants decides
   // (weakest variant, not the headline twin). Null when no run has episodes.
@@ -109,23 +112,39 @@ export function DerivCandidateCard({ r, onViewRuns }) {
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{r.strategy_id}</span>
       </div>
 
-      {/* six-metric grid + episodes — headline (twin) variant, basis labelled */}
+      {/* six-metric grid + episodes — V1 headline on the shared basis toggle;
+          win rate neutral (2026-10-18: 53-58% win with negative option-only
+          P&L must not read green — colour lives on PF and P&L) */}
       {h && (
         <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
           <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-faint)', marginBottom: 5 }}
-            title={`Headline = ${variantLabel(h.variant)} variant (lowest run_number — the structure-consistent variant of run ${h.run_label || h.run_id.slice(0, 8)}). Sharpe/return/MDD are TOTAL basis: rf=0, T-bill cash carry included (${h.basis_label || 'see run params'}). Option-only figures are in the variants table below. RESEARCH-ONLY evidence class — no capital, no forward SIM.`}>
-            Backtest · OOS {String(h.oos_start || '—').slice(0, 7)}→{String(h.oos_end || '—').slice(0, 7)} · {variantLabel(h.variant)} · total-basis (carry-incl) · research-only
+            title={`Headline = ${variantLabel(h.variant)} variant — the candidate under evaluation (run ${h.run_label || h.run_id.slice(0, 8)}); the twin is the baseline, in the variants table. Basis = ${opt ? 'OPTION-ONLY (no cash carry)' : `TOTAL (rf=0, T-bill cash carry included — ${h.basis_label || 'see run params'})`} from the shared toggle. RESEARCH-ONLY evidence class — no capital, no forward SIM.`}>
+            Backtest · OOS {String(h.oos_start || '—').slice(0, 7)}→{String(h.oos_end || '—').slice(0, 7)} · {variantLabel(h.variant)} · {opt ? 'option-only' : 'total-basis (carry-incl)'} · research-only
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: '8px 8px' }}>
-            <Metric label="Sharpe · tot" value={h.sharpe_oos != null ? Number(h.sharpe_oos).toFixed(2) : '—'} big
-              tip="TOTAL basis (carry-inclusive). Option-only: see variants table." sub={optOos.sharpe != null ? `opt ${Number(optOos.sharpe).toFixed(2)}` : undefined} />
-            <Metric label="OOS ret · tot" value={fpct(h.returns_oos, 2) ?? '—'} color={h.returns_oos == null ? undefined : pnlColor(h.returns_oos)} big
-              tip="TOTAL basis OOS return (fraction → %). Option-only stores P&L $, not a return fraction." sub={optOos.pnl_usd != null ? `opt ${money(optOos.pnl_usd)}` : undefined} />
-            <Metric label="Win" value={fpctBare(h.win_rate_oos, 1) ?? '—'}
-              color={h.win_rate_oos == null ? undefined : h.win_rate_oos >= 0.5 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big
-              tip="OOS win rate (basis-invariant)" />
-            <Metric label="MDD · tot" value={fmdd(h.max_drawdown_oos, 2) ?? '—'} color="var(--pnl-neg)"
-              tip="TOTAL basis OOS max drawdown" sub={optOos.maxdd_pct_nav != null ? `opt ${fmdd(optOos.maxdd_pct_nav, 2)} NAV` : undefined} />
+            {opt ? (
+              <Metric label="Sharpe · opt" value={optOos.sharpe != null ? Number(optOos.sharpe).toFixed(2) : '—'} big
+                tip="OPTION-ONLY basis: option legs alone, no T-bill carry." sub={h.sharpe_oos != null ? `tot ${Number(h.sharpe_oos).toFixed(2)}` : undefined} />
+            ) : (
+              <Metric label="Sharpe · tot" value={h.sharpe_oos != null ? Number(h.sharpe_oos).toFixed(2) : '—'} big
+                tip="TOTAL basis (carry-inclusive). Option-only: see variants table." sub={optOos.sharpe != null ? `opt ${Number(optOos.sharpe).toFixed(2)}` : undefined} />
+            )}
+            {opt ? (
+              <Metric label="Opt P&L" value={money(optOos.pnl_usd)} color={optOos.pnl_usd == null ? undefined : pnlColor(optOos.pnl_usd)} big
+                tip="OPTION-ONLY basis: option-leg P&L in $ (no return fraction stored for this basis)." sub={h.returns_oos != null ? `tot ${fpct(h.returns_oos, 2)}` : undefined} />
+            ) : (
+              <Metric label="OOS ret · tot" value={fpct(h.returns_oos, 2) ?? '—'} color={h.returns_oos == null ? undefined : pnlColor(h.returns_oos)} big
+                tip="TOTAL basis OOS return (fraction → %). Option-only stores P&L $, not a return fraction." sub={optOos.pnl_usd != null ? `opt ${money(optOos.pnl_usd)}` : undefined} />
+            )}
+            <Metric label="Win" value={fpctBare(h.win_rate_oos, 1) ?? '—'} big
+              tip="OOS win rate (basis-invariant). Neutral colour — a 53-58% win rate with negative option-only P&L is not green (2026-10-18). Colour lives on PF and P&L." />
+            {opt ? (
+              <Metric label="MDD · opt" value={optOos.maxdd_pct_nav != null ? fmdd(optOos.maxdd_pct_nav, 2) : '—'} color="var(--pnl-neg)" big
+                tip="OPTION-ONLY basis OOS max drawdown, % of NAV" sub={h.max_drawdown_oos != null ? `tot ${fmdd(h.max_drawdown_oos, 2)}` : undefined} />
+            ) : (
+              <Metric label="MDD · tot" value={fmdd(h.max_drawdown_oos, 2) ?? '—'} color="var(--pnl-neg)" big
+                tip="TOTAL basis OOS max drawdown" sub={optOos.maxdd_pct_nav != null ? `opt ${fmdd(optOos.maxdd_pct_nav, 2)} NAV` : undefined} />
+            )}
             <Metric label="Profit factor" value={h.profit_factor_oos != null ? Number(h.profit_factor_oos).toFixed(2) : '—'}
               color={h.profit_factor_oos != null && h.profit_factor_oos >= 1 ? 'var(--pnl-pos)' : undefined}
               tip="OOS profit factor as stored (total-basis run metric — no option-only split stored). Never green below 1.0." />

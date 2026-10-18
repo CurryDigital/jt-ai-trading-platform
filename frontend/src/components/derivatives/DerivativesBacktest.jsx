@@ -124,9 +124,9 @@ function runCols(basis) {
           render: r => money(r.option_only?.OOS?.pnl_usd), cl: r => pnlCl(r.option_only?.OOS?.pnl_usd) + ' font-mono', num: true }
       : { label: 'Return · tot', tip: 'TOTAL basis OOS return (carry-inclusive), stored as a fraction → %',
           render: r => fpct(r.returns_oos, 2), cl: r => pnlCl(r.returns_oos) + ' font-mono', num: true },
-    { label: 'Win', tip: 'OOS win rate (basis-invariant), stored as a fraction → %',
+    { label: 'Win', tip: 'OOS win rate (basis-invariant), stored as a fraction → %. Neutral colour (2026-10-18): a 53-58% win rate is not inherently good — colour lives on PF and P&L.',
       render: r => fpctBare(r.win_rate_oos, 1),
-      cl: r => (r.win_rate_oos == null ? 'text-slate-400' : r.win_rate_oos >= 0.5 ? 'text-emerald-400' : 'text-rose-400') + ' font-mono', num: true },
+      cl: 'text-slate-300 font-mono', num: true },
     opt
       ? { label: 'MDD · opt', tip: 'OPTION-ONLY basis: max drawdown as % of NAV (parameters_used.option_only.OOS.maxdd_pct_nav, stored as a fraction)',
           render: r => fmdd(r.option_only?.OOS?.maxdd_pct_nav, 2), cl: r => pnlCl(-(r.option_only?.OOS?.maxdd_pct_nav ?? 0)) + ' font-mono', num: true }
@@ -141,13 +141,12 @@ function runCols(basis) {
   ];
 }
 
-export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
+export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed, basis, setBasis }) {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [selRun, setSelRun] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailFailed, setDetailFailed] = useState(false);
-  const [basis, setBasis] = useState('opt');
 
   useEffect(() => {
     let dead = false;
@@ -159,8 +158,22 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
     return () => { dead = true; };
   }, []);
 
+  // Default state (2026-10-18, operator): open with the V1 run preselected,
+  // so Run Detail renders immediately (curve / annual P&L / ledger states)
+  // instead of an empty PENDING panel. Focus handoff (View detail) wins.
+  // Deferred setState per the lint rule.
+  useEffect(() => {
+    if (!data || selRun != null || focusStrategy) return;
+    const t = setTimeout(() => {
+      const v1 = (data.runs || []).find(r => (r.variant || '').toLowerCase() === 'v1');
+      if (v1) setSelRun(v1.run_id);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [data, selRun, focusStrategy]);
+
   // Focus handoff from the Research tab's "View detail" — select the
-  // strategy's headline run (lowest run_number = twin when present).
+  // strategy's V1 run (candidate under evaluation; twin is the baseline,
+  // never the headline — 2026-10-18). Falls back to lowest run_number.
   // setState deferred via timeout: the lint rule forbids synchronous setState
   // in an effect body (cascading renders).
   useEffect(() => {
@@ -168,7 +181,8 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
     const t = setTimeout(() => {
       const runs = (data.runs || []).filter(r => r.strategy_id === focusStrategy);
       if (runs.length) {
-        const headline = [...runs].sort((a, b) => (a.run_number ?? 99) - (b.run_number ?? 99))[0];
+        const v1 = runs.find(r => (r.variant || '').toLowerCase() === 'v1');
+        const headline = v1 || [...runs].sort((a, b) => (a.run_number ?? 99) - (b.run_number ?? 99))[0];
         setSelRun(headline.run_id);
       }
       onFocusConsumed && onFocusConsumed();

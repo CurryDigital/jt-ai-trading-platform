@@ -213,19 +213,22 @@ function ResearchCard({ r }) {
   );
 }
 
-// Headline run per candidate (backend orders runs by run_number ASC — the
-// twin/structure-consistent variant leads). Queue metric columns read from it.
-const headlineOf = (r) => (r.runs && r.runs.length ? r.runs[0] : null);
+// Queue headline = the V1 variant (the candidate under evaluation), NEVER the
+// twin (2026-10-18, operator: the twin is the baseline; a created_at
+// tie-break had the queue reading twin total-basis while Backtest showed
+// option-only for the same run — Sharpe 0.55 vs −1.06). Metrics follow the
+// shared basis toggle; option-only figures come from parameters_used.option_only.
+const v1Of = (r) => (r.runs || []).find(v => (v.variant || '').toLowerCase() === 'v1') || null;
 
 const SORTERS = {
   rank:   { get: r => r.research_rank ?? 999, dir: 'asc' },
-  sharpe: { get: r => headlineOf(r)?.sharpe_oos ?? null, dir: 'desc' },
-  pf:     { get: r => headlineOf(r)?.profit_factor_oos ?? null, dir: 'desc' },
-  mdd:    { get: r => headlineOf(r)?.max_drawdown_oos ?? null, dir: 'asc' },
-  trades: { get: r => headlineOf(r)?.trade_count_oos ?? null, dir: 'desc' },
+  sharpe: { get: (r, basis) => basis === 'opt' ? v1Of(r)?.option_only?.OOS?.sharpe ?? null : v1Of(r)?.sharpe_oos ?? null, dir: 'desc' },
+  pf:     { get: (r) => v1Of(r)?.profit_factor_oos ?? null, dir: 'desc' },
+  mdd:    { get: (r, basis) => basis === 'opt' ? v1Of(r)?.option_only?.OOS?.maxdd_pct_nav ?? null : v1Of(r)?.max_drawdown_oos ?? null, dir: 'asc' },
+  trades: { get: (r) => v1Of(r)?.trade_count_oos ?? null, dir: 'desc' },
 };
 
-export function DerivativesResearch({ onViewRuns }) {
+export function DerivativesResearch({ onViewRuns, basis, setBasis }) {
   const [data, setData] = useState(null);       // null = not loaded / failed
   const [loaded, setLoaded] = useState(false);
   const [fInst, setFInst] = useState('ALL');
@@ -235,6 +238,7 @@ export function DerivativesResearch({ onViewRuns }) {
   const [kat, setKat] = useState(null);        // null = feed failed/empty
   const [katLoaded, setKatLoaded] = useState(false);
   const [sort, setSort] = useState({ key: 'rank', dir: 'asc' });
+  const [bannerFull, setBannerFull] = useState(false);
 
   useEffect(() => {
     let dead = false;
@@ -272,21 +276,24 @@ export function DerivativesResearch({ onViewRuns }) {
     const s = SORTERS[sort.key] || SORTERS.rank;
     const dir = sort.dir === 'asc' ? 1 : -1;
     return [...filtered].sort((a, b) => {
-      const va = s.get(a), vb = s.get(b);
+      const va = s.get(a, basis), vb = s.get(b, basis);
       // Nulls always last, whichever direction.
       if (va == null && vb == null) return 0;
       if (va == null) return 1;
       if (vb == null) return -1;
       return va === vb ? 0 : (va < vb ? -1 : 1) * dir;
     });
-  }, [all, fInst, fVenue, fStage, sort]);
+  }, [all, fInst, fVenue, fStage, sort, basis]);
 
   const onSort = (key) => setSort(prev =>
     prev.key === key
       ? { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
       : { key, dir: (SORTERS[key] || SORTERS.rank).dir });
 
-  const cols = useMemo(() => [
+  const cols = useMemo(() => {
+    const opt = basis === 'opt';
+    const bLabel = opt ? 'option-only' : 'total';
+    return [
     { label: '#', tip: 'Research priority rank (qr_research ordering) — default sort',
       render: r => r.research_rank ?? '—', cl: 'text-slate-500 font-mono', width: 26, num: true },
     { label: 'Candidate', tip: 'Registry display name + id (research-owned prose)',
@@ -314,23 +321,27 @@ export function DerivativesResearch({ onViewRuns }) {
       render: r => riskBudget(r), cl: 'text-slate-300 font-mono', width: 92, cellTip: r => riskBudget(r) },
     { label: 'Blocked on', tip: 'Next gate — data blocker standing between this candidate and promotion (display only, research-owned verbatim)',
       render: r => r.data_blocker || null, cl: 'text-slate-400', width: 190, cellTip: r => r.data_blocker },
-    { label: 'Sharpe', tip: 'Headline run (twin variant) OOS Sharpe — TOTAL basis (carry-inclusive). Option-only per variant on the card below. RESEARCH-ONLY.',
+    { label: 'Sharpe', tip: `V1 · OOS · ${bLabel} — the candidate under evaluation (the twin is the baseline, never the headline). RESEARCH-ONLY.`,
       sortKey: 'sharpe', num: true, width: 58,
-      render: r => headlineOf(r)?.sharpe_oos != null ? Number(headlineOf(r).sharpe_oos).toFixed(2) : null,
+      render: r => {
+        const v = opt ? v1Of(r)?.option_only?.OOS?.sharpe : v1Of(r)?.sharpe_oos;
+        return v != null ? Number(v).toFixed(2) : null;
+      },
       cl: 'text-slate-300 font-mono' },
-    { label: 'PF', tip: 'Headline run OOS profit factor (total-basis, as stored). Never green below 1.0. RESEARCH-ONLY.',
+    { label: 'PF', tip: 'V1 · OOS profit factor as stored (total-basis run metric — no option-only split stored). Never green below 1.0. RESEARCH-ONLY.',
       sortKey: 'pf', num: true, width: 50,
-      render: r => headlineOf(r)?.profit_factor_oos != null ? Number(headlineOf(r).profit_factor_oos).toFixed(2) : null,
-      cl: r => (headlineOf(r)?.profit_factor_oos != null && headlineOf(r).profit_factor_oos >= 1 ? 'text-emerald-400' : 'text-slate-300') + ' font-mono' },
-    { label: 'MDD', tip: 'Headline run OOS max drawdown, TOTAL basis (fraction → %). RESEARCH-ONLY.',
+      render: r => v1Of(r)?.profit_factor_oos != null ? Number(v1Of(r).profit_factor_oos).toFixed(2) : null,
+      cl: r => (v1Of(r)?.profit_factor_oos != null && v1Of(r).profit_factor_oos >= 1 ? 'text-emerald-400' : 'text-slate-300') + ' font-mono' },
+    { label: 'MDD', tip: `V1 · OOS max drawdown, ${bLabel} (${opt ? '% of NAV' : 'fraction → %'}). RESEARCH-ONLY.`,
       sortKey: 'mdd', num: true, width: 62,
-      render: r => fmdd(headlineOf(r)?.max_drawdown_oos, 1),
+      render: r => fmdd(opt ? v1Of(r)?.option_only?.OOS?.maxdd_pct_nav : v1Of(r)?.max_drawdown_oos, 1),
       cl: 'text-rose-400 font-mono' },
-    { label: 'Trades', tip: 'Headline run OOS trade count (publishable gate ≥ 30). Episodes on the card below.',
+    { label: 'Trades', tip: 'V1 · OOS trade count (publishable gate ≥ 30). Episodes on the card below.',
       sortKey: 'trades', num: true, width: 52,
-      render: r => headlineOf(r)?.trade_count_oos ?? null,
+      render: r => v1Of(r)?.trade_count_oos ?? null,
       cl: 'text-slate-300 font-mono' },
-  ], []);
+    ];
+  }, [basis]);
 
   const sum = data?.summary || {};
   const failed = loaded && !data;
@@ -341,6 +352,19 @@ export function DerivativesResearch({ onViewRuns }) {
   const rank1Blocker = rank1?.data_blocker || null;
   const selected = rows.find(r => r.strategy_id === selectedId) || null;
   const selectedHasRuns = (selected?.runs?.length || 0) > 0;
+
+  // Default state (2026-10-18, operator): Research opens with the LEAD
+  // candidate's card expanded above the queue. Deferred setState — the lint
+  // rule forbids synchronous setState in an effect body.
+  useEffect(() => {
+    if (!data || selectedId != null) return;
+    const t = setTimeout(() => {
+      const lead = (data.strategies || []).find(r =>
+        (r.research_rank ?? 999) === Math.min(...(data.strategies || []).map(x => x.research_rank ?? 999)));
+      if (lead) setSelectedId(lead.strategy_id);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [data, selectedId]);
 
   return (
     <div className="space-y-3">
@@ -359,12 +383,21 @@ export function DerivativesResearch({ onViewRuns }) {
 
       {/* Rank-1 blocking decision + live KAT chips — ALWAYS visible (they were
           previously gated on zero backtested candidates and vanished when the
-          first runs landed; that was emergent, not intended). */}
+          first runs landed; that was emergent, not intended).
+          Banner clamps to 2 lines with a show-more toggle (2026-10-18); the
+          full text is research-owned and rendered verbatim when expanded. */}
       {data && rank1Blocker && (
         <div className="qr-surface px-3 py-2 border-l-2 border-slate-500">
           <div className="flex items-baseline gap-2">
             <span className="qr-label mr-2 shrink-0">Blocking decision · rank 1</span>
-            <span className="text-[10px] text-slate-400 whitespace-pre-wrap">{rank1Blocker}</span>
+            <span
+              className="text-[10px] text-slate-400 whitespace-pre-wrap"
+              style={bannerFull ? undefined : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+            >{rank1Blocker}</span>
+            <button
+              className="shrink-0 text-[9px] text-slate-500 hover:text-slate-300 underline decoration-dotted"
+              onClick={() => setBannerFull(f => !f)}
+            >{bannerFull ? 'show less' : 'show more'}</button>
           </div>
           <KatLiveBlock kat={kat} katLoaded={katLoaded} />
         </div>
@@ -372,11 +405,33 @@ export function DerivativesResearch({ onViewRuns }) {
 
       <DerivChipFilter
         groups={[
+          { label: 'Basis', value: basis, onChange: setBasis, options: [
+            { label: 'Option-only', value: 'opt' },
+            { label: 'Total (carry-incl)', value: 'total' },
+          ] },
           { label: 'Instrument', value: fInst, onChange: setFInst, options: ['ALL', 'OPTION', 'FUTURE'] },
           { label: 'Venue', value: fVenue, onChange: setFVenue, options: ['ALL', 'US', 'HK'] },
           { label: 'Stage', value: fStage, onChange: setFStage, options: ['ALL', 'RESEARCH', 'BACKTESTED'] },
         ]}
       />
+
+      {/* Lead candidate card ABOVE the queue (IPO page anatomy: a strategies
+          panel above the table). Default = rank-1, expanded on first load. */}
+      {selected && (
+        <DerivPanel
+          title="DERIVATIVE STRATEGIES · RESEARCH-ONLY"
+          endpoint="GET /api/derivatives/strategies"
+          task={TASK_RESEARCH_REGISTRY}
+          live={!!data}
+          failed={failed}
+          note="Expanded candidate card — V1 headline on the shared basis toggle; the twin variant is the baseline (variants table on the card), never the headline. Defaults to the rank-1 candidate; click any queue row to switch."
+          right={<DerivResearchOnlyChip />}
+        >
+          {selectedHasRuns
+            ? <DerivCandidateCard r={selected} onViewRuns={onViewRuns} basis={basis} />
+            : <ResearchCard r={selected} />}
+        </DerivPanel>
+      )}
 
       <DerivPanel
         title="Research Queue"
@@ -384,7 +439,7 @@ export function DerivativesResearch({ onViewRuns }) {
         task={TASK_RESEARCH_REGISTRY}
         live={!!data}
         failed={failed}
-        note="Rank-ordered derivative strategy candidates — kept out of the equity strategy universe (Lab / Pipeline / Performance) by design. Click a row: candidates with runs expand into the strategy card (metrics, variants, ladder, rules); others show the verbatim research card. Metric columns read the headline (twin) run, total basis; click Sharpe / PF / MDD / Trades to sort (default = research rank)."
+        note="Rank-ordered derivative strategy candidates — kept out of the equity strategy universe (Lab / Pipeline / Performance) by design. Click a row to expand its card above. Metric columns read the V1 variant (candidate under evaluation) on the shared basis toggle, default option-only — the twin is the baseline, never the headline; click Sharpe / PF / MDD / Trades to sort (default = research rank)."
         right={<DerivResearchOnlyChip />}
       >
         <DerivTable
@@ -398,9 +453,6 @@ export function DerivativesResearch({ onViewRuns }) {
           sort={sort}
           onSort={onSort}
         />
-        {selected && (selectedHasRuns
-          ? <DerivCandidateCard r={selected} onViewRuns={onViewRuns} />
-          : <ResearchCard r={selected} />)}
       </DerivPanel>
     </div>
   );

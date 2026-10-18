@@ -13,14 +13,18 @@ import { DerivativesExecution } from './DerivativesExecution.jsx';
 // the strategy's headline run preselected (focusStrategy handoff).
 export function DerivativesTab({ sub, onSub }) {
   const [focusStrategy, setFocusStrategy] = useState(null);
+  // Shared basis toggle across Research and Backtest (2026-10-18, operator):
+  // one control, default option-only — the carry-inclusive total basis
+  // flatters every variant and the two sub-tabs must agree.
+  const [basis, setBasis] = useState('opt');
   const viewRuns = (strategy) => {
     setFocusStrategy(strategy.strategy_id);
     onSub && onSub('backtest');
   };
   return (
     <>
-      {sub === 'research'  && <DerivativesResearch onViewRuns={viewRuns} />}
-      {sub === 'backtest'  && <DerivativesBacktest focusStrategy={focusStrategy} onFocusConsumed={() => setFocusStrategy(null)} />}
+      {sub === 'research'  && <DerivativesResearch onViewRuns={viewRuns} basis={basis} setBasis={setBasis} />}
+      {sub === 'backtest'  && <DerivativesBacktest focusStrategy={focusStrategy} onFocusConsumed={() => setFocusStrategy(null)} basis={basis} setBasis={setBasis} />}
       {sub === 'execution' && <DerivativesExecution />}
     </>
   );
