@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, fmtK, fmtNum, fmtTime, pnlCl } from '../../utils.js';
 import {
   DerivPanel, DerivEmptyState, DerivKpiStrip, DerivTable, DerivChipFilter,
-  DerivResearchOnlyChip, DerivThinSampleChip,
-  fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress,
+  DerivResearchOnlyChip,
   TASK_DERIV_LEDGERS,
 } from './shared.jsx';
+import { fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress } from './format.js';
 
 // Derivatives ▸ Backtest — backtest runs for derivative strategies.
 // Phase 2 (2026-10-02, t_d67907e4): LIVE on GET /api/derivatives/backtests
@@ -23,6 +23,9 @@ import {
 // state (kanban filed to qr_research).
 
 const TRADE_COLS = [
+  { label: 'Window', tip: 'IS (in-sample) / OOS (out-of-sample) by entry date vs the run windows',
+    render: r => r.window || null,
+    cl: r => r.window === 'OOS' ? 'text-slate-200 font-mono' : 'text-slate-500 font-mono', width: 52 },
   { label: 'Contract', tip: 'Full contract id', key: 'contract', cl: 'text-slate-200 font-mono' },
   { label: 'Side', tip: 'BUY / SELL', key: 'side',
     cl: r => r.side === 'BUY' ? 'text-emerald-400' : r.side === 'SELL' ? 'text-rose-400' : 'text-slate-300' },
@@ -113,8 +116,8 @@ function runCols(basis) {
       render: r => fmtNum(r.profit_factor_oos),
       cl: r => (r.profit_factor_oos != null && r.profit_factor_oos >= 1 ? 'text-emerald-400' : 'text-slate-300') + ' font-mono', num: true },
     { label: 'Trades', tip: 'OOS trade count', key: 'trade_count_oos', cl: 'text-slate-300 font-mono', num: true },
-    { label: 'Episodes', tip: 'Independent (non-overlapping) OOS episodes, computed from gold.derivatives_backtest_trades — null while that ledger is empty',
-      render: r => r.episodes_oos ?? null, cl: 'text-slate-300 font-mono', num: true },
+    { label: 'Episodes', tip: 'Independent (non-overlapping) OOS episodes, computed from gold.derivatives_backtest_trades — pending while that ledger is empty',
+      render: r => r.episodes_oos ?? 'pending', cl: r => r.episodes_oos == null ? 'text-slate-500 font-mono' : 'text-slate-300 font-mono', num: true },
   ];
 }
 
@@ -138,14 +141,19 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
 
   // Focus handoff from the Research tab's "View detail" — select the
   // strategy's headline run (lowest run_number = twin when present).
+  // setState deferred via timeout: the lint rule forbids synchronous setState
+  // in an effect body (cascading renders).
   useEffect(() => {
     if (!focusStrategy || !data) return;
-    const runs = (data.runs || []).filter(r => r.strategy_id === focusStrategy);
-    if (runs.length) {
-      const headline = [...runs].sort((a, b) => (a.run_number ?? 99) - (b.run_number ?? 99))[0];
-      setSelRun(headline.run_id);
-    }
-    onFocusConsumed && onFocusConsumed();
+    const t = setTimeout(() => {
+      const runs = (data.runs || []).filter(r => r.strategy_id === focusStrategy);
+      if (runs.length) {
+        const headline = [...runs].sort((a, b) => (a.run_number ?? 99) - (b.run_number ?? 99))[0];
+        setSelRun(headline.run_id);
+      }
+      onFocusConsumed && onFocusConsumed();
+    }, 0);
+    return () => clearTimeout(t);
   }, [focusStrategy, data, onFocusConsumed]);
 
   useEffect(() => {
@@ -233,7 +241,7 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
         live={!!detail}
         failed={detailFailed}
         note={detail
-          ? `${detail.run.strategy_id} · variant ${variantLabel(detail.run.variant)} · IS ${detail.run.is_start || '—'}→${detail.run.is_end || '—'} · OOS ${detail.run.oos_start || '—'}→${detail.run.oos_end || '—'} · ${detail.trade_count} trades · ${detail.run.episodes_oos ?? '—'} episodes · risk gates ${detail.run.all_risk_gates_passed == null ? '—' : detail.run.all_risk_gates_passed ? 'PASSED' : 'FAILED'}`
+          ? `${detail.run.strategy_id} · variant ${variantLabel(detail.run.variant)} · IS ${detail.run.is_start || '—'}→${detail.run.is_end || '—'} · OOS ${detail.run.oos_start || '—'}→${detail.run.oos_end || '—'} · ${detail.oos_rows ?? '—'} OOS · ${detail.is_rows ?? '—'} IS trades · ${detail.run.episodes_oos ?? 'pending'} episodes · risk gates ${detail.run.all_risk_gates_passed == null ? '—' : detail.run.all_risk_gates_passed ? 'PASSED' : 'FAILED'}`
           : 'Per-run drill-down — activates when a run is selected above.'}
         right={detail ? <DerivResearchOnlyChip /> : undefined}
       >
@@ -255,13 +263,20 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
                 gold.derivatives_backtest_trades holds no rows for this run — aggregate metrics only. Curve, annual bars, ledger and the episode count activate when the trade-level rows land (requested from qr_research).
               </div>
             )}
+            {detailMismatch(detail).length > 0 ? (
+              <DerivEmptyState
+                line="Data mismatch — ledger does not tie to the run's stored totals. Charts withheld."
+                sub={detailMismatch(detail).join(' · ')}
+              />
+            ) : (
+            <>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               <div>
-                <div className="qr-label mb-1">Cumulative realized P&L · derived from trades</div>
+                <div className="qr-label mb-1">Cumulative realized P&amp;L · OOS window · derived from trades</div>
                 <DerivCurve points={detail.curve?.points} />
               </div>
               <div>
-                <div className="qr-label mb-1">Annual P&L · derived from trades</div>
+                <div className="qr-label mb-1">Annual P&amp;L · OOS window · derived from trades</div>
                 {(detail.annual?.years || []).length === 0 ? (
                   <DerivEmptyState line="No closed-trade years yet." />
                 ) : (
@@ -283,9 +298,39 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
               rowKey={r => r.id}
               empty="No trade rows recorded for this run."
             />
+            </>
+            )}
           </div>
         )}
       </DerivPanel>
     </div>
   );
+}
+
+// Tie-out (follow-up 2026-10-17, item 3): the derived views must reconcile
+// with the run's stored totals — any mismatch renders a notice INSTEAD of
+// the charts, never a chart that disagrees with stored metrics. The ledger
+// carries IS+OOS rows, so counts tie per window and P&L ties against the
+// run's stored net_at_f1.0 per window. An empty ledger is the known pending
+// state (qr_research t_84d15809), not a mismatch.
+function detailMismatch(detail) {
+  if (!detail || !detail.trade_count) return [];
+  const out = [];
+  const run = detail.run || {};
+  if (detail.oos_rows != null && run.trade_count_oos != null && detail.oos_rows !== run.trade_count_oos) {
+    out.push(`OOS ledger rows ${detail.oos_rows} ≠ stored OOS trade count ${run.trade_count_oos}`);
+  }
+  if (detail.is_rows != null && run.trade_count_is != null && detail.is_rows !== run.trade_count_is) {
+    out.push(`IS ledger rows ${detail.is_rows} ≠ stored IS trade count ${run.trade_count_is}`);
+  }
+  const pts = detail.curve?.points || [];
+  const curveTotal = pts.length ? pts[pts.length - 1].cum_pnl : 0;
+  const annualTotal = (detail.annual?.years || []).reduce((a, y) => a + (y.pnl || 0), 0);
+  if (pts.length > 0 && Math.abs(curveTotal - annualTotal) > 0.01) {
+    out.push(`curve total $${curveTotal} ≠ annual sum $${annualTotal}`);
+  }
+  if (pts.length > 0 && run.net_pnl_oos != null && Math.abs(curveTotal - run.net_pnl_oos) > 0.01) {
+    out.push(`OOS curve total $${curveTotal} ≠ stored net P&L $${run.net_pnl_oos} (net_at_f1.0)`);
+  }
+  return out;
 }

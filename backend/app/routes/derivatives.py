@@ -240,12 +240,14 @@ def _params(r):
 
 
 def _episodes_by_run(db):
-    """Independent-episode count per run from the trade ledger.
+    """Independent-episode count per run from the trade ledger, OOS-window
+    scoped (the ledger carries IS+OOS rows; the episode metric belongs to the
+    OOS window the headline metrics describe).
 
     An episode = maximal cluster of overlapping trades: a new episode starts
     when a trade's entry_date falls AFTER every currently-open trade's exit
     (open trades count as open through the run's OOS end). None per run when
-    the ledger has no rows for it — 'not computable', never a fake 0.
+    the ledger has no OOS rows for it — 'not computable', never a fake 0.
     """
     rows = safe_query(db, """
         SELECT run_id, entry_date, exit_date
@@ -254,16 +256,19 @@ def _episodes_by_run(db):
     """, label="derivatives.backtests.episodes")
     if not rows:
         return {}
-    oos_end = {}
-    for r in safe_query(db, "SELECT run_id, oos_end FROM gold.derivatives_backtest_runs",
+    windows = {}
+    for r in safe_query(db, "SELECT run_id, oos_start, oos_end FROM gold.derivatives_backtest_runs",
                         label="derivatives.backtests.episodes.windows") or []:
-        oos_end[str(r.run_id)] = r.oos_end
+        windows[str(r.run_id)] = (r.oos_start, r.oos_end)
     by_run = {}
     for t in rows:
+        w = windows.get(str(t.run_id))
+        if w and w[0] and w[1] and t.entry_date and not (w[0] <= t.entry_date <= w[1]):
+            continue  # IS-window row — out of scope for the OOS episode count
         by_run.setdefault(str(t.run_id), []).append((t.entry_date, t.exit_date))
     out = {}
     for rid, ivs in by_run.items():
-        end_fallback = oos_end.get(rid)
+        end_fallback = (windows.get(rid) or (None, None))[1]
         ivs = sorted(ivs, key=lambda x: (x[0] is None, x[0]))
         episodes = 0
         cur_end = None        # max exit date of the current episode
@@ -319,8 +324,14 @@ def _run_row(r, episodes=None):
         "evidence_class": p.get("evidence_class"),
         "gold_data_tag": p.get("gold_data_tag"),
         "option_only": oo,
-        # Independent episode count from the trade ledger; None when the
-        # ledger has no rows for this run (not computable, not zero).
+        # Net P&L at the run's fill fraction (cost_decomposition.net_at_f1.0) —
+        # the stored total the trade ledger must tie to per window.
+        "net_pnl_is": _num((p.get("cost_decomposition") or {}).get("IS", {}).get("net_at_f1.0"))
+                      if isinstance(p.get("cost_decomposition"), dict) else None,
+        "net_pnl_oos": _num((p.get("cost_decomposition") or {}).get("OOS", {}).get("net_at_f1.0"))
+                       if isinstance(p.get("cost_decomposition"), dict) else None,
+        # Independent episode count from the trade ledger (OOS-scoped); None
+        # when the ledger has no OOS rows for this run (not computable).
         "episodes_oos": (episodes or {}).get(str(r.run_id)),
     }
 
@@ -374,6 +385,15 @@ def get_derivative_backtest_detail(run_id: str, db: Session = Depends(get_db)):
 
     trade_rows = []
     for t in trades or []:
+        # Window tag: the ledger carries IS+OOS rows (verified 2026-10-17:
+        # counts tie exactly to stored trade_count_is + trade_count_oos).
+        ed = t.entry_date
+        window = None
+        if ed is not None:
+            if run.oos_start and run.oos_end and run.oos_start <= ed <= run.oos_end:
+                window = "OOS"
+            elif run.is_start and run.is_end and run.is_start <= ed <= run.is_end:
+                window = "IS"
         trade_rows.append({
             "id": t.id,
             "strategy_id": t.strategy_id,
@@ -394,10 +414,15 @@ def get_derivative_backtest_detail(run_id: str, db: Session = Depends(get_db)):
             "pnl": _num(t.pnl),
             "pnl_pct": _num(t.pnl_pct),
             "status": t.status,
+            "window": window,
         })
 
-    # Derived views — computed only from the real trade rows above.
-    closed = [t for t in trade_rows if t["exit_date"] and t["pnl"] is not None]
+    # Derived views — computed only from the real trade rows above, scoped to
+    # the OOS window (the window the run's headline metrics describe; IS rows
+    # remain visible in the ledger below with their window tag).
+    oos_rows = [t for t in trade_rows if t["window"] == "OOS"]
+    is_rows = [t for t in trade_rows if t["window"] == "IS"]
+    closed = [t for t in oos_rows if t["exit_date"] and t["pnl"] is not None]
     closed.sort(key=lambda t: t["exit_date"])
     curve, cum = [], 0.0
     for t in closed:
@@ -414,8 +439,10 @@ def get_derivative_backtest_detail(run_id: str, db: Session = Depends(get_db)):
         "run": _run_row(run, _episodes_by_run(db)),
         "trades": trade_rows,
         "trade_count": len(trade_rows),
-        "curve": {"source": "derived_from_trades", "points": curve},
-        "annual": {"source": "derived_from_trades", "years": sorted(annual.values(), key=lambda a: a["year"])},
+        "oos_rows": len(oos_rows),
+        "is_rows": len(is_rows),
+        "curve": {"source": "derived_from_trades", "window": "OOS", "points": curve},
+        "annual": {"source": "derived_from_trades", "window": "OOS", "years": sorted(annual.values(), key=lambda a: a["year"])},
         "as_of": _now_iso(),
     }
 

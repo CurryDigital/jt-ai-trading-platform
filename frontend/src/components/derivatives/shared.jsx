@@ -13,6 +13,7 @@
 //   t_736850c6 qr_research — derivatives research registry (strategy feed) — DELIVERED 2026-10-02 (9 rows live)
 //   t_15d7e66a qr_etl      — gold.derivatives_* ledgers (backtests/positions/fills) — DELIVERED 2026-10-02 (empty, correct)
 //   t_822b6365 qr_etl      — Databento contract-month futures data (blocked)
+import { PUBLISHABLE_MIN_TRADES } from './format.js';
 export const TASK_RESEARCH_REGISTRY = 't_736850c6';
 export const TASK_DERIV_LEDGERS = 't_15d7e66a';
 export const TASK_FUTURES_DATA = 't_822b6365';
@@ -280,43 +281,31 @@ export function DerivResearchOnlyChip({ tip }) {
   );
 }
 
-// Thin-sample badge under the platform's publishable gate: a strategy is
-// publishable to the equity pipeline only with OOS trades >= 30
-// (backend strategies.py researcher gate: sharpe>=0.5, |mdd|<=20%,
-// trades>=30, returns present). Below that the sample is too thin to read.
-export const PUBLISHABLE_MIN_TRADES = 30;
-export function DerivThinSampleChip({ trades }) {
-  if (trades == null || trades >= PUBLISHABLE_MIN_TRADES) return null;
+// Thin-sample badge keyed on INDEPENDENT EPISODES (follow-up 2026-10-17):
+// weekly re-entry makes raw trade counts overlap (OOS 68/82/90 trades ≈
+// 29-36 episodes), so the publishable-gate threshold (30, see format.js) is
+// applied to episodes, not trades. Episodes are computed from
+// gold.derivatives_backtest_trades — while that ledger is EMPTY the count is
+// null and the chip reads "Episodes · pending" (a visible pending state,
+// never a clean one).
+export function DerivThinSampleChip({ episodes }) {
+  if (episodes == null) {
+    return (
+      <span
+        className="qr-chip qr-chip-slate opacity-70"
+        title="Independent episode count pending — computable once gold.derivatives_backtest_trades carries trade rows (qr_research t_84d15809). Thin-sample gating will key on episodes with threshold 30 (the platform publishable gate), not raw trades."
+      >
+        Episodes · pending
+      </span>
+    );
+  }
+  if (episodes >= PUBLISHABLE_MIN_TRADES) return null;
   return (
     <span
       className="qr-chip qr-chip-slate"
-      title={`Thin sample: ${trades} OOS trades < ${PUBLISHABLE_MIN_TRADES} — the platform's publishable gate (Strategies researcher feed) requires at least ${PUBLISHABLE_MIN_TRADES} OOS trades before metrics are readable.`}
+      title={`Thin sample: ${episodes} independent OOS episodes < ${PUBLISHABLE_MIN_TRADES} — the platform publishable gate threshold applied to episodes (weekly re-entry makes raw trade counts overlap).`}
     >
-      Thin sample · {trades}&lt;{PUBLISHABLE_MIN_TRADES}
+      Thin sample · {episodes}&lt;{PUBLISHABLE_MIN_TRADES} ep
     </span>
   );
-}
-
-// Derivatives run metrics are stored as FRACTIONS (verified live 2026-10-17:
-// returns_oos 0.01783, win_rate 0.533, max_drawdown 0.02499). Deterministic
-// per-field conversion — never magnitude-sniffing.
-export const fpct = (v, d = 1) => v == null ? null : `${(Number(v) * 100) >= 0 ? '+' : ''}${(Number(v) * 100).toFixed(d)}%`;
-export const fpctBare = (v, d = 1) => v == null ? null : `${(Number(v) * 100).toFixed(d)}%`;
-// Drawdowns are stored positive; display as a negative (a drawdown is a loss).
-export const fmdd = (v, d = 1) => v == null ? null : `−${Math.abs(Number(v) * 100).toFixed(d)}%`;
-
-// Variant display labels (parameters_used.variant: twin / v1 / v2).
-export const VARIANT_LABEL = { twin: 'twin', v1: 'V1', v2: 'V2' };
-export const variantLabel = (v) => VARIANT_LABEL[(v || '').toLowerCase()] || (v ? String(v).toUpperCase() : '—');
-
-// Named stress windows used for the OOS-coverage note: if a run's OOS window
-// overlaps none of these, the page must say so (stress evidence then accrues
-// forward only — 2026-10-17 no-paid-data policy).
-export const NAMED_STRESS_WINDOWS = [
-  { name: 'COVID crash', start: '2020-02-19', end: '2020-04-30' },
-  { name: '2022 bear', start: '2022-01-03', end: '2022-10-31' },
-];
-export function oosCoversNamedStress(oosStart, oosEnd) {
-  if (!oosStart || !oosEnd) return false;
-  return NAMED_STRESS_WINDOWS.some(w => oosStart <= w.end && oosEnd >= w.start);
 }

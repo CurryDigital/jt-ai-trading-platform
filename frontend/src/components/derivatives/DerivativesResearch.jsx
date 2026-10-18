@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../utils.js';
 import {
   DerivPanel, DerivKpiStrip, DerivTable, DerivChipFilter, DerivResearchOnlyChip,
-  fmdd,
   TASK_RESEARCH_REGISTRY,
 } from './shared.jsx';
+import { fmdd } from './format.js';
 import { DerivCandidateCard } from './DerivCandidateCard.jsx';
 
 // Derivatives ▸ Research — rank-ordered research queue for derivative

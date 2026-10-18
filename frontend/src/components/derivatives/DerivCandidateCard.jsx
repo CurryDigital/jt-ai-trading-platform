@@ -1,9 +1,7 @@
 import { Chip, Button, pnlColor } from '../jtkit';
 import { Metric } from '../StrategiesWorkspace';
-import {
-  DerivTable, DerivResearchOnlyChip, DerivThinSampleChip,
-  fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress,
-} from './shared.jsx';
+import { DerivTable, DerivResearchOnlyChip, DerivThinSampleChip } from './shared.jsx';
+import { fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress } from './format.js';
 
 // DerivCandidateCard — a derivatives research candidate WITH backtest runs,
 // rendered with the same anatomy as the HK IPO STRATEGIES card
@@ -43,8 +41,8 @@ const VARIANT_COLS = [
   { label: 'MDD · tot', tip: 'OOS max drawdown, TOTAL basis (fraction → %)', render: r => fmdd(r.max_drawdown_oos, 2), cl: 'text-rose-400 font-mono', num: true },
   { label: 'MDD · opt', tip: 'OOS max drawdown, OPTION-ONLY basis, % of NAV', render: r => fmdd(r.option_only?.OOS?.maxdd_pct_nav, 2), cl: 'text-rose-400 font-mono', num: true },
   { label: 'Trades', tip: 'OOS trade count', key: 'trade_count_oos', cl: 'text-slate-300 font-mono', num: true },
-  { label: 'Episodes', tip: 'Independent (non-overlapping) OOS episodes from the trade ledger — not computable while gold.derivatives_backtest_trades is empty',
-    render: r => r.episodes_oos ?? null, cl: 'text-slate-400 font-mono', num: true },
+  { label: 'Episodes', tip: 'Independent (non-overlapping) OOS episodes from the trade ledger — pending while gold.derivatives_backtest_trades is empty',
+    render: r => r.episodes_oos ?? 'pending', cl: r => r.episodes_oos == null ? 'text-slate-500 font-mono' : 'text-slate-300 font-mono', num: true },
 ];
 
 function Ladder({ hasRuns }) {
@@ -91,7 +89,7 @@ export function DerivCandidateCard({ r, onViewRuns }) {
             <Chip color="slate">{r.instrument || '—'}</Chip>
             {r.evidence_class && <Chip color="slate">{r.evidence_class}</Chip>}
             <DerivResearchOnlyChip />
-            {h && <DerivThinSampleChip trades={h.trade_count_oos} />}
+            {h && <DerivThinSampleChip episodes={h.episodes_oos} />}
           </div>
         </div>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{r.strategy_id}</span>
@@ -118,8 +116,8 @@ export function DerivCandidateCard({ r, onViewRuns }) {
               color={h.profit_factor_oos != null && h.profit_factor_oos >= 1 ? 'var(--pnl-pos)' : undefined}
               tip="OOS profit factor as stored (total-basis run metric — no option-only split stored). Never green below 1.0." />
             <Metric label="OOS trades" value={h.trade_count_oos ?? '—'} tip="OOS trade count" />
-            <Metric label="Episodes" value={h.episodes_oos ?? '—'}
-              tip="Independent (non-overlapping) OOS episodes — computed from gold.derivatives_backtest_trades, which is empty (aggregate-only runs). Not computable yet; never a fabricated 0." />
+            <Metric label="Episodes" value={h.episodes_oos ?? 'pending'}
+              tip="Independent (non-overlapping) OOS episodes — computed from gold.derivatives_backtest_trades, which is empty (aggregate-only runs, qr_research t_84d15809). Pending, never a fabricated 0. Thin-sample gating keys on this count (threshold 30, the publishable gate)." />
           </div>
           {noStress && (
             <div style={{ fontSize: 9, color: 'var(--text-faint)', marginTop: 5 }}>
