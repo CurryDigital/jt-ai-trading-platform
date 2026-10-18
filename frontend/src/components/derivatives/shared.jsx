@@ -284,16 +284,17 @@ export function DerivResearchOnlyChip({ tip }) {
 // Thin-sample badge keyed on INDEPENDENT EPISODES (follow-up 2026-10-17):
 // weekly re-entry makes raw trade counts overlap (OOS 68/82/90 trades ≈
 // 29-36 episodes), so the publishable-gate threshold (30, see format.js) is
-// applied to episodes, not trades. Episodes are computed from
-// gold.derivatives_backtest_trades — while that ledger is EMPTY the count is
-// null and the chip reads "Episodes · pending" (a visible pending state,
-// never a clean one).
-export function DerivThinSampleChip({ episodes }) {
+// applied to episodes, not trades. Card-level keying (follow-up 2): the
+// MINIMUM across variants — the weakest variant decides, not the headline
+// twin. Episodes are computed from gold.derivatives_backtest_trades — while
+// that ledger lacks OOS rows the count is null and the chip reads
+// "Episodes · pending" (a visible pending state, never a clean one).
+export function DerivThinSampleChip({ episodes, variant }) {
   if (episodes == null) {
     return (
       <span
         className="qr-chip qr-chip-slate opacity-70"
-        title="Independent episode count pending — computable once gold.derivatives_backtest_trades carries trade rows (qr_research t_84d15809). Thin-sample gating will key on episodes with threshold 30 (the platform publishable gate), not raw trades."
+        title="Independent episode count pending — computable once gold.derivatives_backtest_trades carries trade rows (qr_research t_84d15809). Thin-sample gating keys on episodes with threshold 30 (the platform publishable gate), not raw trades."
       >
         Episodes · pending
       </span>
@@ -303,7 +304,7 @@ export function DerivThinSampleChip({ episodes }) {
   return (
     <span
       className="qr-chip qr-chip-slate"
-      title={`Thin sample: ${episodes} independent OOS episodes < ${PUBLISHABLE_MIN_TRADES} — the platform publishable gate threshold applied to episodes (weekly re-entry makes raw trade counts overlap).`}
+      title={`Thin sample: ${episodes} independent OOS episodes${variant ? ` (${variant})` : ''} < ${PUBLISHABLE_MIN_TRADES} — the platform publishable gate threshold applied to episodes (weekly re-entry makes raw trade counts overlap). Keyed on the weakest variant, not the headline twin.`}
     >
       Thin sample · {episodes}&lt;{PUBLISHABLE_MIN_TRADES} ep
     </span>

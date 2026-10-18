@@ -1,7 +1,7 @@
 import { Chip, Button, pnlColor } from '../jtkit';
 import { Metric } from '../StrategiesWorkspace';
 import { DerivTable, DerivResearchOnlyChip, DerivThinSampleChip } from './shared.jsx';
-import { fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress } from './format.js';
+import { fpct, fpctBare, fmdd, variantLabel, oosCoversNamedStress, PUBLISHABLE_MIN_TRADES } from './format.js';
 
 // DerivCandidateCard — a derivatives research candidate WITH backtest runs,
 // rendered with the same anatomy as the HK IPO STRATEGIES card
@@ -32,7 +32,15 @@ const money = (v) => v == null ? '—' : `${Number(v) >= 0 ? '+' : '−'}$${Math
 // IPO-card thresholds: Win green >= 50%, returns/MDD signed colours, Sharpe
 // neutral, and nothing green while PF < 1.
 const VARIANT_COLS = [
-  { label: 'Variant', tip: 'parameters_used.variant — variants of the one run of record', render: r => variantLabel(r.variant), cl: 'text-slate-200 font-mono', width: 58 },
+  { label: 'Variant', tip: 'parameters_used.variant — variants of the one run of record. A "thin" tag marks a variant under the 30-episode publishable gate.',
+    render: r => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {variantLabel(r.variant)}
+        {r.episodes_oos != null && r.episodes_oos < PUBLISHABLE_MIN_TRADES && (
+          <span className="qr-chip qr-chip-slate" title={`Thin sample: ${r.episodes_oos} independent OOS episodes < ${PUBLISHABLE_MIN_TRADES} (publishable gate threshold applied to episodes)`}>thin</span>
+        )}
+      </span>
+    ), cl: 'text-slate-200 font-mono', width: 58 },
   { label: 'Sharpe · tot', tip: 'OOS Sharpe, TOTAL basis (carry-inclusive)', render: r => r.sharpe_oos != null ? Number(r.sharpe_oos).toFixed(2) : null, cl: 'text-slate-300 font-mono', num: true },
   { label: 'Sharpe · opt', tip: 'OOS Sharpe, OPTION-ONLY basis (no cash carry) — parameters_used.option_only.OOS.sharpe', render: r => r.option_only?.OOS?.sharpe != null ? Number(r.option_only.OOS.sharpe).toFixed(2) : null, cl: 'text-slate-300 font-mono', num: true },
   { label: 'PF', tip: 'OOS profit factor as stored (total-basis run metric). Never green below 1.0.',
@@ -76,6 +84,12 @@ export function DerivCandidateCard({ r, onViewRuns }) {
   const kills = Array.isArray(r.kill_conditions) ? r.kill_conditions : [];
   const optOos = h?.option_only?.OOS || {};
   const noStress = h ? !oosCoversNamedStress(h.oos_start, h.oos_end) : false;
+  // Thin-sample keying: the MINIMUM episode count across variants decides
+  // (weakest variant, not the headline twin). Null when no run has episodes.
+  const epValues = (r.runs || []).map(v => v.episodes_oos).filter(v => v != null);
+  const minEp = epValues.length ? Math.min(...epValues) : null;
+  const minEpVariant = minEp != null
+    ? (r.runs.find(v => v.episodes_oos === minEp)?.variant) : null;
 
   return (
     <div className="jt-surface" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 9, marginTop: 8 }}>
@@ -89,7 +103,7 @@ export function DerivCandidateCard({ r, onViewRuns }) {
             <Chip color="slate">{r.instrument || '—'}</Chip>
             {r.evidence_class && <Chip color="slate">{r.evidence_class}</Chip>}
             <DerivResearchOnlyChip />
-            {h && <DerivThinSampleChip episodes={h.episodes_oos} />}
+            {h && <DerivThinSampleChip episodes={minEp} variant={minEpVariant ? variantLabel(minEpVariant) : undefined} />}
           </div>
         </div>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--text-faint)' }}>{r.strategy_id}</span>

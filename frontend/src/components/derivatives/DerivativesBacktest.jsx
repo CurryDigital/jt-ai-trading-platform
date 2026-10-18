@@ -77,6 +77,28 @@ const BASIS_OPTS = [
   { label: 'Total (carry-incl)', value: 'total' },
 ];
 
+// IS-window hold (user directive 2026-10-17): the twin variant's in-sample
+// figures (stored: 134 trades / IS net P&L −$2,766) are under qr_research
+// reconciliation against the audited Run-0 twin (62 trades, sharpe_is 0.9941
+// per parameters_used.twin_definition_note). Display "under reconciliation"
+// for the IS window ONLY — OOS figures are unaffected and stay live.
+// REMOVE THIS HOLD when the user says the reconciliation is done.
+const IS_RECONCILING = { strategy_id: 'deriv_putwrite_regime_v1', variant: 'twin', run_id: '98cf94f6-b93e-450b-bc6e-edf03d4b9545' };
+const isReconcilingIS = (r) => !!r && r.strategy_id === IS_RECONCILING.strategy_id
+  && ((r.variant || '').toLowerCase() === IS_RECONCILING.variant || r.run_id === IS_RECONCILING.run_id);
+
+function windowCell(r) {
+  const oos = r.oos_start && r.oos_end
+    ? `OOS ${String(r.oos_start).slice(0, 7)}→${String(r.oos_end).slice(0, 7)}` : null;
+  if (isReconcilingIS(r)) {
+    return oos ? `IS under reconciliation · ${oos}` : 'IS under reconciliation';
+  }
+  if (r.is_start && r.oos_start) {
+    return `IS ${String(r.is_start).slice(0, 7)}→${String(r.is_end).slice(0, 7)} · ${oos}`;
+  }
+  return oos;
+}
+
 // Runs-table columns, rebuilt when the basis flips. Every performance column
 // is labelled with its basis; PF/trades/win are basis-invariant as stored.
 function runCols(basis) {
@@ -89,11 +111,9 @@ function runCols(basis) {
       cl: 'text-slate-200 font-mono', width: 190, cellTip: r => r.strategy_id },
     { label: 'Variant', tip: 'Run variant from parameters_used.variant (twin / V1 / V2 — variants of one run of record)',
       render: r => variantLabel(r.variant), cl: 'text-slate-300 font-mono', width: 62 },
-    { label: 'Window', tip: 'In-sample and out-of-sample spans (both stored)',
-      render: r => r.is_start && r.oos_start
-        ? `IS ${String(r.is_start).slice(0, 7)}→${String(r.is_end).slice(0, 7)} · OOS ${String(r.oos_start).slice(0, 7)}→${String(r.oos_end).slice(0, 7)}`
-        : (r.oos_start ? `OOS ${String(r.oos_start).slice(0, 7)}→${String(r.oos_end).slice(0, 7)}` : null),
-      cl: 'text-slate-400 font-mono', width: 250 },
+    { label: 'Window', tip: 'In-sample and out-of-sample spans (both stored). The twin variant\'s IS window is under qr_research reconciliation (stored 134 trades vs audited 62) — marked, not hidden.',
+      render: r => windowCell(r),
+      cl: r => isReconcilingIS(r) ? 'text-slate-500 font-mono' : 'text-slate-400 font-mono', width: 250 },
     opt
       ? { label: 'Sharpe · opt', tip: 'OPTION-ONLY basis: option legs alone, no T-bill cash carry (parameters_used.option_only.OOS.sharpe)',
           render: r => fmtNum(r.option_only?.OOS?.sharpe), cl: 'text-slate-300 font-mono', num: true }
@@ -241,7 +261,7 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
         live={!!detail}
         failed={detailFailed}
         note={detail
-          ? `${detail.run.strategy_id} · variant ${variantLabel(detail.run.variant)} · IS ${detail.run.is_start || '—'}→${detail.run.is_end || '—'} · OOS ${detail.run.oos_start || '—'}→${detail.run.oos_end || '—'} · ${detail.oos_rows ?? '—'} OOS · ${detail.is_rows ?? '—'} IS trades · ${detail.run.episodes_oos ?? 'pending'} episodes · risk gates ${detail.run.all_risk_gates_passed == null ? '—' : detail.run.all_risk_gates_passed ? 'PASSED' : 'FAILED'}`
+          ? `${detail.run.strategy_id} · variant ${variantLabel(detail.run.variant)} · ${isReconcilingIS(detail.run) ? 'IS under reconciliation' : `IS ${detail.run.is_start || '—'}→${detail.run.is_end || '—'}`} · OOS ${detail.run.oos_start || '—'}→${detail.run.oos_end || '—'} · ${detail.oos_rows ?? '—'} OOS · ${detail.is_rows ?? '—'} IS trades · ${detail.run.episodes_oos ?? 'pending'} episodes · risk gates ${detail.run.all_risk_gates_passed == null ? '—' : detail.run.all_risk_gates_passed ? 'PASSED' : 'FAILED'}`
           : 'Per-run drill-down — activates when a run is selected above.'}
         right={detail ? <DerivResearchOnlyChip /> : undefined}
       >
@@ -258,6 +278,11 @@ export function DerivativesBacktest({ focusStrategy = null, onFocusConsumed }) {
           </div>
         ) : (
           <div className="space-y-3">
+            {isReconcilingIS(detail.run) && (
+              <div className="text-[10px] text-slate-500">
+                IS window under reconciliation — qr_research is reconciling the twin variant's stored in-sample figures (134 trades / IS net P&L) against the audited Run-0 twin (62 trades). OOS figures below are unaffected. (Hold per operator, 2026-10-17.)
+              </div>
+            )}
             {detail.run.episodes_oos == null && detail.trade_count === 0 && (
               <div className="text-[10px] text-slate-500">
                 gold.derivatives_backtest_trades holds no rows for this run — aggregate metrics only. Curve, annual bars, ledger and the episode count activate when the trade-level rows land (requested from qr_research).
