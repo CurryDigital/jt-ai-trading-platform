@@ -393,7 +393,7 @@ const STRAT_COLS = [
 // research-owned (registry description/exit_logic, rendered verbatim).
 const ENGINE_NOTES = {
   hk_ipo_postlisting_drift_c1:
-    'Engine legs match the mirror columns (bar 20 entry / bar 40 exit). No stop, no weekly cap. Paper-flat observer: assigned_capital=0 by design, not enrolled in paper_strategies.',
+    'Engine legs match the mirror columns (bar 20 entry / bar 40 exit). No stop, no weekly cap. Paper observer enrolled 2026-10-18: $50k nominal pool (EXPERIMENTAL half-size), 2-slot half-book; paper ledger fed daily by qr_research hk_ipo_c1_paper_feeder.',
 };
 
 // Some registry rows store a machine signal-file config (JSON blob) in
@@ -660,14 +660,19 @@ const ConclusionCell = ({ c }) => {
 // its performance strip: engine ledger trade wins (pnl_pct is a fraction →
 // ×100), else the rule-mirror decision. Returns null when the strategy does
 // not enter the name (SKIP/WATCH) — those rows drop out of the filtered list.
+// src tracks provenance: 'engine' rows come from gold.strategy_backtest_trades
+// (SIMULATION ledger — NEVER paper fills; paper round-trips live only in
+// gold.paper_trades_synthetic). The card strip must disclose this so pre-
+// enrollment backtest rows are not read as closed paper round-trips
+// (2026-10-26 mislabel fix: 6951.HK/2249.HK read as "paper 2 closed -11.1%").
 const stratTradeOf = (stratId, r, tr) => {
   if (tr) {
     const pnl = tr.pnl_pct != null ? tr.pnl_pct * 100 : (tr.unrealized_pnl_pct != null ? tr.unrealized_pnl_pct * 100 : null);
-    return { pnl, closed: tr.exit_date != null };
+    return { pnl, closed: tr.exit_date != null, src: 'engine' };
   }
   const d = stratDecision(stratId, r);
   if (!d.trade) return null;
-  return { pnl: d.trade.pnl, closed: d.trade.pnlKind === 'realized' };
+  return { pnl: d.trade.pnl, closed: d.trade.pnlKind === 'realized', src: 'mirror' };
 };
 
 // Per-strategy cell: the strategy's round-trip in the name. When the engine's
@@ -864,6 +869,12 @@ const IpoStrategyCard = ({ s, ev, positions = [], onOpen, onAdjust, onPause, mir
               </>
             )}
             {mirror.open > 0 && <span>{mirror.open} open / awaiting entry</span>}
+            {mirror.nEngine > 0 && (
+              <span style={{ color: 'var(--text-faint)', flexBasis: '100%' }}
+                title="Closed round-trips sourced from gold.strategy_backtest_trades (SIMULATION OOS ledger — includes pre-enrollment backtest fills). These are NOT paper trades; the paper book accrues only in gold.paper_trades_synthetic and reads on the PAPER tile of the mode ladder above.">
+                {mirror.nEngine} of {mirror.n} closed from SIM backtest ledger (pre-paper) — not paper round-trips
+              </span>
+            )}
           </div>
         ) : (
           <div style={{ fontSize: 10, color: '#565e6c' }}>{mirror ? 'no entries in this window' : '—'}</div>
@@ -1385,6 +1396,7 @@ export function IpoTab({ onOpen }) {
           winRate: closed.length ? wins / closed.length * 100 : null,
           avg: closed.length ? sum / closed.length : null,
           sum, open: open.length,
+          nEngine: closed.filter(e => e.t.src === 'engine').length,
         };
       }
     }
@@ -1396,7 +1408,10 @@ export function IpoTab({ onOpen }) {
   // filter respected; CALL / STRATEGY chips ignored — a card summarizes its
   // own strategy). Feeds each strategy card so the card numbers always follow
   // from the list: same cohort, same stratTradeOf legs (engine ledger trade
-  // wins, else rule-mirror), same units. Gross of costs.
+  // wins, else rule-mirror), same units. Gross of costs for mirror legs;
+  // engine-ledger legs are net of costs. nEngine counts closed trades sourced
+  // from the SIM backtest ledger — disclosed on the card so they are never
+  // read as paper round-trips (2026-10-26 mislabel fix).
   const mirrorPerf = useMemo(() => {
     if (!watch) return {};
     const out = {};
@@ -1417,6 +1432,7 @@ export function IpoTab({ onOpen }) {
         avg: closed.length ? sum / closed.length : null,
         sum,
         open: open.length,
+        nEngine: closed.filter(t => t.src === 'engine').length,
       };
     }
     return out;
@@ -1748,6 +1764,12 @@ export function IpoTab({ onOpen }) {
                   </>
                 )}
                 {watchView.stratPerf.open > 0 && <span>{watchView.stratPerf.open} open / awaiting entry</span>}
+                {watchView.stratPerf.nEngine > 0 && (
+                  <span style={{ color: 'var(--text-faint)' }}
+                    title="Closed round-trips sourced from gold.strategy_backtest_trades (SIMULATION OOS ledger — includes pre-enrollment backtest fills). NOT paper trades; the paper book accrues only in gold.paper_trades_synthetic.">
+                    {watchView.stratPerf.nEngine}/{watchView.stratPerf.n} closed = SIM backtest ledger (pre-paper) — not paper round-trips
+                  </span>
+                )}
               </div>
             )}
             {!bucketFilter && watch.bandCount != null && (
