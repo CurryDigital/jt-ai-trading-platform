@@ -203,6 +203,33 @@ function RealMetrics({ s, mode }) {
     // Colour carries meaning only: emerald = actively in market; Watching and
     // Off are neutral states (Watching is default text, Off is muted).
     const stateColor = paperState === 'engaged' ? 'var(--pnl-pos)' : paperState === 'off' ? 'var(--text-muted)' : undefined;
+    // Per-book paper deployment ratio (kanban t_786a7c6e; ETL
+    // consumption.strategy_paper_deployment_current). NULL/absent (PAPER_UAT
+    // or pre-run) → no chip, never 0%. Colour thresholds per spec: ≥98%
+    // green, 90–98% amber, <90% red — this is the whole-lot + cap
+    // quantization cash drag the badge exists to expose.
+    const dep = s._api?.paper_deployment;
+    const depPct = dep?.deployment_ratio != null ? Number(dep.deployment_ratio) * 100 : null;
+    let depChip = null;
+    if (depPct != null) {
+      const depColor = depPct >= 98 ? 'emerald' : depPct >= 90 ? 'amber' : 'rose';
+      const capPct = dep.max_position_pct != null ? `${Math.round(Number(dep.max_position_pct) * 100)}%` : '20%';
+      const tipParts = [
+        `committed $${Number(dep.committed_notional ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} of $${Number(dep.target_notional ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} target (whole-lot + ${capPct} cap drag)`,
+      ];
+      const cuPct = dep.capital_utilization != null ? Number(dep.capital_utilization) * 100 : null;
+      if (cuPct != null && Math.abs(cuPct - depPct) >= 0.05) {
+        tipParts.push(`capital utilization ${cuPct.toFixed(1)}% of assigned (gap incl. designed CASH residual)`);
+      }
+      const skips = Object.entries(dep.skips_by_kind || {});
+      if (skips.length) tipParts.push(`skips: ${skips.map(([k, n]) => `${k} ×${n}`).join(', ')}`);
+      if (dep.run_date) tipParts.push(`rebalancer run ${dep.run_date}`);
+      depChip = (
+        <span title={tipParts.join(' · ')} style={{ cursor: 'help' }}>
+          <Chip color={depColor}>Deployed {depPct.toFixed(1)}%</Chip>
+        </span>
+      );
+    }
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
         <Metric label="P&L" value={pnl != null ? fmtK(pnl) : '—'} color={pnl == null ? undefined : pnl >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
@@ -211,6 +238,7 @@ function RealMetrics({ s, mode }) {
         <Metric label="Trades" value={s.paperTrades ?? '—'} />
         <Metric label="Monitoring" value={stateLabel} color={stateColor} />
         <Metric label="Conviction" value={conviction != null ? Number(conviction).toFixed(1) : '—'} />
+        {depChip && <div style={{ gridColumn: '1 / -1' }}>{depChip}</div>}
       </div>
     );
   }

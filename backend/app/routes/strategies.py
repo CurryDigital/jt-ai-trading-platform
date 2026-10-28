@@ -414,6 +414,43 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
             except Exception as e:
                 logger.error(f"paper yearly query error: {e}")
 
+        # ------------------------------------------------------------------
+        # Per-book paper deployment ratio (kanban t_786a7c6e, ETL t_33ffe715):
+        # same source as the pipeline-feed block below — the Researcher rows
+        # are what actually feed the strategy tile (_api), so the chip reads
+        # from here. NULL object when no row (PAPER_UAT or pre-run).
+        # ------------------------------------------------------------------
+        paper_deployment = {}
+        if registry_ids:
+            try:
+                dep_rows = safe_query(
+                    db,
+                    """
+                    SELECT strategy_id, run_date, assigned_capital, target_notional,
+                           invested_notional, pending_open_notional, committed_notional,
+                           deployment_ratio, capital_utilization, undeployed_notional,
+                           skips_by_kind, max_position_pct
+                    FROM consumption.strategy_paper_deployment_current
+                    WHERE strategy_id = ANY(:ids)
+                    """,
+                    {"ids": registry_ids},
+                    label="route_paper_deployment",
+                )
+                for r in dep_rows:
+                    paper_deployment[r.strategy_id] = {
+                        "deployment_ratio": _coerce_number(r.deployment_ratio),
+                        "capital_utilization": _coerce_number(r.capital_utilization),
+                        "committed_notional": _coerce_number(r.committed_notional),
+                        "target_notional": _coerce_number(r.target_notional),
+                        "assigned_capital": _coerce_number(r.assigned_capital),
+                        "undeployed_notional": _coerce_number(r.undeployed_notional),
+                        "skips_by_kind": r.skips_by_kind if isinstance(r.skips_by_kind, dict) else None,
+                        "max_position_pct": _coerce_number(r.max_position_pct),
+                        "run_date": r.run_date.isoformat() if r.run_date else None,
+                    }
+            except Exception as e:
+                logger.error(f"paper deployment query error: {e}")
+
         strategies = []
         for row in result:
             tickers = row.universe_tickers
@@ -585,6 +622,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "paper_unpriced": paper_metrics.get(sid, {}).get("paper_unpriced", 0),
                 "paper_trades": paper_metrics.get(sid, {}).get("paper_trades"),
                 "paper_open": paper_open,
+                "paper_deployment": paper_deployment.get(sid),
             })
         # Also fetch from strategy_templates if they have different strategies
         template_strategies = []
@@ -1494,6 +1532,47 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
             except Exception as e:
                 logger.error(f"paper skip counts query error: {e}")
 
+        # ------------------------------------------------------------------
+        # Per-book paper deployment ratio (kanban t_786a7c6e, ETL t_33ffe715):
+        # consumption.strategy_paper_deployment_current holds ONE row per active
+        # PAPER/SIMULATION strategy (PK strategy_id), upserted by
+        # rebuild_paper_positions.py on every Pipeline B run. deployment_ratio =
+        # committed (invested + pending-open) / target notional; <1.0 exposes
+        # whole-lot + concentration-cap quantization drag. PAPER_UAT strategies
+        # carry NO row by design (broker session is book-of-record) — the
+        # payload object stays NULL there so the UI renders no chip, never 0%.
+        # ------------------------------------------------------------------
+        paper_deployment = {}
+        if strategy_ids:
+            try:
+                dep_rows = safe_query(
+                    db,
+                    """
+                    SELECT strategy_id, run_date, assigned_capital, target_notional,
+                           invested_notional, pending_open_notional, committed_notional,
+                           deployment_ratio, capital_utilization, undeployed_notional,
+                           skips_by_kind, max_position_pct
+                    FROM consumption.strategy_paper_deployment_current
+                    WHERE strategy_id = ANY(:ids)
+                    """,
+                    {"ids": strategy_ids},
+                    label="route_paper_deployment",
+                )
+                for r in dep_rows:
+                    paper_deployment[r.strategy_id] = {
+                        "deployment_ratio": _coerce_number(r.deployment_ratio),
+                        "capital_utilization": _coerce_number(r.capital_utilization),
+                        "committed_notional": _coerce_number(r.committed_notional),
+                        "target_notional": _coerce_number(r.target_notional),
+                        "assigned_capital": _coerce_number(r.assigned_capital),
+                        "undeployed_notional": _coerce_number(r.undeployed_notional),
+                        "skips_by_kind": r.skips_by_kind if isinstance(r.skips_by_kind, dict) else None,
+                        "max_position_pct": _coerce_number(r.max_position_pct),
+                        "run_date": r.run_date.isoformat() if r.run_date else None,
+                    }
+            except Exception as e:
+                logger.error(f"paper deployment query error: {e}")
+
         data = []
         for r in rows:
             sid = r.id
@@ -1535,6 +1614,8 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 "paper_open_positions": open_positions,
                 "paper_state": paper_state,
                 "paper_skip_count": skip_counts.get(sid, 0),
+                # NULL object when no row (PAPER_UAT or pre-run) — UI renders no chip.
+                "paper_deployment": paper_deployment.get(sid),
                 "paper_wr": paper.get("paper_wr"),
                 "paper_pf": paper.get("paper_pf"),
                 "paper_pnl": paper.get("paper_pnl"),
