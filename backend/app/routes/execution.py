@@ -9,6 +9,14 @@ import time
 
 from app.dependencies import get_db, logger
 from app.db.safe_query import safe_query, safe_query_one
+from app.services.bookkeeping import non_strategy_leg_exists
+
+# CLEANSE-1 (kanban t_070590de): skip-log labeled non-strategy closure legs
+# (RESET_STALE_SIGNAL flattened / CLEANSE1_CLOSURE) are operator bookkeeping,
+# never strategy performance — excluded from every realized-P&L aggregate in
+# the book overview. SQL predicate fragment over alias `t`.
+_NS_EXCL = "AND NOT " + non_strategy_leg_exists("t")
+_NS_INCL = "AND " + non_strategy_leg_exists("t")
 
 router = APIRouter(prefix="/api/execution", tags=["execution"])
 
@@ -248,6 +256,7 @@ def _book_overview_sim_paper(db, exec_mode):
         JOIN gold.strategy_registry r
           ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
         WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_EXCL}
     """, label=f"book_overview_{exec_mode}_closed")
 
     today_row = safe_query_one(db, f"""
@@ -257,6 +266,7 @@ def _book_overview_sim_paper(db, exec_mode):
           ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
         WHERE t.status = 'closed' AND t.exit_date = CURRENT_DATE
           AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_EXCL}
     """, label=f"book_overview_{exec_mode}_today")
 
     open_row = safe_query_one(db, f"""
@@ -278,6 +288,7 @@ def _book_overview_sim_paper(db, exec_mode):
         WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
           AND t.exit_date >= date_trunc('year', now())::date
           AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_EXCL}
         GROUP BY t.exit_date ORDER BY t.exit_date
     """, label=f"book_overview_{exec_mode}_daily")
 
@@ -296,6 +307,7 @@ def _book_overview_sim_paper(db, exec_mode):
         JOIN gold.strategy_registry r
           ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
         WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_EXCL}
         GROUP BY t.strategy_id, r.name
         ORDER BY SUM(t.pnl) DESC NULLS LAST
         LIMIT 6
@@ -314,6 +326,7 @@ def _book_overview_sim_paper(db, exec_mode):
         JOIN gold.strategy_registry r
           ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
         WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_EXCL}
         GROUP BY t.strategy_id, r.name
         ORDER BY SUM(t.pnl) ASC NULLS LAST
         LIMIT 6
@@ -353,6 +366,22 @@ def _book_overview_sim_paper(db, exec_mode):
     strategies = [_strat_row(r) for r in strat_rows]
     worst_strategies = [_strat_row(r) for r in strat_rows_worst]
 
+    # CLEANSE-1 (t_070590de): the amounts excluded above, surfaced so the UI
+    # can disclose "excl. $X of non-strategy bookkeeping" instead of silently
+    # diverging from the raw ledger.
+    ns_row = safe_query_one(db, f"""
+        SELECT COUNT(*) AS legs, SUM(t.pnl) AS pnl
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_INCL}
+    """, label=f"book_overview_{exec_mode}_non_strategy")
+    non_strategy_excluded = {
+        "legs": int(ns_row.legs or 0) if ns_row else 0,
+        "pnl": round(float(ns_row.pnl), 2) if ns_row and ns_row.pnl is not None else None,
+    }
+
     return {
         "stats": {
             "closed_trades": closed,
@@ -363,6 +392,7 @@ def _book_overview_sim_paper(db, exec_mode):
             "ytd_trades": ytd_trades,
             "cum_pnl": round(cum_pnl, 2) if cum_pnl is not None else None,
         },
+        "non_strategy_excluded": non_strategy_excluded,
         "ytd_curve": ytd_curve,
         "top_strategies": strategies,
         "worst_strategies": worst_strategies,

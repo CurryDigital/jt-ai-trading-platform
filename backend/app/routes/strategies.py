@@ -9,6 +9,10 @@ import logging
 
 from app.dependencies import get_db, logger, api_to_registry_mode, registry_to_api_mode
 from app.db.safe_query import safe_query, safe_query_one
+from app.services.bookkeeping import (
+    fetch_phantom_position_keys,
+    non_strategy_leg_exists,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -128,7 +132,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                    r.trade_count_oos, r.win_rate_oos, r.profit_factor_oos, r.returns_oos,
                    r.conviction_score, r.description,
                    r.assigned_capital, r.in_market_capital, r.signal_logic, r.exit_logic,
-                   r.priority, r.approved_at, res.status as research_status
+                   r.priority, r.approved_at, r.retirement_reason, res.status as research_status
             FROM gold.strategy_registry r
             JOIN gold.strategy_research res ON res.strategy_id = r.strategy_id
             WHERE r.status != 'DEPRECATED'
@@ -314,16 +318,17 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
             try:
                 paper_rows = safe_query(
                     db,
-                    """
+                    f"""
                     SELECT strategy_id,
                            COUNT(*) FILTER (WHERE status = 'closed') AS closed_trades,
                            COUNT(*) FILTER (WHERE status = 'closed' AND pnl > 0) AS winning_trades,
                            SUM(pnl) FILTER (WHERE status = 'closed') AS total_pnl,
                            SUM(pnl) FILTER (WHERE status = 'closed' AND pnl > 0) AS gross_profit,
                            SUM(pnl) FILTER (WHERE status = 'closed' AND pnl < 0) AS gross_loss
-                    FROM gold.paper_trades_synthetic
+                    FROM gold.paper_trades_synthetic t
                     WHERE strategy_id = ANY(:ids)
                       AND (ticker IS NULL OR ticker != 'CASH')
+                      AND NOT {non_strategy_leg_exists('t')}
                     GROUP BY strategy_id
                     """,
                     {"ids": registry_ids},
@@ -344,6 +349,43 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
             except Exception as e:
                 logger.error(f"paper metrics query error: {e}")
 
+        # Non-strategy bookkeeping legs (CLEANSE-1, t_070590de): closure legs
+        # labeled RESET_STALE_SIGNAL (flattened) / CLEANSE1_CLOSURE in the skip
+        # log are excluded from every performance aggregate above; surface the
+        # excluded amount so the UI can annotate instead of silently dropping.
+        non_strategy = {}
+        phantom_keys = set()
+        if registry_ids:
+            try:
+                ns_rows = safe_query(
+                    db,
+                    f"""
+                    SELECT t.strategy_id,
+                           COUNT(*) AS legs,
+                           SUM(t.pnl) AS pnl
+                    FROM gold.paper_trades_synthetic t
+                    WHERE t.status = 'closed'
+                      AND t.strategy_id = ANY(:ids)
+                      AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                      AND {non_strategy_leg_exists('t')}
+                    GROUP BY t.strategy_id
+                    """,
+                    {"ids": registry_ids},
+                    label="route_non_strategy_legs",
+                )
+                for r in ns_rows:
+                    non_strategy[r.strategy_id] = {
+                        "non_strategy_legs": int(r.legs or 0),
+                        "non_strategy_pnl": _coerce_number(r.pnl),
+                    }
+            except Exception as e:
+                logger.error(f"non-strategy leg query error: {e}")
+            try:
+                phantom_keys = fetch_phantom_position_keys(db, registry_ids)
+            except Exception as e:
+                logger.error(f"phantom position key error: {e}")
+                phantom_keys = set()
+
         # Unrealized P&L for OPEN paper positions (mark-to-market).
         # consumption.portfolio_positions_current paper rows ARE marked to
         # market by the ETL (sync_paper_positions_current.py, t_646c098a:
@@ -354,7 +396,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 open_rows = safe_query(
                     db,
                     """
-                    SELECT p.strategy_id, p.unrealized_pnl
+                    SELECT p.strategy_id, p.ticker, p.quantity, p.unrealized_pnl
                     FROM consumption.portfolio_positions_current p
                     WHERE p.strategy_id = ANY(:ids)
                       AND p.status = 'ACTIVE'
@@ -366,11 +408,23 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                     label="route_paper_unrealized",
                 )
                 for r in open_rows:
+                    unr = _coerce_number(r.unrealized_pnl)
+                    # Phantom rows: closure-labeled cleanse legs with no backing
+                    # open ledger row — excluded from strategy unrealized P&L,
+                    # surfaced under non_strategy_unrealized (t_070590de).
+                    _pk = (r.strategy_id, r.ticker,
+                           round(float(r.quantity or 0.0), 4))
+                    if _pk in phantom_keys:
+                        ns = non_strategy.setdefault(r.strategy_id, {
+                            "non_strategy_legs": 0, "non_strategy_pnl": None})
+                        if unr is not None:
+                            ns["non_strategy_unrealized"] = (ns.get("non_strategy_unrealized") or 0) + unr
+                            ns["non_strategy_phantom_positions"] = ns.get("non_strategy_phantom_positions", 0) + 1
+                        continue
                     m = paper_metrics.setdefault(r.strategy_id, {
                         "paper_wr": None, "paper_pf": None,
                         "paper_pnl_realized": None, "paper_trades": 0,
                     })
-                    unr = _coerce_number(r.unrealized_pnl)
                     if unr is not None:
                         m["paper_pnl_unrealized"] = (m.get("paper_pnl_unrealized") or 0) + unr
                     else:
@@ -392,15 +446,16 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
             try:
                 py_rows = safe_query(
                     db,
-                    """
+                    f"""
                     SELECT strategy_id,
                            EXTRACT(YEAR FROM exit_date)::int AS y,
                            SUM(pnl) AS pnl,
                            COUNT(*) AS trades
-                    FROM gold.paper_trades_synthetic
+                    FROM gold.paper_trades_synthetic t
                     WHERE status = 'closed'
                       AND strategy_id = ANY(:ids)
                       AND (ticker IS NULL OR ticker != 'CASH')
+                      AND NOT {non_strategy_leg_exists('t')}
                     GROUP BY strategy_id, EXTRACT(YEAR FROM exit_date)
                     """,
                     {"ids": registry_ids},
@@ -450,6 +505,38 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                     }
             except Exception as e:
                 logger.error(f"paper deployment query error: {e}")
+
+        # Paper-book skip detail (CLEANSE-1, kanban t_070590de): the tile's
+        # 'N unfilled' badge drills down to these rows (ticker, skip_kind,
+        # reason, skip_date). Same source the pipeline-feed uses; capped at
+        # 100 rows per strategy, paper_skip_count carries the full total.
+        paper_skips = {}
+        paper_skip_counts = {}
+        if registry_ids:
+            try:
+                sk_rows = safe_query(
+                    db,
+                    """
+                    SELECT strategy_id, ticker, skip_kind, reason, skip_date
+                    FROM consumption.strategy_paper_skips_current
+                    WHERE strategy_id = ANY(:ids)
+                    ORDER BY strategy_id, skip_date DESC, ticker
+                    """,
+                    {"ids": registry_ids},
+                    label="route_paper_skip_detail",
+                )
+                for r in sk_rows:
+                    lst = paper_skips.setdefault(r.strategy_id, [])
+                    if len(lst) < 100:
+                        lst.append({
+                            "ticker": r.ticker,
+                            "skip_kind": r.skip_kind,
+                            "reason": r.reason,
+                            "skip_date": r.skip_date.isoformat() if r.skip_date else None,
+                        })
+                    paper_skip_counts[r.strategy_id] = paper_skip_counts.get(r.strategy_id, 0) + 1
+            except Exception as e:
+                logger.error(f"paper skip detail query error: {e}")
 
         strategies = []
         for row in result:
@@ -623,6 +710,20 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "paper_trades": paper_metrics.get(sid, {}).get("paper_trades"),
                 "paper_open": paper_open,
                 "paper_deployment": paper_deployment.get(sid),
+                # Registry status detail (CLEANSE-1, t_070590de): the raw
+                # retirement_reason so tiles can render PAUSED/PENDING/RETIRED
+                # with the operator's reason text. PENDING books are stored as
+                # status='paused' with a 'PENDING —' reason prefix.
+                "retirement_reason": getattr(row, 'retirement_reason', None),
+                # Skip detail behind the 'N unfilled' badge (t_070590de).
+                "paper_skips": paper_skips.get(sid, []),
+                "paper_skip_count": paper_skip_counts.get(sid, 0),
+                # Non-strategy bookkeeping (cleanse closures / stale-orphan
+                # flattens) excluded from the paper aggregates above.
+                "non_strategy_pnl": non_strategy.get(sid, {}).get("non_strategy_pnl"),
+                "non_strategy_legs": non_strategy.get(sid, {}).get("non_strategy_legs", 0),
+                "non_strategy_unrealized": non_strategy.get(sid, {}).get("non_strategy_unrealized"),
+                "non_strategy_phantom_positions": non_strategy.get(sid, {}).get("non_strategy_phantom_positions", 0),
             })
         # Also fetch from strategy_templates if they have different strategies
         template_strategies = []
@@ -1377,6 +1478,67 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
         strategy_ids = [r.id for r in rows if r.id]
 
         # ------------------------------------------------------------------
+        # Registry status detail (CLEANSE-1, kanban t_070590de): the view has
+        # no retirement_reason column and its db_status is a research-lifecycle
+        # value, so the registry is queried directly for the authoritative
+        # status + operator reason text (PAUSED / PENDING — stored as
+        # status='paused' with a 'PENDING —' reason prefix / RETIRED).
+        # Halted books (paused/retired, not DEPRECATED) that fail the view's
+        # quality gates are APPENDED to the feed with null metrics — a paused
+        # book must render on the page labeled PAUSED, never silently vanish
+        # (which previously read as "not in the universe" while its mode still
+        # said PAPER).
+        # ------------------------------------------------------------------
+        registry_meta = {}
+        halted_extra = []
+        try:
+            reg_rows = safe_query(
+                db,
+                """
+                SELECT strategy_id, name, asset_class, status, retirement_reason,
+                       execution_mode, frequency, updated_at
+                FROM gold.strategy_registry
+                WHERE status != 'DEPRECATED'
+                """,
+                {},
+                label="route_pipeline_registry_meta",
+            )
+            feed_id_set = set(strategy_ids)
+            # Scope guard: only halted books that were recently live belong on
+            # the page — the CLEANSE-1 wave (reason prefix 'CLEANSE-1') or any
+            # book with ledger exits in the last 45 days. Ancient retired
+            # shells (40+ legacy rows) stay out of the feed.
+            recent_halted = {
+                r.strategy_id for r in safe_query(
+                    db,
+                    """
+                    SELECT DISTINCT strategy_id
+                    FROM gold.paper_trades_synthetic
+                    WHERE exit_date >= CURRENT_DATE - 45
+                    """,
+                    {},
+                    label="route_pipeline_recent_halted",
+                )
+            }
+            for rr in reg_rows:
+                registry_meta[rr.strategy_id] = {
+                    "status": rr.status,
+                    "retirement_reason": rr.retirement_reason,
+                }
+                if (rr.status or "").lower() in ("paused", "retired") \
+                        and rr.strategy_id not in feed_id_set:
+                    if (rr.retirement_reason or "").startswith("CLEANSE-1") \
+                            or rr.strategy_id in recent_halted:
+                        halted_extra.append(rr)
+        except Exception as e:
+            logger.error(f"pipeline registry meta query error: {e}")
+        # Halted ids join the id universe so the skip/non-strategy lookups
+        # below cover them too (a paused book still carries unfilled-signal
+        # rows and cleanse-closure legs worth surfacing).
+        halted_ids = [rr.strategy_id for rr in halted_extra]
+        all_ids = strategy_ids + halted_ids
+
+        # ------------------------------------------------------------------
         # Paper-trading monitoring state, two distinct facts (kanban t_1f3bee9f):
         #   monitored_ids — is_active in gold.strategy_paper_monitoring (ETL-owned
         #     flag kept in sync with registry execution_mode by trigger). This is
@@ -1431,20 +1593,23 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
         # Only computed for actively monitored strategies; null otherwise.
         # ------------------------------------------------------------------
         paper_metrics = {}
+        non_strategy = {}
+        phantom_keys = set()
         if monitored_ids:
             try:
                 paper_rows = safe_query(
                     db,
-                    """
+                    f"""
                     SELECT strategy_id,
                            COUNT(*) FILTER (WHERE status = 'closed') AS closed_trades,
                            COUNT(*) FILTER (WHERE status = 'closed' AND pnl > 0) AS winning_trades,
                            SUM(pnl) FILTER (WHERE status = 'closed') AS total_pnl,
                            SUM(pnl) FILTER (WHERE status = 'closed' AND pnl > 0) AS gross_profit,
                            SUM(pnl) FILTER (WHERE status = 'closed' AND pnl < 0) AS gross_loss
-                    FROM gold.paper_trades_synthetic
+                    FROM gold.paper_trades_synthetic t
                     WHERE strategy_id = ANY(:ids)
                       AND (ticker IS NULL OR ticker != 'CASH')
+                      AND NOT {non_strategy_leg_exists('t')}
                     GROUP BY strategy_id
                     """,
                     {"ids": list(monitored_ids)},
@@ -1465,7 +1630,43 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
             except Exception as e:
                 logger.error(f"paper metrics query error: {e}")
 
-            # ----------------------------------------------------------
+        # Non-strategy bookkeeping legs (CLEANSE-1, t_070590de): skip-log
+        # labeled closures (RESET_STALE_SIGNAL flattened / CLEANSE1_CLOSURE)
+        # are excluded from the aggregates above; the excluded amounts are
+        # surfaced per strategy so the UI annotates instead of dropping.
+        # Scoped to monitored ∪ halted ids — a paused book (e.g. the cleanse
+        # cohort) is no longer monitored but still carries its closure legs.
+        ns_ids = sorted(set(monitored_ids) | set(halted_ids))
+        if ns_ids:
+            try:
+                ns_rows = safe_query(
+                    db,
+                    f"""
+                    SELECT t.strategy_id, COUNT(*) AS legs, SUM(t.pnl) AS pnl
+                    FROM gold.paper_trades_synthetic t
+                    WHERE t.status = 'closed'
+                      AND t.strategy_id = ANY(:ids)
+                      AND (t.ticker IS NULL OR t.ticker != 'CASH')
+                      AND {non_strategy_leg_exists('t')}
+                    GROUP BY t.strategy_id
+                    """,
+                    {"ids": ns_ids},
+                    label="route_non_strategy_legs",
+                )
+                for r in ns_rows:
+                    non_strategy[r.strategy_id] = {
+                        "non_strategy_legs": int(r.legs or 0),
+                        "non_strategy_pnl": _coerce_number(r.pnl),
+                    }
+            except Exception as e:
+                logger.error(f"non-strategy leg query error: {e}")
+            try:
+                phantom_keys = fetch_phantom_position_keys(db, ns_ids)
+            except Exception as e:
+                logger.error(f"phantom position key error: {e}")
+                phantom_keys = set()
+
+        if monitored_ids:
             # Unrealized P&L for OPEN paper positions (mark-to-market).
             # consumption.portfolio_positions_current paper rows ARE marked to
             # market by the ETL (sync_paper_positions_current.py, t_646c098a:
@@ -1476,7 +1677,7 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 open_rows = safe_query(
                     db,
                     """
-                    SELECT p.strategy_id, p.unrealized_pnl
+                    SELECT p.strategy_id, p.ticker, p.quantity, p.unrealized_pnl
                     FROM consumption.portfolio_positions_current p
                     WHERE p.strategy_id = ANY(:ids)
                       AND p.status = 'ACTIVE'
@@ -1488,11 +1689,23 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                     label="route_paper_unrealized",
                 )
                 for r in open_rows:
+                    unr = _coerce_number(r.unrealized_pnl)
+                    # Phantom rows: closure-labeled cleanse legs with no backing
+                    # open ledger row — excluded from strategy unrealized P&L,
+                    # surfaced under non_strategy_unrealized (t_070590de).
+                    _pk = (r.strategy_id, r.ticker,
+                           round(float(r.quantity or 0.0), 4))
+                    if _pk in phantom_keys:
+                        ns = non_strategy.setdefault(r.strategy_id, {
+                            "non_strategy_legs": 0, "non_strategy_pnl": None})
+                        if unr is not None:
+                            ns["non_strategy_unrealized"] = (ns.get("non_strategy_unrealized") or 0) + unr
+                            ns["non_strategy_phantom_positions"] = ns.get("non_strategy_phantom_positions", 0) + 1
+                        continue
                     m = paper_metrics.setdefault(r.strategy_id, {
                         "paper_wr": None, "paper_pf": None,
                         "paper_pnl_realized": None, "paper_trades": 0,
                     })
-                    unr = _coerce_number(r.unrealized_pnl)
                     if unr is not None:
                         m["paper_pnl_unrealized"] = (m.get("paper_pnl_unrealized") or 0) + unr
                     else:
@@ -1512,12 +1725,40 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
         # (strategy_id, ticker) BUY signal the paper rebalancer could not fill
         # (below one lot / unsupported asset class / no price). Expose the
         # count per strategy so the list view can badge strategies with
-        # unfilled BUY signals. Empty table = no skips = count 0.
+        # unfilled BUY signals, AND the row detail (ticker, skip_kind, reason,
+        # skip_date — kanban t_070590de) so the badge is a drill-down, not a
+        # bare count. Capped at 100 rows per strategy (CADENCE_GATE books can
+        # hold dozens; the count always reflects the full set).
+        # Empty table = no skips = count 0.
         # ------------------------------------------------------------------
         skip_counts = {}
-        if strategy_ids:
+        paper_skips = {}
+        if all_ids:
             try:
                 skip_rows = safe_query(
+                    db,
+                    """
+                    SELECT strategy_id, ticker, skip_kind, reason, skip_date
+                    FROM consumption.strategy_paper_skips_current
+                    WHERE strategy_id = ANY(:ids)
+                    ORDER BY strategy_id, skip_date DESC, ticker
+                    """,
+                    {"ids": all_ids},
+                    label="route_paper_skip_detail",
+                )
+                for r in skip_rows:
+                    lst = paper_skips.setdefault(r.strategy_id, [])
+                    if len(lst) < 100:
+                        lst.append({
+                            "ticker": r.ticker,
+                            "skip_kind": r.skip_kind,
+                            "reason": r.reason,
+                            "skip_date": r.skip_date.isoformat() if r.skip_date else None,
+                        })
+                skip_counts = {sid: len(v) for sid, v in paper_skips.items()}
+                # Full per-strategy totals (beyond the 100-row cap) so the
+                # badge count never disagrees with the capped detail list.
+                tot_rows = safe_query(
                     db,
                     """
                     SELECT strategy_id, COUNT(*) AS skips
@@ -1525,12 +1766,12 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                     WHERE strategy_id = ANY(:ids)
                     GROUP BY strategy_id
                     """,
-                    {"ids": strategy_ids},
+                    {"ids": all_ids},
                     label="route_paper_skip_counts",
                 )
-                skip_counts = {r.strategy_id: int(r.skips or 0) for r in skip_rows}
+                skip_counts = {r.strategy_id: int(r.skips or 0) for r in tot_rows}
             except Exception as e:
-                logger.error(f"paper skip counts query error: {e}")
+                logger.error(f"paper skip detail query error: {e}")
 
         # ------------------------------------------------------------------
         # Per-book paper deployment ratio (kanban t_786a7c6e, ETL t_33ffe715):
@@ -1614,6 +1855,9 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 "paper_open_positions": open_positions,
                 "paper_state": paper_state,
                 "paper_skip_count": skip_counts.get(sid, 0),
+                # Skip detail (CLEANSE-1, t_070590de): ticker/skip_kind/reason/
+                # skip_date rows behind the badge — the tile drill-down.
+                "paper_skips": paper_skips.get(sid, []),
                 # NULL object when no row (PAPER_UAT or pre-run) — UI renders no chip.
                 "paper_deployment": paper_deployment.get(sid),
                 "paper_wr": paper.get("paper_wr"),
@@ -1629,10 +1873,59 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 "live_pnl": paper.get("paper_pnl"),
                 "mode": registry_to_api_mode(r.mode),
                 "db_status": r.db_status,
+                # Registry status detail (CLEANSE-1, t_070590de): authoritative
+                # registry status + operator reason text for PAUSED/PENDING/
+                # RETIRED tiles.
+                "registry_status": (registry_meta.get(sid) or {}).get("status"),
+                "retirement_reason": (registry_meta.get(sid) or {}).get("retirement_reason"),
+                # Non-strategy bookkeeping (cleanse closures / stale-orphan
+                # flattens) excluded from the paper aggregates above.
+                "non_strategy_pnl": non_strategy.get(sid, {}).get("non_strategy_pnl"),
+                "non_strategy_legs": non_strategy.get(sid, {}).get("non_strategy_legs", 0),
+                "non_strategy_unrealized": non_strategy.get(sid, {}).get("non_strategy_unrealized"),
+                "non_strategy_phantom_positions": non_strategy.get(sid, {}).get("non_strategy_phantom_positions", 0),
                 "frequency": r.frequency,
                 "agent_source": r.agent_source,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                 "metric_valid_flag": r.metric_valid_flag,
+            })
+        # Halted books (paused/retired, not in the quality-gated view) ride the
+        # same row shape with null metrics — the UI renders the status label +
+        # reason, never a ghost "live" card and never an absent book.
+        for rr in halted_extra:
+            sid = rr.strategy_id
+            data.append({
+                "id": sid,
+                "name": rr.name or sid,
+                "asset": rr.asset_class,
+                "horizon": None,
+                "tier": None,
+                "stage": "halted",
+                "btwr": None, "sim_wr": None, "btpf": None, "trades": None,
+                "returns": None, "sharpe": None, "dd": None,
+                "is_paper_monitoring": False,
+                "paper_engaged": False,
+                "paper_open_positions": 0,
+                "paper_state": "off",
+                "paper_skip_count": skip_counts.get(sid, 0),
+                "paper_skips": paper_skips.get(sid, []),
+                "paper_deployment": None,
+                "paper_wr": None, "paper_pf": None, "paper_pnl": None,
+                "paper_pnl_realized": None, "paper_pnl_unrealized": None,
+                "paper_unpriced": 0, "paper_trades": None,
+                "livewr": None, "livepf": None, "live_pnl": None,
+                "mode": registry_to_api_mode(rr.execution_mode),
+                "db_status": rr.status,
+                "registry_status": rr.status,
+                "retirement_reason": rr.retirement_reason,
+                "non_strategy_pnl": non_strategy.get(sid, {}).get("non_strategy_pnl"),
+                "non_strategy_legs": non_strategy.get(sid, {}).get("non_strategy_legs", 0),
+                "non_strategy_unrealized": non_strategy.get(sid, {}).get("non_strategy_unrealized"),
+                "non_strategy_phantom_positions": non_strategy.get(sid, {}).get("non_strategy_phantom_positions", 0),
+                "frequency": rr.frequency,
+                "agent_source": None,
+                "updated_at": rr.updated_at.isoformat() if rr.updated_at else None,
+                "metric_valid_flag": None,
             })
         return {
             "data": data,

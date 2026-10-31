@@ -54,6 +54,14 @@ except ImportError:
     stock_detail_router = None
 from app.services.ib_service import ib_quant_service
 from app.services.ib_web_service import ib_web_service
+from app.services.bookkeeping import non_strategy_leg_exists, fetch_closure_legs
+
+# CLEANSE-1 (kanban t_070590de): skip-log labeled non-strategy closure legs
+# (RESET_STALE_SIGNAL flattened / CLEANSE1_CLOSURE) are operator bookkeeping,
+# never strategy performance — excluded from every realized-P&L aggregate over
+# the synthetic paper ledger in this module. Queries here use the unaliased
+# table, so the predicate targets gold.paper_trades_synthetic directly.
+_NS_EXCL_SYNTH = "AND NOT " + non_strategy_leg_exists("gold.paper_trades_synthetic")
 from app.services.strategy_manager import strategy_manager
 from app.services.jt_strategy_executor import get_executor
 from app.services.event_bus import event_bus
@@ -4886,7 +4894,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         SELECT strategy_id, name, asset_class, universe_tickers, frequency, execution_mode, status,
                sharpe_oos, max_drawdown_oos, trade_count_oos, win_rate_oos, profit_factor_oos, returns_oos,
                conviction_score, assigned_capital, in_market_capital, signal_logic, exit_logic, description,
-               created_at, updated_at, priority
+               created_at, updated_at, priority, retirement_reason
         FROM gold.strategy_registry
         WHERE strategy_id = :sid
     """, {"sid": strategy_id}, label="eval_strategy")
@@ -5020,7 +5028,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
             FROM gold.paper_trades_synthetic
             WHERE strategy_id = :sid AND status = 'closed' AND pnl IS NOT NULL
               AND (ticker IS NULL OR ticker != 'CASH')
-        """, {"sid": strategy_id}, label="eval_live_summary_synthetic")
+        """ + _NS_EXCL_SYNTH, {"sid": strategy_id}, label="eval_live_summary_synthetic")
 
     live_metrics = {"total_trades": 0, "win_rate": None, "profit_factor": None,
                     "total_pnl": 0.0, "last_trade_at": None, "first_trade_at": None,
@@ -5071,7 +5079,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
             FROM gold.paper_trades_synthetic
             WHERE strategy_id = :sid AND status = 'closed' AND pnl IS NOT NULL
               AND (ticker IS NULL OR ticker != 'CASH')
-        """, {"sid": strategy_id}, label="eval_paper_book_summary")
+        """ + _NS_EXCL_SYNTH, {"sid": strategy_id}, label="eval_paper_book_summary")
         paper_book_metrics = _shape_book_metrics(paper_book_row)
         live_book_metrics = dict(live_metrics)
         if live_book_metrics.get("total_trades", 0) == 0:
@@ -5165,6 +5173,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
               AND (ticker IS NULL OR ticker != 'CASH')
               AND status = 'closed'
               AND exit_date > CURRENT_DATE - (:days || ' days')::INTERVAL
+        """ + _NS_EXCL_SYNTH + """
             GROUP BY exit_date
             ORDER BY d ASC
         """, {"sid": strategy_id, "days": str(days)}, label="eval_equity_synthetic")
@@ -5245,6 +5254,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
               AND pnl IS NOT NULL
               AND exit_date IS NOT NULL
               AND (ticker IS NULL OR ticker != 'CASH')
+        """ + _NS_EXCL_SYNTH + """
             GROUP BY 1, 2
             ORDER BY 1, 2
         """, {"sid": strategy_id}, label="eval_monthly_returns_paper")
@@ -5297,8 +5307,17 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
             LIMIT :limit
         """, {"sid": strategy_id, "limit": pos_limit}, label="eval_trades_synthetic")
 
+        # CLEANSE-1 (t_070590de): ledger rows stay listed (they ARE the book's
+        # history) but closure-labeled legs are flagged non-strategy so the UI
+        # annotates them instead of letting them read as strategy performance.
+        _closures = fetch_closure_legs(db, [strategy_id])
         recent_trades = []
         for t in trades:
+            _ns = None
+            if t.status == 'closed' and t.exit_date:
+                _cl = _closures.get((strategy_id, t.ticker))
+                if _cl and _cl.get("skip_date") == (t.exit_date.isoformat() if t.exit_date else None):
+                    _ns = {"skip_kind": _cl["skip_kind"], "reason": _cl["reason"]}
             if t.status == 'closed' and t.exit_date:
                 recent_trades.append({
                     "ts": t.entry_date.isoformat() if t.entry_date else None,
@@ -5308,6 +5327,7 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
                     "price": float(t.entry_price) if t.entry_price is not None else None,
                     "pnl": None,
                     "mode": strategy.execution_mode,
+                    "non_strategy": bool(_ns),
                 })
                 recent_trades.append({
                     "ts": t.exit_date.isoformat() if t.exit_date else None,
@@ -5317,6 +5337,8 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
                     "price": float(t.exit_price) if t.exit_price is not None else None,
                     "pnl": float(t.pnl) if t.pnl is not None else None,
                     "mode": strategy.execution_mode,
+                    "non_strategy": bool(_ns),
+                    "non_strategy_label": _ns,
                 })
             else:
                 recent_trades.append({
@@ -5431,6 +5453,18 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
             if t["entry_price"]:
                 t["unrealized_pnl_pct"] = m["current_price"] / t["entry_price"] - 1.0
 
+    # ---- Non-strategy bookkeeping excluded totals (CLEANSE-1, t_070590de) ---
+    # Every paper aggregate above excludes skip-log labeled closure legs
+    # (RESET_STALE_SIGNAL flattened / CLEANSE1_CLOSURE); the held-back amount
+    # is disclosed in the payload as non_strategy_excluded.
+    ns_row = safe_query_one(db, """
+        SELECT COUNT(*) AS legs, SUM(pnl) AS pnl
+        FROM gold.paper_trades_synthetic
+        WHERE strategy_id = :sid AND status = 'closed'
+          AND (ticker IS NULL OR ticker != 'CASH')
+    """ + "AND " + non_strategy_leg_exists("gold.paper_trades_synthetic"),
+        {"sid": strategy_id}, label="eval_non_strategy_excluded")
+
     # ---- Paper-book skip surface -------------------------------------------
     # consumption.strategy_paper_skips_current (qr_etl, refreshed every paper
     # rebalancer run): one row per (strategy_id, ticker) BUY signal the paper
@@ -5485,6 +5519,9 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         "name": name,
         "version": None,
         "status": strategy.status,
+        # CLEANSE-1 (t_070590de): operator reason text for halted books —
+        # the detail page renders the PAUSED/PENDING/RETIRED banner from these.
+        "retirement_reason": getattr(strategy, 'retirement_reason', None),
         "priority": strategy.priority,
         "asset_class": asset_class,
         "direction": direction,
@@ -5526,6 +5563,13 @@ def get_strategy_evaluation(strategy_id: str, days: int = 90, trade_limit: int =
         "recent_signals": recent_signals,
         "backtest_trades": backtest_trades,
         "paper_skips": paper_skips,
+        # CLEANSE-1 (t_070590de): closure-labeled non-strategy legs excluded
+        # from every aggregate above — surfaced so the page can disclose the
+        # held-back amount instead of silently diverging from the raw ledger.
+        "non_strategy_excluded": {
+            "legs": int(ns_row.legs or 0) if ns_row else 0,
+            "pnl": float(ns_row.pnl) if ns_row and ns_row.pnl is not None else None,
+        },
         "window_days": days,
     }
 
@@ -5565,6 +5609,7 @@ def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
             WHERE strategy_id = :sid AND pnl IS NOT NULL
               AND (ticker IS NULL OR ticker != 'CASH')
               AND status = 'closed'
+        """ + _NS_EXCL_SYNTH + """
             ORDER BY COALESCE(exit_date, entry_date) DESC
             LIMIT 50
         """, {"sid": strategy_id}, label="demote_recent_synthetic")
@@ -5575,6 +5620,7 @@ def _evaluate_demote_rules(db: Session, strategy_id: str) -> dict:
             WHERE strategy_id = :sid AND pnl IS NOT NULL
               AND (ticker IS NULL OR ticker != 'CASH')
               AND status = 'closed'
+        """ + _NS_EXCL_SYNTH + """
             GROUP BY exit_date
             ORDER BY d ASC
         """, {"sid": strategy_id}, label="demote_daily_synthetic")
@@ -5907,7 +5953,7 @@ def _gather_promotion_metrics(db: Session, strategy_id: str) -> dict:
         FROM gold.paper_trades_synthetic
         WHERE strategy_id = :sid AND pnl IS NOT NULL
           AND (ticker IS NULL OR ticker != 'CASH')
-    """, {"sid": strategy_id}, label="promote_live")
+    """ + _NS_EXCL_SYNTH, {"sid": strategy_id}, label="promote_live")
 
     bt_metrics = {
         "win_rate":     float(bt.win_rate) if bt and bt.win_rate is not None else None,

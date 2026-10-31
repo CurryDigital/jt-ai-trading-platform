@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api, usePoll } from '../utils';
 import { Chip, KpiTile, Button, ModeBadge, fmtPct, fmtK } from './jtkit';
-import { HORIZON, mapApiToBook, fracToPct } from './strategyProfiles';
+import { HORIZON, mapApiToBook, fracToPct, haltedLabel } from './strategyProfiles';
 
 // Strategies workspace — Performance card grid + Pipeline mode-ladder board.
 // Universe = the quality-gated pipeline feed (gold.v_pipeline_ui_feed), the
@@ -21,7 +21,7 @@ const PERF_MODES = [
   { k: 'uat', l: 'UAT', desc: 'Broker rehearsal' },
   { k: 'live', l: 'Live', desc: 'Live capital' },
 ];
-const STAGE_CHIP = { deployed: 'emerald', uat: 'slate', golden: 'amber', near_golden: 'blue', experimental: 'slate' };
+const STAGE_CHIP = { deployed: 'emerald', uat: 'slate', golden: 'amber', near_golden: 'blue', experimental: 'slate', halted: 'rose' };
 
 function useStrategyBook() {
   const [book, setBook] = useState(null);
@@ -40,9 +40,32 @@ function useStrategyBook() {
     // renders). Registry rows failing the metric gates are dropped here so the
     // Pipeline and Performance tabs can never drift from the Lab count. If the
     // feed call fails, fall back to the full registry rather than an empty tab.
-    const feedIds = new Set((feed?.data || []).map((r) => r.id));
+    const feedRows = feed?.data || [];
+    const feedIds = new Set(feedRows.map((r) => r.id));
     const gated = feedIds.size ? raw.filter((r) => feedIds.has(r.id)) : raw;
-    setBook(mapApiToBook(gated));
+    // CLEANSE-1 (t_070590de): overlay the feed's authoritative registry status
+    // + reason + skip detail + non-strategy bookkeeping onto researcher rows,
+    // and append halted feed rows that have no researcher row at all (retired
+    // books are excluded from /researcher) so a halted book never vanishes.
+    const feedById = new Map(feedRows.map((r) => [r.id, r]));
+    const merged = gated.map((r) => {
+      const f = feedById.get(r.id);
+      if (!f) return r;
+      return {
+        ...r,
+        registry_status: f.registry_status,
+        retirement_reason: f.retirement_reason ?? r.retirement_reason,
+        paper_skips: f.paper_skips ?? r.paper_skips,
+        paper_skip_count: f.paper_skip_count ?? r.paper_skip_count,
+        non_strategy_pnl: f.non_strategy_pnl ?? r.non_strategy_pnl,
+        non_strategy_legs: f.non_strategy_legs ?? r.non_strategy_legs,
+        non_strategy_unrealized: f.non_strategy_unrealized ?? r.non_strategy_unrealized,
+        non_strategy_phantom_positions: f.non_strategy_phantom_positions ?? r.non_strategy_phantom_positions,
+      };
+    });
+    const inMerged = new Set(merged.map((r) => r.id));
+    const feedOnly = feedRows.filter((r) => !inMerged.has(r.id) && r.stage === 'halted');
+    setBook(mapApiToBook([...merged, ...feedOnly]));
   }, []);
   usePoll(load, 60000);
   const reload = useCallback(() => load(true), [load]);
@@ -188,9 +211,23 @@ export function YearlyBars({ yearly, emptyLabel = 'No annual backtest data yet',
 function RealMetrics({ s, mode }) {
   const conviction = s._api?.conviction_score;
   const liveActive = s.mode === 'LIVE_TRADING';
+  const [skipsOpen, setSkipsOpen] = useState(false);
 
   if (mode === 'paper') {
     const pnl = s.paperPNL;
+    // Non-strategy bookkeeping (CLEANSE-1, t_070590de): cleanse-closure and
+    // stale-orphan flatten legs are excluded from every aggregate on this
+    // block; the held-back amount is disclosed, never silently dropped.
+    const nsLegs = s._api?.non_strategy_legs || 0;
+    const nsPnl = s._api?.non_strategy_pnl;
+    const nsPhantom = s._api?.non_strategy_phantom_positions || 0;
+    const nsUnr = s._api?.non_strategy_unrealized;
+    const skipRows = s._api?.paper_skips || [];
+    const skipCount = s._api?.paper_skip_count || 0;
+    const nsTip = [
+      nsLegs ? `${nsLegs} closure leg${nsLegs === 1 ? '' : 's'} labeled RESET_STALE_SIGNAL/CLEANSE1_CLOSURE in the skip log — operator bookkeeping from the 2026-10-28 cleanse, not strategy performance` : null,
+      nsPhantom ? `${nsPhantom} phantom ETL-cache position${nsPhantom === 1 ? '' : 's'} excluded from open P&L` : null,
+    ].filter(Boolean).join(' · ');
     // Monitoring state semantics (kanban t_1f3bee9f):
     //   engaged  = paper monitor running AND open paper positions right now.
     //   watching = monitor running but flat book (all-SELL scores, or a
@@ -239,6 +276,30 @@ function RealMetrics({ s, mode }) {
         <Metric label="Monitoring" value={stateLabel} color={stateColor} />
         <Metric label="Conviction" value={conviction != null ? Number(conviction).toFixed(1) : '—'} />
         {depChip && <div style={{ gridColumn: '1 / -1' }}>{depChip}</div>}
+        {(nsLegs > 0 || nsPhantom > 0) && (
+          <div style={{ gridColumn: '1 / -1', fontSize: 8, color: 'var(--text-faint)', lineHeight: 1.4 }} title={nsTip}>
+            excl. {nsPnl != null ? fmtK(nsPnl) : '—'} non-strategy bookkeeping{nsLegs ? ` (${nsLegs} cleanse-closure leg${nsLegs === 1 ? '' : 's'})` : ''}{nsPhantom ? ` · ${nsPhantom} phantom position${nsPhantom === 1 ? '' : 's'}${nsUnr != null ? ` (${fmtK(nsUnr)})` : ''}` : ''}
+          </div>
+        )}
+        {skipCount > 0 && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSkipsOpen(!skipsOpen); }}
+              style={{ border: 'none', cursor: 'pointer', padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: 'rgba(100,116,139,0.25)', color: 'var(--text-secondary)' }}
+              title="BUY signals the paper rebalancer could not fill — click for the per-ticker reasons"
+            >{skipCount} unfilled {skipsOpen ? '▴' : '▾'}</button>
+            {skipsOpen && (
+              <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 140, overflowY: 'auto' }}>
+                {skipRows.slice(0, 12).map((sk, i) => (
+                  <div key={i} style={{ fontSize: 8, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} title={sk.reason || ''}>
+                    {sk.ticker} · {sk.skip_kind} · {sk.skip_date}{(sk.reason || '').length > 0 ? ` — ${(sk.reason || '').slice(0, 70)}` : ''}
+                  </div>
+                ))}
+                {skipRows.length > 12 && <div style={{ fontSize: 8, color: 'var(--text-faint)' }}>+{skipRows.length - 12} more — open strategy detail</div>}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -447,6 +508,10 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
   // UAT → Live is engine-blocked until qr_research defines the gate criteria
   // (kanban t_b64f7302) — show the rung but keep it disabled, no fake affordance.
   const nextBlocked = s.mode === 'UAT' && next === 'LIVE_TRADING';
+  // CLEANSE-1 (t_070590de): halted books (registry paused/retired; PENDING is
+  // stored as paused + 'PENDING —' reason prefix) render their status label +
+  // operator reason on the card and get no ladder CTAs — never implied live.
+  const halted = haltedLabel(s._api?.registry_status || s._api?.status, s._api?.retirement_reason);
   const NEXT_CTA = { PAPER_TRADING: 'Promote to Paper →', UAT: 'Promote to UAT →', LIVE_TRADING: 'Deploy Live →' };
   const oosStart = s._api?.oos_start || null;
   const oosEnd = s._api?.oos_end || null;
@@ -472,9 +537,14 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
         <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => onOpen(s.id)} title="Open strategy detail">
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-            <Chip color={STAGE_CHIP[s.stage]}>{s.stage.replace('_', ' ')}</Chip>
+            <Chip color={STAGE_CHIP[s.stage]}>{halted ? halted.k : s.stage.replace('_', ' ')}</Chip>
             <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{s.asset}</span>
           </div>
+          {halted && halted.reason && (
+            <div style={{ fontSize: 8, color: 'var(--text-muted)', lineHeight: 1.35, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={halted.reason}>
+              {halted.reason}
+            </div>
+          )}
         </div>
         <ModeBadge mode={s.mode} />
       </div>
@@ -492,7 +562,7 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
         <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} oosStart={viewMode === 'sim' ? oosStart : null} oosEnd={viewMode === 'sim' ? oosEnd : null} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → UAT' : undefined} />
       </div>
 
-      {showLadder && (
+      {showLadder && !halted && (
         <div style={{ display: 'flex', gap: 6, marginTop: 1 }}>
           {next && (
             <Button variant={next === 'LIVE_TRADING' ? 'danger' : 'primary'} size="sm" style={{ flex: 1, justifyContent: 'center' }}
@@ -661,7 +731,9 @@ export function StrategyPipelineBoard({ book, error, hzn, setHzn, onOpen, onActi
 
       <div className="strat-pipeline-grid">
         {LADDER.map((st) => {
-          const items = view.filter((s) => s.mode === st.mode);
+          // Halted books (registry paused/retired) never sit in a live lane —
+          // they render in the Halted lane below with their reason.
+          const items = view.filter((s) => s.mode === st.mode && s.stage !== 'halted');
           return (
             <div key={st.mode} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px' }}>
@@ -682,6 +754,24 @@ export function StrategyPipelineBoard({ book, error, hzn, setHzn, onOpen, onActi
             </div>
           );
         })}
+        {(() => {
+          const haltedItems = view.filter((s) => s.stage === 'halted');
+          if (!haltedItems.length) return null;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 4px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Chip color="rose">Halted</Chip>
+                  <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>registry paused / pending / retired — not trading</span>
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>{haltedItems.length}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 60, padding: 6, borderRadius: 'var(--radius-lg)', background: 'rgba(255,255,255,0.012)', border: '1px solid var(--border-glass)' }}>
+                {haltedItems.map((s) => <StrategyCard key={s.id} s={s} onOpen={onOpen} onAction={onAction} showLadder={false} viewMode="paper" />)}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

@@ -18,7 +18,7 @@ const DEPLOYED_STATUS = new Set(['approved', 'active', 'live', 'deployed']);
 // Finer asset-class label for filtering UI: keeps ETF distinct from single-stock
 // equity (ASSET_MAP above folds ETF into EQUITY for horizon/profile grouping).
 function assetClassFor(row) {
-  const v = (row.asset_class || '').toUpperCase();
+  const v = (row.asset_class || row.asset || '').toUpperCase();
   if (v === 'ETF') return 'ETF';
   if (v === 'FX') return 'FX';
   if (v === 'CRYPTO') return 'CRYPTO';
@@ -45,10 +45,30 @@ function normalizeMode(row) {
   return null;
 }
 
+// CLEANSE-1 (t_070590de): halted-book label from registry status + reason.
+// PENDING books are stored as status='paused' with a 'PENDING —' reason prefix.
+export function haltedLabel(status, reason) {
+  const st = (status || '').toLowerCase();
+  if (st === 'retired') return { k: 'RETIRED', reason: reason || '' };
+  if (st === 'paused') {
+    const r = reason || '';
+    // PENDING books carry a 'PENDING —' marker in the reason (stored form:
+    // 'CLEANSE-1 2026-10-28: PENDING — …'), not a distinct status value.
+    return { k: /\bPENDING\b/.test(r.slice(0, 80)) ? 'PENDING' : 'PAUSED', reason: r };
+  }
+  return null;
+}
+
 export function stageFor(row) {
-  const st = (row.status || '').toLowerCase();
+  // Researcher rows carry registry `status`; pipeline-feed rows carry
+  // `registry_status`/`db_status` (halted books appended by CLEANSE-1 have no
+  // plain `status`). First truthy wins.
+  const st = (row.status || row.registry_status || row.db_status || '').toLowerCase();
   const mode = normalizeMode(row);
   const researchStatus = (row.research_status || '').toLowerCase();
+  // CLEANSE-1 (t_070590de): halted books never read as live. 'pending' is
+  // stored as status='paused' with a 'PENDING —' retirement_reason prefix.
+  if (st === 'paused' || st === 'retired') return 'halted';
   if (researchStatus === 'rejected' || researchStatus === 'retired') return 'experimental';
   if (st === 'live' || mode === 'LIVE_TRADING') return 'deployed';
   // Broker rehearsal (IBKR UAT session, paper money) sits between golden and deployed.
@@ -117,7 +137,8 @@ export function fracToPct(value, digits = 1) {
 
 export function mapApiToBook(rows) {
   return (rows || []).map((row) => {
-    const asset = ASSET_MAP[(row.asset_class || '').toUpperCase()] || 'EQUITY';
+    // Feed-only halted rows (CLEANSE-1) carry `asset` instead of `asset_class`.
+    const asset = ASSET_MAP[(row.asset_class || row.asset || '').toUpperCase()] || 'EQUITY';
     const stage = stageFor(row);
     const wr = row.win_rate != null ? pctAsIs(row.win_rate, 0) : null;
     const dd = row.max_drawdown != null ? -Math.abs(pctAsIs(row.max_drawdown, 1)) : null;

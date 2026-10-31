@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { api, usePoll } from '../utils';
-import { stageFor } from './strategyProfiles';
+import { stageFor, haltedLabel } from './strategyProfiles';
 
 /**
  * Strategy Lab — backtest screener with live pipeline metrics.
@@ -184,6 +184,16 @@ const StrategyLab = ({ onOpen }) => {
       live_trades: s.paper_trades,
       // Legacy aliases kept in case downstream code still references them.
       db_status: s.db_status,
+      // CLEANSE-1 (t_070590de): authoritative registry status + reason, skip
+      // detail behind the 'N unfilled' badge, and non-strategy bookkeeping
+      // excluded from the paper aggregates.
+      registry_status: s.registry_status,
+      retirement_reason: s.retirement_reason,
+      paper_skips: s.paper_skips || [],
+      non_strategy_pnl: s.non_strategy_pnl,
+      non_strategy_legs: s.non_strategy_legs || 0,
+      non_strategy_unrealized: s.non_strategy_unrealized,
+      non_strategy_phantom_positions: s.non_strategy_phantom_positions || 0,
       mode: s.mode,
       stage,
       tier: s.tier,
@@ -225,6 +235,22 @@ const StrategyLab = ({ onOpen }) => {
     return <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-700 text-slate-300 uppercase">{status}</span>;
   };
 
+  // CLEANSE-1 (t_070590de): halted-book badge — PAUSED / PENDING (stored as
+  // paused + 'PENDING —' reason prefix) / RETIRED, with the operator reason
+  // on the tooltip. Retired is the only rose (critical) chip; paused/pending
+  // are neutral slate per the house palette rule.
+  const haltedBadge = (s) => {
+    const h = haltedLabel(s.registry_status, s.retirement_reason);
+    if (!h) return null;
+    const rose = h.k === 'RETIRED';
+    return (
+      <span
+        className={`ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase cursor-help ${rose ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-700 text-slate-300'}`}
+        title={h.reason || h.k}
+      >{h.k}</span>
+    );
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -239,7 +265,7 @@ const StrategyLab = ({ onOpen }) => {
             </span>
           </div>
           <p className="text-[10px] text-slate-500 mt-0.5">
-            {strategies.length} of {pipelineUniverse || '…'} research strategies pass quality gates · Pipeline & Performance show the same gated set · backtest vs. paper · real data only
+            {strategies.filter(s => !haltedLabel(s.registry_status, s.retirement_reason)).length} of {pipelineUniverse || '…'} research strategies pass quality gates · Pipeline & Performance show the same gated set · backtest vs. paper · real data only
           </p>
         </div>
       </div>
@@ -327,20 +353,25 @@ const StrategyLab = ({ onOpen }) => {
                 const isExpanded = expandedStrategy === s.id;
                 const ac = normalizeAssetClass(s.asset_class);
                 const isRejected = s.db_status === 'rejected';
+                const halted = haltedLabel(s.registry_status, s.retirement_reason);
                 return (
                   <React.Fragment key={s.id}>
-                    <tr className={`border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer ${isRejected ? 'opacity-70' : ''}`} onClick={() => setExpandedStrategy(isExpanded ? null : s.id)}>
+                    <tr className={`border-b border-white/[0.04] hover:bg-white/[0.03] cursor-pointer ${isRejected || halted ? 'opacity-70' : ''}`} onClick={() => setExpandedStrategy(isExpanded ? null : s.id)}>
                       <td className="p-2.5">
                         <div className="flex items-center gap-2.5">
                           <span className="text-[10px] text-slate-600 font-mono">#{idx + 1}</span>
                           <div>
-                            <div className="font-bold text-white">{s.name}{statusBadge(s.db_status)}{s.paper_skip_count > 0 && (
-                              <span
-                                className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-700 text-slate-300 uppercase cursor-help"
-                                title={`${s.paper_skip_count} BUY signal${s.paper_skip_count === 1 ? '' : 's'} not filled in the paper book — open Strategy Detail for reasons`}
-                              >{s.paper_skip_count} unfilled</span>
+                            <div className="font-bold text-white">{s.name}{halted ? haltedBadge(s) : statusBadge(s.db_status)}{s.paper_skip_count > 0 && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setExpandedStrategy(isExpanded ? null : s.id); }}
+                                className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-700 text-slate-300 uppercase cursor-pointer hover:bg-slate-600"
+                                title={`${s.paper_skip_count} BUY signal${s.paper_skip_count === 1 ? '' : 's'} not filled in the paper book — click for the per-ticker reasons`}
+                              >{s.paper_skip_count} unfilled {isExpanded ? '▴' : '▾'}</button>
                             )}</div>
                             <div className="text-[9px] text-slate-500">{s.id}</div>
+                            {halted && halted.reason && (
+                              <div className="text-[9px] text-slate-500 mt-0.5 max-w-[340px] truncate" title={halted.reason}>{halted.reason}</div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -419,6 +450,24 @@ const StrategyLab = ({ onOpen }) => {
                                   className="w-full py-2 border border-white/10 hover:border-blue-400/40 text-blue-400 hover:text-blue-300 text-[11px] font-bold rounded-lg transition-colors"
                                 >Open full strategy detail page ↗</button>
                               )}
+                              {(s.paper_skips || []).length > 0 && (
+                                <div>
+                                  <span className="text-[9px] text-slate-500 block mb-1">Unfilled paper signals ({s.paper_skip_count}) — BUY signals the rebalancer could not fill</span>
+                                  <div className="max-h-40 overflow-y-auto space-y-1">
+                                    {s.paper_skips.map((sk, i) => (
+                                      <div key={i} className="bg-slate-800/50 px-2 py-1 rounded text-[10px] font-mono text-slate-300" title={sk.reason || ''}>
+                                        <span className="text-white">{sk.ticker}</span> · <span className="text-slate-400">{sk.skip_kind}</span> · <span className="text-slate-500">{sk.skip_date}</span>
+                                        {sk.reason && <div className="text-[9px] text-slate-500">{sk.reason}</div>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {(s.non_strategy_legs > 0 || s.non_strategy_phantom_positions > 0) && (
+                                <div className="text-[9px] text-slate-500 bg-slate-800/40 rounded p-2" title="Closure legs labeled RESET_STALE_SIGNAL/CLEANSE1_CLOSURE in the skip log — operator bookkeeping from the 2026-10-28 cleanse, not strategy performance">
+                                  Excluded from performance above: {s.non_strategy_pnl != null ? `${s.non_strategy_pnl >= 0 ? '+' : ''}${money(s.non_strategy_pnl)}` : '—'} non-strategy bookkeeping{s.non_strategy_legs ? ` (${s.non_strategy_legs} cleanse-closure leg${s.non_strategy_legs === 1 ? '' : 's'})` : ''}{s.non_strategy_phantom_positions ? ` · ${s.non_strategy_phantom_positions} phantom position${s.non_strategy_phantom_positions === 1 ? '' : 's'}` : ''}
+                                </div>
+                              )}
                             </div>
                             <div className="space-y-3">
                               <h4 className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Logic</h4>
@@ -430,7 +479,7 @@ const StrategyLab = ({ onOpen }) => {
                                 <span className="text-[9px] text-slate-500 block mb-1">Exit</span>
                                 <span className="text-[12px] text-white font-mono">{s.exit_logic || '—'}</span>
                               </div>
-                              {s.is_paper_monitoring ? (
+                              {s.is_paper_monitoring && !halted ? (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleStop(s); }}
                                   disabled={stoppingId === s.id || deployingId === s.id}
@@ -447,7 +496,7 @@ const StrategyLab = ({ onOpen }) => {
                               ) : (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleDeploy(s); }}
-                                  disabled={deployingId === s.id || stoppingId === s.id || isRejected}
+                                  disabled={deployingId === s.id || stoppingId === s.id || isRejected || !!halted}
                                   className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                                 >
                                   {deployingId === s.id ? (
@@ -456,6 +505,8 @@ const StrategyLab = ({ onOpen }) => {
                                     deployResult.success ? <span className="text-emerald-100">✓ Deployed to paper trading</span> : <span className="text-rose-200">✗ {deployResult.error}</span>
                                   ) : isRejected ? (
                                     <>Rejected · cannot deploy</>
+                                  ) : halted ? (
+                                    <>{halted.k} · registry halted — cannot deploy</>
                                   ) : (
                                     <>Deploy to paper trading · {money(DEFAULT_POOL)} pool · {s.universe?.length || 0} tickers</>
                                   )}

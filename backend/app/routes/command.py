@@ -14,8 +14,15 @@ from datetime import datetime, timezone, timedelta
 from app.dependencies import get_db, logger
 from app.db.safe_query import safe_query, safe_query_one
 from app.db.session import engine
+from app.services.bookkeeping import non_strategy_leg_exists, fetch_phantom_position_keys
 
 router = APIRouter(prefix="/api", tags=["command"])
+
+# CLEANSE-1 (kanban t_070590de): skip-log labeled non-strategy closure legs
+# (RESET_STALE_SIGNAL flattened / CLEANSE1_CLOSURE) are operator bookkeeping,
+# never strategy performance — excluded from every realized-P&L aggregate in
+# this module. SQL predicate fragment over alias `t` (paper_trades_synthetic).
+_NS_EXCL = "AND NOT " + non_strategy_leg_exists("t")
 
 SEV_ORDER = {'critical': 0, 'warning': 1, 'info': 2}
 
@@ -455,6 +462,7 @@ def get_command_overview(db: Session = Depends(get_db)):
           ON m.strategy_id = r.strategy_id AND m.is_active
         WHERE r.status NOT IN ('DEPRECATED', 'retired')
           AND (t.ticker IS NULL OR t.ticker != 'CASH')
+    """ + _NS_EXCL + """
         GROUP BY r.strategy_id, r.name
     """, label="command_strategy_risks")
     for r in risk_rows:
@@ -540,7 +548,7 @@ def get_command_overview(db: Session = Depends(get_db)):
             WHERE t.status = 'closed' AND r.execution_mode = 'SIMULATION'
               AND t.exit_date >= date_trunc('month', now())::date
               AND (t.ticker IS NULL OR t.ticker != 'CASH')
-        """, label="command_monthly_pnl_sim")),
+        """ + _NS_EXCL, label="command_monthly_pnl_sim")),
         "paper": _month_bucket(safe_query_one(db, """
             SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
             FROM gold.paper_trades_synthetic t
@@ -548,7 +556,7 @@ def get_command_overview(db: Session = Depends(get_db)):
             WHERE t.status = 'closed' AND r.execution_mode = 'PAPER'
               AND t.exit_date >= date_trunc('month', now())::date
               AND (t.ticker IS NULL OR t.ticker != 'CASH')
-        """, label="command_monthly_pnl_paper")),
+        """ + _NS_EXCL, label="command_monthly_pnl_paper")),
         "live": _month_bucket(safe_query_one(db, """
             SELECT COUNT(*) AS trades, SUM(pnl) AS pnl
             FROM gold.trade_executions
@@ -571,6 +579,7 @@ def get_command_overview(db: Session = Depends(get_db)):
         WHERE t.status = 'closed'
           AND t.exit_date >= date_trunc('month', now())::date
           AND (t.ticker IS NULL OR t.ticker != 'CASH')
+    """ + _NS_EXCL + """
         GROUP BY t.strategy_id, r.name
     """, label="command_paper_book_month")
     book = [{
@@ -621,6 +630,33 @@ def get_command_overview(db: Session = Depends(get_db)):
         WHERE p.status = 'ACTIVE' AND p.quantity > 0
           AND p.execution_mode = 'PAPER_TRADING'
     """, label="command_asset_breakdown_open")
+
+    # Phantom positions (CLEANSE-1, t_070590de): closure-labeled cleanse legs
+    # with no backing open ledger row still sat ACTIVE in the ETL cache after
+    # the flatten — excluded from open P&L before aggregation.
+    try:
+        phantom_keys = fetch_phantom_position_keys(
+            db, sorted({p.strategy_id for p in open_rows if p.strategy_id}))
+    except Exception:
+        phantom_keys = set()
+    if phantom_keys:
+        kept = []
+        phantom_pnl = 0.0
+        phantom_n = 0
+        for p in open_rows:
+            pk = (p.strategy_id, p.ticker, round(float(p.quantity or 0.0), 4))
+            if pk in phantom_keys:
+                phantom_n += 1
+                if p.unrealized_pnl is not None:
+                    phantom_pnl += float(p.unrealized_pnl)
+                continue
+            kept.append(p)
+        if phantom_n:
+            logger.warning(
+                "command asset breakdown: excluded %d phantom cleanse rows ($%.2f)",
+                phantom_n, phantom_pnl)
+        open_rows = kept
+
     for p in open_rows:
         if _is_cash_position(p):
             continue
@@ -638,6 +674,7 @@ def get_command_overview(db: Session = Depends(get_db)):
         WHERE t.status = 'closed'
           AND t.exit_date >= date_trunc('year', now())::date
           AND (t.ticker IS NULL OR t.ticker != 'CASH')
+    """ + _NS_EXCL + """
         GROUP BY r.asset_class
     """, label="command_asset_breakdown_closed")
     for r in closed_rows:
@@ -798,7 +835,7 @@ def _mode_ledger_queries(mode):
                 JOIN gold.strategy_registry r
                   ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
                 WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
-            """,
+            """ + _NS_EXCL,
             "today": """
                 SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
                 FROM gold.paper_trades_synthetic t
@@ -806,7 +843,7 @@ def _mode_ledger_queries(mode):
                   ON r.strategy_id = t.strategy_id AND r.execution_mode = 'SIMULATION'
                 WHERE t.status = 'closed' AND t.exit_date = CURRENT_DATE
                   AND (t.ticker IS NULL OR t.ticker != 'CASH')
-            """,
+            """ + _NS_EXCL,
             "daily": """
                 SELECT t.exit_date AS d, SUM(t.pnl) AS pnl
                 FROM gold.paper_trades_synthetic t
@@ -815,6 +852,7 @@ def _mode_ledger_queries(mode):
                 WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
                   AND t.exit_date >= CURRENT_DATE - 29
                   AND (t.ticker IS NULL OR t.ticker != 'CASH')
+            """ + _NS_EXCL + """
                 GROUP BY t.exit_date ORDER BY t.exit_date
             """,
             "open_strats": """
@@ -847,7 +885,7 @@ def _mode_ledger_queries(mode):
                 JOIN gold.strategy_registry r
                   ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
                 WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
-            """,
+            """ + _NS_EXCL,
             "today": """
                 SELECT COUNT(*) AS trades, SUM(t.pnl) AS pnl
                 FROM gold.paper_trades_synthetic t
@@ -855,7 +893,7 @@ def _mode_ledger_queries(mode):
                   ON r.strategy_id = t.strategy_id AND r.execution_mode = 'PAPER'
                 WHERE t.status = 'closed' AND t.exit_date = CURRENT_DATE
                   AND (t.ticker IS NULL OR t.ticker != 'CASH')
-            """,
+            """ + _NS_EXCL,
             "daily": """
                 SELECT t.exit_date AS d, SUM(t.pnl) AS pnl
                 FROM gold.paper_trades_synthetic t
@@ -864,6 +902,7 @@ def _mode_ledger_queries(mode):
                 WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
                   AND t.exit_date >= CURRENT_DATE - 29
                   AND (t.ticker IS NULL OR t.ticker != 'CASH')
+            """ + _NS_EXCL + """
                 GROUP BY t.exit_date ORDER BY t.exit_date
             """,
             "open_strats": """

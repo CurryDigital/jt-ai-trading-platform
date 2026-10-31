@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { api, usePoll, pnlCl } from '../../utils';
+import { api, usePoll, pnlCl, fmtK } from '../../utils';
 
 // Shared per-book performance overview for ALL Execution subtabs (SIM / PAPER /
 // UAT / LIVE) — mounted in ExecScaffold's full-width overview slot so the YTD
@@ -282,6 +282,21 @@ export const BookOverview = ({ book }) => {
           )}
         </div>
       </div>
+
+      {/* CLEANSE-1 (t_070590de): non-strategy bookkeeping footnote — closure
+          legs labeled RESET_STALE_SIGNAL (flattened) / CLEANSE1_CLOSURE are
+          excluded from every figure above; the held-back amount is disclosed,
+          never silently dropped and never quoted as strategy performance. */}
+      {(data?.non_strategy_excluded?.legs || 0) > 0 && (
+        <div
+          className="text-[9px] text-slate-500 px-1"
+          title="Closure legs labeled RESET_STALE_SIGNAL (flattened) / CLEANSE1_CLOSURE in consumption.strategy_paper_skips_current — operator bookkeeping from the 2026-10-28 cleanse (orphan-holding flatten), not strategy performance"
+        >
+          Figures above exclude {data.non_strategy_excluded.legs} non-strategy cleanse-closure leg{data.non_strategy_excluded.legs === 1 ? '' : 's'}
+          {data.non_strategy_excluded.pnl != null && <> ({data.non_strategy_excluded.pnl >= 0 ? '+' : ''}{fmtK(data.non_strategy_excluded.pnl)})</>}
+          {' '}— operator bookkeeping, not strategy performance.
+        </div>
+      )}
     </div>
   );
 };

@@ -3,6 +3,7 @@ import { api, usePoll, fmt, fmtK, fmtAge, pnlCl } from '../utils';
 import { PromotionPanel } from './PromotionPanel';
 import { CapitalAllocationPanel } from './CapitalAllocationPanel';
 import { RiskWatchPanel } from './RiskWatchPanel';
+import { haltedLabel } from './strategyProfiles';
 
 // UTC-date helpers for the SIM "Signals" rule-mirror watchlist (HK IPO strategies).
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
@@ -655,6 +656,41 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           </div>
         </div>
 
+        {/* CLEANSE-1 (t_070590de): halted-book banner — registry PAUSED /
+            PENDING (paused + 'PENDING —' reason prefix) / RETIRED with the
+            operator's reason text. The page must never read as a live book. */}
+        {(() => {
+          const halted = haltedLabel(data.status, data.retirement_reason);
+          if (!halted) return null;
+          const rose = halted.k === 'RETIRED';
+          return (
+            <div className={`qr-surface px-3 py-2 border-l-2 ${rose ? 'border-rose-500/60' : 'border-slate-500/60'}`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`qr-chip ${rose ? 'qr-chip-rose' : 'qr-chip-slate'}`}>{halted.k}</span>
+                <span className="text-[10px] text-slate-400">Registry-halted — not trading. Metrics below are historical; paper aggregates exclude cleanse-closure bookkeeping.</span>
+              </div>
+              {halted.reason && (
+                <p className="text-[10px] text-slate-400 leading-relaxed mt-1 whitespace-pre-line">{halted.reason}</p>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* CLEANSE-1 (t_070590de): non-strategy bookkeeping disclosure — legs
+            labeled RESET_STALE_SIGNAL/CLEANSE1_CLOSURE are excluded from every
+            aggregate on this page; the held-back amount is disclosed, never
+            silently dropped and never quoted as strategy performance. */}
+        {(data.non_strategy_excluded?.legs || 0) > 0 && (
+          <div className="qr-surface px-3 py-2">
+            <div className="text-[10px] text-slate-500 leading-relaxed" title="Closure legs labeled RESET_STALE_SIGNAL (flattened) / CLEANSE1_CLOSURE in consumption.strategy_paper_skips_current — operator bookkeeping from the 2026-10-28 cleanse">
+              <span className="qr-chip qr-chip-slate text-[9px] mr-2">NON-STRATEGY BOOKKEEPING</span>
+              {data.non_strategy_excluded.legs} cleanse-closure leg{data.non_strategy_excluded.legs === 1 ? '' : 's'}
+              {data.non_strategy_excluded.pnl != null && <> totaling <span className={`qr-num font-bold ${pnlCl(data.non_strategy_excluded.pnl)}`}>{data.non_strategy_excluded.pnl >= 0 ? '+' : ''}{fmtK(data.non_strategy_excluded.pnl)}</span></>}
+              {' '}excluded from all performance figures on this page — orphan-holding flatten per operator directive, not strategy performance.
+            </div>
+          </div>
+        )}
+
         {/* Research notes & disclosures — the registry description verbatim
             (research-owned text). For EXPERIMENTAL rows this carries the audit
             trail and caveats (e.g. C1: post-hoc filter family, n=21 suspicious-
@@ -1209,9 +1245,9 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                         </thead>
                         <tbody className="divide-y divide-white/[0.04]">
                           {activeBookPayload.recent_trades.map((t, i) => (
-                            <tr key={i} className="qr-tr-hover">
+                            <tr key={i} className={`qr-tr-hover ${t.non_strategy ? 'opacity-50' : ''}`} title={t.non_strategy ? `Non-strategy bookkeeping — ${t.non_strategy_label?.skip_kind || 'cleanse closure'}${t.non_strategy_label?.reason ? `: ${t.non_strategy_label.reason}` : ''} · excluded from all performance figures` : undefined}>
                               <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.ts ? new Date(t.ts).toLocaleString('en-GB', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                              <td className="py-1 px-2 text-white text-[11px] font-mono">{t.ticker}</td>
+                              <td className="py-1 px-2 text-white text-[11px] font-mono">{t.ticker}{t.non_strategy && <span className="qr-chip qr-chip-slate text-[8px] ml-1" title="Cleanse-closure leg — excluded from strategy performance">bookkeeping</span>}</td>
                               <td className="py-1 px-2 text-right">
                                 <span className={`qr-chip ${t.side === 'BUY' || t.side === 'LONG' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{t.side}</span>
                               </td>
