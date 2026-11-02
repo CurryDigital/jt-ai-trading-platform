@@ -628,9 +628,11 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
   usePoll(loadArchive, 60000);
   if (!book) return <Placeholder label={error ? 'Could not load strategies — backend unreachable.' : 'Loading strategies…'} />;
 
-  const counts = { all: book.length, day: 0, swing: 0, position: 0 };
-  book.forEach((s) => { counts[s.horizon] = (counts[s.horizon] || 0) + 1; });
-
+  // Counts and asset options reflect ACTIVE books only — archived/halted rows
+  // are excluded from active strategy counts (their home is the Archive tab).
+  const activeBook = book.filter((s) => s.stage !== 'halted');
+  const counts = { all: activeBook.length, day: 0, swing: 0, position: 0 };
+  activeBook.forEach((s) => { counts[s.horizon] = (counts[s.horizon] || 0) + 1; });
   // Mode ladder (cumulative): Sim shows every ACTIVE strategy, Paper shows
   // paper/uat/live deployments, UAT shows rehearsal + live, Live shows live
   // capital only. Halted rows (registry paused/retired, incl. archived books)
@@ -644,9 +646,9 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
     live: (s) => s.mode === 'LIVE_TRADING',
   };
 
-  // Asset-class options from the classes actually present in the book.
-  const assetCounts = { all: book.length };
-  book.forEach((s) => { const k = s.assetClass || 'EQUITY'; assetCounts[k] = (assetCounts[k] || 0) + 1; });
+  // Asset-class options from the classes actually present in the active book.
+  const assetCounts = { all: activeBook.length };
+  activeBook.forEach((s) => { const k = s.assetClass || 'EQUITY'; assetCounts[k] = (assetCounts[k] || 0) + 1; });
   const assetOpts = ['all', ...Object.keys(assetCounts).filter((k) => k !== 'all').sort()];
 
   const src = book
