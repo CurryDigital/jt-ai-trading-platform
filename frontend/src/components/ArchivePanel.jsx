@@ -19,6 +19,8 @@ const REASON_LABEL = {
 };
 
 const fmtPct1 = (v) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(1)}%`);
+// Ledger floats arrive with binary noise (35.20000076); trim to 4dp max.
+const fmtNum = (v) => (v == null ? '—' : String(+Number(v).toFixed(4)));
 
 function EvidenceMetric({ label, value, tip, sub }) {
   return (
@@ -35,7 +37,7 @@ function ArchiveCard({ a, onOpen }) {
   const oosWin = e.oos_start && e.oos_end ? `${String(e.oos_start).slice(0, 7)}→${String(e.oos_end).slice(0, 7)}` : null;
   const hasOpen = (a.open_count || 0) > 0;
   const posLine = hasOpen
-    ? `${a.open_count} open leg${a.open_count === 1 ? '' : 's'} — ${(a.open_positions || []).map((p) => `${p.ticker} ${p.n_shares}sh @ ${p.entry_price} (${p.entry_date})`).join(', ')}`
+    ? `${a.open_count} open leg${a.open_count === 1 ? '' : 's'} — ${(a.open_positions || []).map((p) => `${p.ticker} ${fmtNum(p.n_shares)}sh @ ${fmtNum(p.entry_price)} (${p.entry_date})`).join(', ')}`
     : 'FLAT';
   return (
     <div className="jt-surface" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
