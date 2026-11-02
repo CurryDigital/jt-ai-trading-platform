@@ -574,12 +574,18 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
         <Chip color={hz.color}>{hz.label}</Chip>
         <Chip color={s.tier === 'T1' ? 'emerald' : s.tier === 'T2' ? 'amber' : 'slate'}>{s.tier}</Chip>
         {viewMode === 'paper' && s._api?.paper_tier && (
-          <span title={s._api.paper_tier_blocker || undefined} style={{ cursor: 'help' }}>
-            <Chip color={s._api.paper_tier === 'CORE_PAPER' ? 'emerald' : 'slate'}>{s._api.paper_tier === 'CORE_PAPER' ? 'CORE' : 'WATCH'}</Chip>
+          <span title={s._api.paper_tier_blocker || undefined} style={{ cursor: s._api.paper_tier_blocker ? 'help' : undefined }}>
+            <Chip color={s._api.paper_tier === 'CORE' ? 'emerald' : 'slate'}>{s._api.paper_tier}</Chip>
           </span>
         )}
         {live && s.trades > 0 && <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--pnl-pos)' }}>{s.trades} live trades</span>}
       </div>
+
+      {viewMode === 'paper' && s._api?.paper_tier === 'WATCH' && s._api?.paper_tier_blocker && (
+        <div style={{ fontSize: 8, color: 'var(--text-muted)', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={s._api.paper_tier_blocker}>
+          {s._api.paper_tier_blocker}
+        </div>
+      )}
 
       <RealMetrics s={s} mode={viewMode} />
 
@@ -675,21 +681,21 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
   // Counts come from the active book tiers, not average win rates over tiny
   // samples. Archived = archive registry size.
   const activePaper = book.filter((s) => s.stage !== 'halted' && (s.mode === 'PAPER_TRADING' || s.mode === 'UAT' || s.mode === 'LIVE_TRADING'));
-  const coreN = activePaper.filter((s) => s._api?.paper_tier === 'CORE_PAPER').length;
-  const watchN = activePaper.filter((s) => s._api?.paper_tier === 'WATCH_PAPER').length;
+  const coreN = activePaper.filter((s) => s._api?.paper_tier === 'CORE').length;
+  const watchN = activePaper.filter((s) => s._api?.paper_tier === 'WATCH').length;
   const archivedN = archive?.count ?? null;
 
   // Headline rankings — evidence-first (2026-11-02):
   //  - Sim: best OOS return among ACTIVE, non-halted books only (archived and
   //    PENDING/DATA_BLOCKED books never headline, even when their stored
   //    backtest return is the biggest number on the page).
-  //  - Paper: "Best validated book" — eligible only for CORE_PAPER with >=20
+  //  - Paper: "Best validated book" — eligible only for CORE tier with >=20
   //    closed cost-true trades; ranked on closed net (realized) P&L. Open
   //    (unrealized) gains never win a headline. "—" when nothing qualifies.
   const simBest = perfMode === 'sim'
     ? [...src].filter((s) => s.returns != null).sort((a, b) => b.returns - a.returns)[0]
     : null;
-  const validated = [...src].filter((s) => s._api?.paper_tier === 'CORE_PAPER' && (s.paperTrades ?? 0) >= 20 && s._api?.paper_pnl_realized != null)
+  const validated = [...src].filter((s) => s._api?.paper_tier === 'CORE' && (s.paperTrades ?? 0) >= 20 && s._api?.paper_pnl_realized != null)
     .sort((a, b) => Number(b._api.paper_pnl_realized) - Number(a._api.paper_pnl_realized));
   const bestValidated = perfMode === 'paper' ? (validated[0] || null) : null;
 
@@ -712,8 +718,8 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
       </div>
 
       <div className="strat-kpi-grid">
-        <KpiTile label="Active Core" value={coreN} sub="CORE_PAPER · probation binding" />
-        <KpiTile label="Watch" value={watchN} sub="WATCH_PAPER · blocker open" />
+        <KpiTile label="Active Core" value={coreN} sub="CORE · probation binding" />
+        <KpiTile label="Watch" value={watchN} sub="WATCH · blocker open" />
         <KpiTile label="Archived" value={archivedN ?? '—'} sub="evidence record · excluded from rankings" />
         <KpiTile label="Live" value={liveN} pos={liveN > 0} />
       </div>
@@ -729,7 +735,7 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
                 : 'Best OOS return: —')}
               {perfMode === 'paper' && (bestValidated
                 ? <>Best validated book: <b style={{ color: 'var(--text-secondary)' }}>{bestValidated.name} <span style={{ fontFamily: 'var(--font-mono)' }}>{fmtK(Number(bestValidated._api.paper_pnl_realized))} closed net</span></b></>
-                : 'Best validated book: — (no CORE_PAPER book with ≥20 closed cost-true trades)')}
+                : 'Best validated book: — (no CORE book with ≥20 closed cost-true trades)')}
               {(perfMode === 'uat' || perfMode === 'live') && 'Headline rankings populate when the book has realized history.'}
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

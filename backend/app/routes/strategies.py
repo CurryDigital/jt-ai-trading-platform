@@ -114,22 +114,13 @@ def delete_strategy(strat_id: str, db: Session = Depends(get_db)):
 _RESEARCHER_TTL_S = 15
 _researcher_cache = {}  # (asset_class, priority, status) -> (monotonic_ts, payload)
 
-# PORTFOLIO-PRUNE-1 (2026-11-02, qr_research): active paper book tiers.
-# Source of truth: PORTFOLIO_PRUNE1_registry_diff_2026-11-02.md +
-# PORTFOLIO_PRUNE1_survivor_scorecard_2026-11.md (qr_research workspace).
-# Interim serving-layer map until a durable registry/research column lands
-# (durable storage is qr_research/qr_etl's domain) — presentation metadata
-# only; no DB writes. Books not listed have no active-paper tier.
-PAPER_TIERS = {
-    "ETF_Multi_Asset_Tactical_Allocation": ("CORE_PAPER", "Core book — existing probation rules binding; no scaling"),
-    "etf_vix_scaled_11": ("CORE_PAPER", "Core book — no current blocker; probation rules binding; no scaling"),
-    "ETF_US_Sector_Relative_Momentum": ("CORE_PAPER", "Core book — no current blocker; probation rules binding; no scaling"),
-    "us_stk_sue_mom_01_v2": ("WATCH_PAPER", "SUE PIT audit FAILED (BLOCKED_ON_DATA) — forward-only evidence; freshness gate t_4df7ec1d; reinforcement gate: >=20 closed cost-true trades, net PF>1.0"),
-    "us_stk_lowbeta_14": ("WATCH_PAPER", "26 unfilled signals unresolved — execution evidence incomplete"),
-    "cn_stk_lowvol_12": ("WATCH_PAPER", "Only 3 closed paper trades — open gain is not proof of edge"),
-    "etf_def_sector_rot_12_w": ("WATCH_PAPER", "PF 0.10 from 4 closed trades; weak earlier-period evidence"),
-    "COMM_Gold_Trend_VolTarget": ("WATCH_PAPER", "Regime-fragile trend book; current loss rule-consistent, no scaling"),
-}
+# PORTFOLIO-PRUNE-1 (2026-11-02, qr_etl t_62c45cee): paper book tiers are
+# DB-resident — gold.strategy_registry.paper_tier / paper_tier_blocker
+# (TEXT NULL, tier IN ('CORE','WATCH') OR NULL), mirrored on
+# gold.strategy_research and exposed at the tail of gold.v_pipeline_ui_feed
+# (ordinals 31/32). qr_research scorecard fills UPDATE them monthly as tiers
+# change — always read from the DB, never cache a static copy here.
+# NULL tier = unclassified/retired → the UI renders no tier badge.
 
 # Archive reason vocabulary (PORTFOLIO-PRUNE-1). Parsed from the bracket tag in
 # gold.strategy_registry.retirement_reason — the registry text is the
@@ -163,7 +154,8 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                    r.trade_count_oos, r.win_rate_oos, r.profit_factor_oos, r.returns_oos,
                    r.conviction_score, r.description,
                    r.assigned_capital, r.in_market_capital, r.signal_logic, r.exit_logic,
-                   r.priority, r.approved_at, r.retirement_reason, res.status as research_status
+                   r.priority, r.approved_at, r.retirement_reason, res.status as research_status,
+                   r.paper_tier, r.paper_tier_blocker
             FROM gold.strategy_registry r
             JOIN gold.strategy_research res ON res.strategy_id = r.strategy_id
             WHERE r.status != 'DEPRECATED'
@@ -741,10 +733,11 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "paper_trades": paper_metrics.get(sid, {}).get("paper_trades"),
                 "paper_open": paper_open,
                 "paper_deployment": paper_deployment.get(sid),
-                # PORTFOLIO-PRUNE-1 (2026-11-02): CORE_PAPER / WATCH_PAPER tier
-                # + the current blocker/probation condition for active books.
-                "paper_tier": PAPER_TIERS.get(sid, (None, None))[0],
-                "paper_tier_blocker": PAPER_TIERS.get(sid, (None, None))[1],
+                # PORTFOLIO-PRUNE-1 (2026-11-02, t_62c45cee): CORE / WATCH tier
+                # + the current blocker/probation condition for active books,
+                # read from gold.strategy_registry (DB source of truth).
+                "paper_tier": getattr(row, 'paper_tier', None),
+                "paper_tier_blocker": getattr(row, 'paper_tier_blocker', None),
                 # Registry status detail (CLEANSE-1, t_070590de): the raw
                 # retirement_reason so tiles can render PAUSED/PENDING/RETIRED
                 # with the operator's reason text. PENDING books are stored as
@@ -1688,7 +1681,7 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
             SELECT id, name, asset, horizon, tier, stage, btwr, btpf, trades,
                    returns, sharpe, dd, livewr, livepf, live_pnl,
                    mode, db_status, frequency, agent_source, updated_at,
-                   metric_valid_flag
+                   metric_valid_flag, paper_tier, paper_tier_blocker
             FROM gold.v_pipeline_ui_feed
             """,
             {},
@@ -1715,7 +1708,8 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 db,
                 """
                 SELECT strategy_id, name, asset_class, status, retirement_reason,
-                       execution_mode, frequency, updated_at
+                       execution_mode, frequency, updated_at,
+                       paper_tier, paper_tier_blocker
                 FROM gold.strategy_registry
                 WHERE status != 'DEPRECATED'
                 """,
@@ -2073,6 +2067,10 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 "paper_engaged": is_engaged,
                 "paper_open_positions": open_positions,
                 "paper_state": paper_state,
+                # Paper book tier (PORTFOLIO-PRUNE-1, t_62c45cee): DB-sourced
+                # from gold.v_pipeline_ui_feed tail columns; NULL = no badge.
+                "paper_tier": r.paper_tier,
+                "paper_tier_blocker": r.paper_tier_blocker,
                 "paper_skip_count": skip_counts.get(sid, 0),
                 # Skip detail (CLEANSE-1, t_070590de): ticker/skip_kind/reason/
                 # skip_date rows behind the badge — the tile drill-down.
@@ -2126,6 +2124,8 @@ def get_pipeline_ui_feed(db: Session = Depends(get_db)):
                 "paper_engaged": False,
                 "paper_open_positions": 0,
                 "paper_state": "off",
+                "paper_tier": getattr(rr, 'paper_tier', None),
+                "paper_tier_blocker": getattr(rr, 'paper_tier_blocker', None),
                 "paper_skip_count": skip_counts.get(sid, 0),
                 "paper_skips": paper_skips.get(sid, []),
                 "paper_deployment": None,
