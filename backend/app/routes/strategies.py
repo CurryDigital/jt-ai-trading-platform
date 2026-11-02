@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from datetime import datetime, timezone
 from decimal import Decimal
+import re
 import time
 import logging
 
@@ -112,6 +113,36 @@ def delete_strategy(strat_id: str, db: Session = Depends(get_db)):
 # it (the promote flow uses this so a confirmed mode change is visible immediately).
 _RESEARCHER_TTL_S = 15
 _researcher_cache = {}  # (asset_class, priority, status) -> (monotonic_ts, payload)
+
+# PORTFOLIO-PRUNE-1 (2026-11-02, qr_research): active paper book tiers.
+# Source of truth: PORTFOLIO_PRUNE1_registry_diff_2026-11-02.md +
+# PORTFOLIO_PRUNE1_survivor_scorecard_2026-11.md (qr_research workspace).
+# Interim serving-layer map until a durable registry/research column lands
+# (durable storage is qr_research/qr_etl's domain) — presentation metadata
+# only; no DB writes. Books not listed have no active-paper tier.
+PAPER_TIERS = {
+    "ETF_Multi_Asset_Tactical_Allocation": ("CORE_PAPER", "Core book — existing probation rules binding; no scaling"),
+    "etf_vix_scaled_11": ("CORE_PAPER", "Core book — no current blocker; probation rules binding; no scaling"),
+    "ETF_US_Sector_Relative_Momentum": ("CORE_PAPER", "Core book — no current blocker; probation rules binding; no scaling"),
+    "us_stk_sue_mom_01_v2": ("WATCH_PAPER", "SUE PIT audit FAILED (BLOCKED_ON_DATA) — forward-only evidence; freshness gate t_4df7ec1d; reinforcement gate: >=20 closed cost-true trades, net PF>1.0"),
+    "us_stk_lowbeta_14": ("WATCH_PAPER", "26 unfilled signals unresolved — execution evidence incomplete"),
+    "cn_stk_lowvol_12": ("WATCH_PAPER", "Only 3 closed paper trades — open gain is not proof of edge"),
+    "etf_def_sector_rot_12_w": ("WATCH_PAPER", "PF 0.10 from 4 closed trades; weak earlier-period evidence"),
+    "COMM_Gold_Trend_VolTarget": ("WATCH_PAPER", "Regime-fragile trend book; current loss rule-consistent, no scaling"),
+}
+
+# Archive reason vocabulary (PORTFOLIO-PRUNE-1). Parsed from the bracket tag in
+# gold.strategy_registry.retirement_reason — the registry text is the
+# research-owned source of truth; this set just recognises the tags.
+ARCHIVE_REASONS = (
+    "OVERFIT_REJECTED",
+    "WEAK_EVIDENCE",
+    "INSUFFICIENT_EVIDENCE",
+    "REGIME_FRAGILE",
+    "SUPERSEDED_BY_MULTI_ASSET",
+    "DATA_BLOCKED_SURVIVORSHIP",
+)
+_ARCHIVE_TAG_RE = re.compile(r"\[([A-Z][A-Z0-9_]{3,})\]")
 
 
 @router.get("/strategies/researcher")
@@ -710,6 +741,10 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 "paper_trades": paper_metrics.get(sid, {}).get("paper_trades"),
                 "paper_open": paper_open,
                 "paper_deployment": paper_deployment.get(sid),
+                # PORTFOLIO-PRUNE-1 (2026-11-02): CORE_PAPER / WATCH_PAPER tier
+                # + the current blocker/probation condition for active books.
+                "paper_tier": PAPER_TIERS.get(sid, (None, None))[0],
+                "paper_tier_blocker": PAPER_TIERS.get(sid, (None, None))[1],
                 # Registry status detail (CLEANSE-1, t_070590de): the raw
                 # retirement_reason so tiles can render PAUSED/PENDING/RETIRED
                 # with the operator's reason text. PENDING books are stored as
@@ -821,6 +856,190 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
 # =============================================================================
 # Strategy Templates by Asset
 # =============================================================================
+
+@router.get("/strategies/archive")
+def get_strategy_archive(db: Session = Depends(get_db)):
+    """Performance Archive — first-class registry view of PORTFOLIO-PRUNE-1
+    archived books (2026-11-02, qr_research).
+
+    An archived entry keeps its full evidence record (backtest metrics, paper
+    ledger aggregates net of non-strategy bookkeeping legs, open-position
+    runoff state) but is excluded from active strategy counts and
+    best-performance rankings. No restore action is exposed — revival requires
+    a fresh pre-reg ID + operator approval (stated per row).
+
+    Rows: registry rows whose retirement_reason carries the PORTFOLIO-PRUNE-1
+    stamp. This includes hk_ipo_postlisting_drift_c1, which stays
+    status='paper' until its last leg reaches the scheduled bar-40 exit
+    (archive_state='retiring').
+    """
+    try:
+        rows = safe_query(db, """
+            SELECT r.strategy_id AS id, r.name, r.asset_class, r.priority,
+                   r.status, r.retired_at, r.retirement_reason, r.execution_mode,
+                   r.sharpe_oos, r.max_drawdown_oos, r.trade_count_oos,
+                   r.win_rate_oos, r.profit_factor_oos, r.returns_oos
+            FROM gold.strategy_registry r
+            WHERE r.retirement_reason ILIKE '%PORTFOLIO-PRUNE-1%'
+            ORDER BY r.name
+        """, {}, label="route_strategy_archive")
+    except Exception as e:
+        logger.error(f"Archive registry query error: {e}")
+        return {"archived": [], "count": 0}
+
+    ids = [r.id for r in rows if r.id]
+
+    # Former (pre-prune) registry status from the 2026-11-02 backup snapshot.
+    # The backup is a one-off qa artifact — degrade quietly if it is dropped.
+    former_status = {}
+    if ids:
+        try:
+            bak_rows = safe_query(db, """
+                SELECT strategy_id, status
+                FROM gold.strategy_registry_bak_20261102
+                WHERE strategy_id = ANY(:ids)
+            """, {"ids": ids}, label="route_strategy_archive_former")
+            former_status = {r.strategy_id: r.status for r in bak_rows}
+        except Exception as e:
+            logger.error(f"Archive former-status query error: {e}")
+
+    # Latest backtest run per strategy — registry OOS fields go stale after
+    # each new run, same overlay as /strategies/researcher.
+    latest_bt = {}
+    if ids:
+        try:
+            bt_rows = safe_query(db, """
+                SELECT DISTINCT ON (strategy_id)
+                       strategy_id, sharpe_oos, max_drawdown_oos, trade_count_oos,
+                       win_rate_oos, profit_factor_oos, returns_oos, oos_start, oos_end
+                FROM gold.strategy_backtest_runs
+                WHERE strategy_id = ANY(:ids)
+                ORDER BY strategy_id, created_at DESC
+            """, {"ids": ids}, label="route_strategy_archive_bt")
+            for b in bt_rows:
+                wr = _coerce_number(b.win_rate_oos)
+                mdd = _coerce_number(b.max_drawdown_oos)
+                # Same display contract as /strategies/researcher: win_rate and
+                # max_drawdown are stored as fractions (0.625 = 62.5%) and
+                # served percent-scaled; returns_oos stays a fraction.
+                if wr is not None and abs(wr) <= 1.0:
+                    wr = wr * 100.0
+                if mdd is not None and abs(mdd) <= 1.0:
+                    mdd = mdd * 100.0
+                latest_bt[b.strategy_id] = {
+                    "sharpe_oos": _coerce_number(b.sharpe_oos),
+                    "max_drawdown_oos": mdd,
+                    "trade_count_oos": int(b.trade_count_oos) if b.trade_count_oos is not None else None,
+                    "win_rate_oos": wr,
+                    "profit_factor_oos": _coerce_number(b.profit_factor_oos),
+                    "returns_oos": _coerce_number(b.returns_oos),
+                    "oos_start": b.oos_start.isoformat() if getattr(b, "oos_start", None) is not None else None,
+                    "oos_end": b.oos_end.isoformat() if getattr(b, "oos_end", None) is not None else None,
+                }
+        except Exception as e:
+            logger.error(f"Archive backtest overlay error: {e}")
+
+    # Paper ledger aggregates — closed legs only, net of the declared cost
+    # model (t_f81b2bb2) and excluding non-strategy bookkeeping legs
+    # (CLEANSE-1, t_070590de): a cleanse-closure gain must never read as
+    # strategy performance in the archive either.
+    paper_agg = {}
+    if ids:
+        try:
+            p_rows = safe_query(
+                db,
+                f"""
+                SELECT strategy_id,
+                       COUNT(*) FILTER (WHERE status = 'closed') AS closed_trades,
+                       SUM(pnl) FILTER (WHERE status = 'closed') AS realized_pnl
+                FROM gold.paper_trades_synthetic t
+                WHERE strategy_id = ANY(:ids)
+                  AND (ticker IS NULL OR ticker != 'CASH')
+                  AND NOT {non_strategy_leg_exists('t')}
+                GROUP BY strategy_id
+                """,
+                {"ids": ids},
+                label="route_strategy_archive_paper",
+            )
+            for r in p_rows:
+                paper_agg[r.strategy_id] = {
+                    "closed_trades": int(r.closed_trades or 0),
+                    "realized_pnl": _coerce_number(r.realized_pnl),
+                }
+        except Exception as e:
+            logger.error(f"Archive paper aggregate error: {e}")
+
+    # Current open legs (runoff state) straight from the paper ledger.
+    open_legs = {}
+    if ids:
+        try:
+            o_rows = safe_query(db, """
+                SELECT strategy_id, ticker, n_shares, entry_date, entry_price
+                FROM gold.paper_trades_synthetic
+                WHERE strategy_id = ANY(:ids)
+                  AND (exit_date IS NULL OR status = 'open')
+                  AND (ticker IS NULL OR ticker != 'CASH')
+                ORDER BY strategy_id, entry_date
+            """, {"ids": ids}, label="route_strategy_archive_open")
+            for r in o_rows:
+                open_legs.setdefault(r.strategy_id, []).append({
+                    "ticker": r.ticker,
+                    "n_shares": _coerce_number(r.n_shares),
+                    "entry_date": r.entry_date.isoformat() if r.entry_date is not None else None,
+                    "entry_price": _coerce_number(r.entry_price),
+                })
+        except Exception as e:
+            logger.error(f"Archive open-leg query error: {e}")
+
+    archived = []
+    for r in rows:
+        reason_text = r.retirement_reason or ""
+        # Reason badge: first bracket tag from the PORTFOLIO-PRUNE-1 vocabulary.
+        reason_code = next(
+            (t for t in _ARCHIVE_TAG_RE.findall(reason_text) if t in ARCHIVE_REASONS),
+            None,
+        )
+        # Revival condition: the research-owned sentence in the reason text.
+        m = re.search(r"Revival(?: condition)?:\s*(.+?)(?:\.\s*(?:Archive date|Archived =)|$)", reason_text, re.DOTALL)
+        revival = (m.group(1).strip().rstrip(".") if m else None) or "Fresh pre-reg ID + operator approval"
+        # Scheduled exit for retiring books (e.g. 'bar-40 exit ~2026-11-06').
+        sm = re.search(r"exit ~(\d{4}-\d{2}-\d{2})", reason_text)
+        legs = open_legs.get(r.id, [])
+        bt = latest_bt.get(r.id, {})
+        pa = paper_agg.get(r.id, {})
+        archived.append({
+            "id": r.id,
+            "name": r.name,
+            "asset_class": r.asset_class,
+            "former_status": former_status.get(r.id),
+            "former_priority": r.priority,
+            "archive_state": "retiring" if (r.status or "").lower() == "paper" else "archived",
+            "archive_date": r.retired_at.date().isoformat() if r.retired_at else None,
+            "scheduled_exit": sm.group(1) if sm else None,
+            "reason_code": reason_code,
+            "rationale": reason_text,
+            "revival_condition": revival,
+            "linked_evidence": sorted(set(re.findall(r"t_[0-9a-f]{8}", reason_text))),
+            "open_positions": legs,
+            "open_count": len(legs),
+            "evidence": {
+                "sharpe_oos": bt.get("sharpe_oos"),
+                "max_drawdown_oos": bt.get("max_drawdown_oos"),
+                "trade_count_oos": bt.get("trade_count_oos"),
+                "win_rate_oos": bt.get("win_rate_oos"),
+                "profit_factor_oos": bt.get("profit_factor_oos"),
+                "returns_oos": bt.get("returns_oos"),
+                "oos_start": bt.get("oos_start"),
+                "oos_end": bt.get("oos_end"),
+                "closed_paper_trades": pa.get("closed_trades", 0),
+                "paper_realized_pnl": pa.get("realized_pnl"),
+                # The paper ledger charges the declared cost model
+                # (t_f81b2bb2) and excludes non-strategy bookkeeping legs.
+                "paper_pnl_basis": "net of declared cost model, excl. non-strategy bookkeeping",
+            },
+        })
+    return {"archived": archived, "count": len(archived)}
+
 
 @router.get("/strategies/templates")
 def get_strategy_templates(asset_class: str = None, db: Session = Depends(get_db)):

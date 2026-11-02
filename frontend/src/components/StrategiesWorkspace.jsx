@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api, usePoll } from '../utils';
 import { Chip, KpiTile, Button, ModeBadge, fmtPct, fmtK } from './jtkit';
 import { HORIZON, mapApiToBook, fracToPct, haltedLabel } from './strategyProfiles';
+import ArchivePanel from './ArchivePanel';
 
 // Strategies workspace — Performance card grid + Pipeline mode-ladder board.
 // Universe = the quality-gated pipeline feed (gold.v_pipeline_ui_feed), the
@@ -16,6 +17,9 @@ const MODE_LABEL = { SIMULATION: 'Simulation', PAPER_TRADING: 'Paper', UAT: 'UAT
 const NEXT_MODE = { SIMULATION: 'PAPER_TRADING', PAPER_TRADING: 'UAT', UAT: 'LIVE_TRADING' };
 const PREV_MODE = { LIVE_TRADING: 'UAT', UAT: 'PAPER_TRADING', PAPER_TRADING: 'SIMULATION' };
 const PERF_MODES = [
+  // Archive FIRST (PORTFOLIO-PRUNE-1, 2026-11-02): retired books live in a
+  // first-class registry view, excluded from active counts and rankings.
+  { k: 'archive', l: 'Archive', desc: 'Retired · evidence record' },
   { k: 'sim', l: 'Sim', desc: 'Backtest / OOS' },
   { k: 'paper', l: 'Paper', desc: 'Paper-trading' },
   { k: 'uat', l: 'UAT', desc: 'Broker rehearsal' },
@@ -214,7 +218,19 @@ function RealMetrics({ s, mode }) {
   const [skipsOpen, setSkipsOpen] = useState(false);
 
   if (mode === 'paper') {
-    const pnl = s.paperPNL;
+    // Realized vs open separation (PORTFOLIO-PRUNE-1, 2026-11-02): closed net
+    // P&L is the primary figure; open P&L is secondary and explicitly
+    // unrealized. They are never combined into one headline number.
+    const realized = s._api?.paper_pnl_realized != null ? Number(s._api.paper_pnl_realized) : null;
+    const openPnl = s._api?.paper_pnl_unrealized != null ? Number(s._api.paper_pnl_unrealized) : null;
+    const closedN = s.paperTrades ?? 0;
+    // Thin forward sample: with <20 closed cost-true trades, WR/PF are noise,
+    // not evidence — render them muted with an explicit insufficiency note.
+    const thinSample = closedN < 20;
+    const evidenceColor = thinSample ? 'var(--text-muted)' : undefined;
+    const evidenceTip = thinSample
+      ? `Insufficient forward sample — ${closedN} closed cost-true trade${closedN === 1 ? '' : 's'} (<20). Not validation evidence.`
+      : undefined;
     // Non-strategy bookkeeping (CLEANSE-1, t_070590de): cleanse-closure and
     // stale-orphan flatten legs are excluded from every aggregate on this
     // block; the held-back amount is disclosed, never silently dropped.
@@ -269,12 +285,17 @@ function RealMetrics({ s, mode }) {
     }
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
-        <Metric label="P&L" value={pnl != null ? fmtK(pnl) : '—'} color={pnl == null ? undefined : pnl >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
-        <Metric label="Profit factor" value={s.paperPF != null ? s.paperPF.toFixed(2) : '—'} big />
-        <Metric label="Win rate" value={s.paperWR != null ? `${s.paperWR}%` : '—'} color={s.paperWR == null ? undefined : s.paperWR >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big />
-        <Metric label="Trades" value={s.paperTrades ?? '—'} />
+        <Metric label="Closed net P&L" value={realized != null ? fmtK(realized) : '—'} color={realized == null ? undefined : realized >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big tip={`Realized P&L of ${closedN} closed trade${closedN === 1 ? '' : 's'}, net of the declared cost model, excl. non-strategy bookkeeping`} />
+        <Metric label="Open P&L · unrealized" value={openPnl != null ? fmtK(openPnl) : '—'} color={openPnl == null ? undefined : openPnl >= 0 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} tip="Mark-to-market open book — NOT realized, not validation evidence" sub={s._api?.paper_open?.positions != null ? `${s._api.paper_open.positions} open` : null} />
+        <Metric label="Win rate" value={s.paperWR != null ? `${s.paperWR}%` : '—'} color={thinSample ? evidenceColor : s.paperWR == null ? undefined : s.paperWR >= 50 ? 'var(--pnl-pos)' : 'var(--pnl-neg)'} big tip={evidenceTip} sub={`n=${closedN} closed`} />
+        <Metric label="Profit factor" value={s.paperPF != null ? s.paperPF.toFixed(2) : '—'} big color={evidenceColor} tip={evidenceTip} sub={`n=${closedN} closed`} />
+        <Metric label="Closed trades" value={s.paperTrades ?? '—'} />
         <Metric label="Monitoring" value={stateLabel} color={stateColor} />
-        <Metric label="Conviction" value={conviction != null ? Number(conviction).toFixed(1) : '—'} />
+        {thinSample && (s.paperWR != null || s.paperPF != null) && (
+          <div style={{ gridColumn: '1 / -1', fontSize: 8, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+            Insufficient forward sample ({closedN} &lt; 20 closed) — WR/PF shown for reference, not evidence.
+          </div>
+        )}
         {depChip && <div style={{ gridColumn: '1 / -1' }}>{depChip}</div>}
         {(nsLegs > 0 || nsPhantom > 0) && (
           <div style={{ gridColumn: '1 / -1', fontSize: 8, color: 'var(--text-faint)', lineHeight: 1.4 }} title={nsTip}>
@@ -552,6 +573,11 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Chip color={hz.color}>{hz.label}</Chip>
         <Chip color={s.tier === 'T1' ? 'emerald' : s.tier === 'T2' ? 'amber' : 'slate'}>{s.tier}</Chip>
+        {viewMode === 'paper' && s._api?.paper_tier && (
+          <span title={s._api.paper_tier_blocker || undefined} style={{ cursor: 'help' }}>
+            <Chip color={s._api.paper_tier === 'CORE_PAPER' ? 'emerald' : 'slate'}>{s._api.paper_tier === 'CORE_PAPER' ? 'CORE' : 'WATCH'}</Chip>
+          </span>
+        )}
         {live && s.trades > 0 && <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--pnl-pos)' }}>{s.trades} live trades</span>}
       </div>
 
@@ -589,17 +615,32 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
   const [perfMode, setPerfMode] = useState('sim');
   const [sortKey, setSortKey] = useState('returns');
   const [assetFilter, setAssetFilter] = useState('all');
+  // Archive registry (PORTFOLIO-PRUNE-1): drives the Archive tab and the
+  // Archived count on the summary strip.
+  const [archive, setArchive] = useState(null);
+  const [archiveError, setArchiveError] = useState(false);
+  const loadArchive = useCallback(async () => {
+    const r = await api.get('/api/strategies/archive');
+    if (r == null) { setArchiveError(true); return; }
+    setArchiveError(false);
+    setArchive(r);
+  }, []);
+  usePoll(loadArchive, 60000);
   if (!book) return <Placeholder label={error ? 'Could not load strategies — backend unreachable.' : 'Loading strategies…'} />;
 
   const counts = { all: book.length, day: 0, swing: 0, position: 0 };
   book.forEach((s) => { counts[s.horizon] = (counts[s.horizon] || 0) + 1; });
 
-  // Mode ladder (cumulative): Sim shows every strategy, Paper shows
-  // paper/uat/live deployments, UAT shows rehearsal + live, Live shows live capital only.
+  // Mode ladder (cumulative): Sim shows every ACTIVE strategy, Paper shows
+  // paper/uat/live deployments, UAT shows rehearsal + live, Live shows live
+  // capital only. Halted rows (registry paused/retired, incl. archived books)
+  // are excluded from every active view and every ranking — their home is the
+  // Archive tab.
+  const ACTIVE_ONLY = (s) => s.stage !== 'halted';
   const MODE_FILTER = {
-    sim: () => true,
-    paper: (s) => s.mode === 'PAPER_TRADING' || s.mode === 'UAT' || s.mode === 'LIVE_TRADING',
-    uat: (s) => s.mode === 'UAT' || s.mode === 'LIVE_TRADING',
+    sim: ACTIVE_ONLY,
+    paper: (s) => ACTIVE_ONLY(s) && (s.mode === 'PAPER_TRADING' || s.mode === 'UAT' || s.mode === 'LIVE_TRADING'),
+    uat: (s) => ACTIVE_ONLY(s) && (s.mode === 'UAT' || s.mode === 'LIVE_TRADING'),
     live: (s) => s.mode === 'LIVE_TRADING',
   };
 
@@ -615,24 +656,40 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
 
   const SORTS = {
     sim: [{ k: 'returns', l: 'Return' }, { k: 'sharpe', l: 'Sharpe' }, { k: 'btWR', l: 'Win rate' }, { k: 'trades', l: 'Trades' }],
-    paper: [{ k: 'paperPNL', l: 'P&L' }, { k: 'paperPF', l: 'Profit factor' }, { k: 'paperWR', l: 'Win rate' }, { k: 'paperTrades', l: 'Trades' }],
+    paper: [{ k: 'paperRealized', l: 'Closed P&L' }, { k: 'paperPF', l: 'Profit factor' }, { k: 'paperWR', l: 'Win rate' }, { k: 'paperTrades', l: 'Trades' }],
     uat: [{ k: 'returns', l: 'Return' }, { k: 'btWR', l: 'Win rate' }, { k: 'trades', l: 'Trades' }],
     live: [{ k: 'returns', l: 'Return' }, { k: 'btWR', l: 'Win rate' }, { k: 'trades', l: 'Trades' }],
   };
 
   // keep sort key valid across mode switches
-  const currentSorts = SORTS[perfMode];
+  const currentSorts = SORTS[perfMode] || SORTS.sim;
   const effectiveSort = currentSorts.find((o) => o.k === sortKey) ? sortKey : currentSorts[0].k;
+  const sortVal = (s, k) => (k === 'paperRealized' ? (s._api?.paper_pnl_realized ?? null) : s[k]);
 
-  const sorted = [...src].sort((a, b) => (b[effectiveSort] ?? -Infinity) - (a[effectiveSort] ?? -Infinity));
-  const simWRs = src.filter((s) => s.btWR != null);
-  const avgSimWR = simWRs.length ? simWRs.reduce((a, s) => a + s.btWR, 0) / simWRs.length : null;
-  const paperWRs = src.filter((s) => s.paperWR != null);
-  const avgPaperWR = paperWRs.length ? paperWRs.reduce((a, s) => a + s.paperWR, 0) / paperWRs.length : null;
-  const liveN = src.filter((s) => s.mode === 'LIVE_TRADING').length;
-  const paperN = src.filter((s) => s.mode === 'PAPER_TRADING').length;
-  const uatN = src.filter((s) => s.mode === 'UAT').length;
-  const best = sorted.find((s) => s[effectiveSort] != null);
+  const sorted = [...src].sort((a, b) => (sortVal(b, effectiveSort) ?? -Infinity) - (sortVal(a, effectiveSort) ?? -Infinity));
+  const liveN = book.filter((s) => s.mode === 'LIVE_TRADING' && s.stage !== 'halted').length;
+
+  // Summary strip (PORTFOLIO-PRUNE-1): active potential vs archived history.
+  // Counts come from the active book tiers, not average win rates over tiny
+  // samples. Archived = archive registry size.
+  const activePaper = book.filter((s) => s.stage !== 'halted' && (s.mode === 'PAPER_TRADING' || s.mode === 'UAT' || s.mode === 'LIVE_TRADING'));
+  const coreN = activePaper.filter((s) => s._api?.paper_tier === 'CORE_PAPER').length;
+  const watchN = activePaper.filter((s) => s._api?.paper_tier === 'WATCH_PAPER').length;
+  const archivedN = archive?.count ?? null;
+
+  // Headline rankings — evidence-first (2026-11-02):
+  //  - Sim: best OOS return among ACTIVE, non-halted books only (archived and
+  //    PENDING/DATA_BLOCKED books never headline, even when their stored
+  //    backtest return is the biggest number on the page).
+  //  - Paper: "Best validated book" — eligible only for CORE_PAPER with >=20
+  //    closed cost-true trades; ranked on closed net (realized) P&L. Open
+  //    (unrealized) gains never win a headline. "—" when nothing qualifies.
+  const simBest = perfMode === 'sim'
+    ? [...src].filter((s) => s.returns != null).sort((a, b) => b.returns - a.returns)[0]
+    : null;
+  const validated = [...src].filter((s) => s._api?.paper_tier === 'CORE_PAPER' && (s.paperTrades ?? 0) >= 20 && s._api?.paper_pnl_realized != null)
+    .sort((a, b) => Number(b._api.paper_pnl_realized) - Number(a._api.paper_pnl_realized));
+  const bestValidated = perfMode === 'paper' ? (validated[0] || null) : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -643,60 +700,53 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <ModeSeg mode={perfMode} setMode={setPerfMode} />
-          <AssetSeg asset={assetFilter} setAsset={setAssetFilter} opts={assetOpts} counts={assetCounts} />
-          <HorizonSeg hzn={hzn} setHzn={setHzn} counts={counts} />
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-        <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>Sort</span>
-        <div className="strat-seg" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
-          {currentSorts.map((o) => (
-            <button key={o.k} onClick={() => setSortKey(o.k)} style={{ padding: '4px 9px', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, background: sortKey === o.k ? 'var(--primary)' : 'transparent', color: sortKey === o.k ? '#fff' : 'var(--text-secondary)' }}>{o.l}</button>
-          ))}
+          {perfMode !== 'archive' && (
+            <>
+              <AssetSeg asset={assetFilter} setAsset={setAssetFilter} opts={assetOpts} counts={assetCounts} />
+              <HorizonSeg hzn={hzn} setHzn={setHzn} counts={counts} />
+            </>
+          )}
         </div>
       </div>
 
       <div className="strat-kpi-grid">
-        {perfMode === 'sim' && (
-          <>
-            <KpiTile label={hzn === 'all' ? 'Strategies' : HORIZON[hzn].label} value={src.length} sub={`${liveN} live · ${uatN} uat · ${paperN} paper`} />
-            <KpiTile label="Avg BT Win Rate" value={avgSimWR != null ? `${avgSimWR.toFixed(1)}%` : '—'} pos={avgSimWR != null ? avgSimWR >= 50 : undefined} />
-            <KpiTile label="Live Strategies" value={liveN} pos={liveN > 0} />
-            <KpiTile label="Best (Return)" value={best ? best.name.split(' ').slice(0, 2).join(' ') : '—'} sub={best ? fmtPct(best.returns) : null} pos />
-          </>
-        )}
-        {perfMode === 'paper' && (
-          <>
-            <KpiTile label="Paper Strategies" value={src.length} sub={liveN > 0 ? `${paperN} paper · ${liveN} live` : null} />
-            <KpiTile label="Avg Paper WR" value={avgPaperWR != null ? `${avgPaperWR.toFixed(1)}%` : '—'} pos={avgPaperWR != null ? avgPaperWR >= 50 : undefined} />
-            <KpiTile label="Paper Active" value={src.filter((s) => s.mode === 'PAPER_TRADING').length} pos />
-            <KpiTile label="Best Paper P&L" value={best ? best.name.split(' ').slice(0, 2).join(' ') : '—'} sub={best && best.paperPNL != null ? fmtK(best.paperPNL) : null} pos={best && best.paperPNL != null ? best.paperPNL >= 0 : undefined} />
-          </>
-        )}
-        {perfMode === 'uat' && (
-          <>
-            <KpiTile label="UAT Strategies" value={uatN} pos={uatN > 0} sub={liveN > 0 ? `${liveN} live also in view` : null} />
-            <KpiTile label="Broker Fills" value="—" />
-            <KpiTile label="Avg Slippage" value="—" />
-            <KpiTile label="Fills Metrics" value="Pending" sub="qr_etl mirror · t_b64f7302" />
-          </>
-        )}
-        {perfMode === 'live' && (
-          <>
-            <KpiTile label="Live Strategies" value={liveN} pos={liveN > 0} />
-            <KpiTile label="Avg Live WR" value="—" />
-            <KpiTile label="Live Trades" value="—" />
-            <KpiTile label="Best Live P&L" value="—" />
-          </>
-        )}
+        <KpiTile label="Active Core" value={coreN} sub="CORE_PAPER · probation binding" />
+        <KpiTile label="Watch" value={watchN} sub="WATCH_PAPER · blocker open" />
+        <KpiTile label="Archived" value={archivedN ?? '—'} sub="evidence record · excluded from rankings" />
+        <KpiTile label="Live" value={liveN} pos={liveN > 0} />
       </div>
 
-      {sorted.length === 0
-        ? <Placeholder label="No strategies match these filters." hint="Try another mode, asset class, or horizon — or deploy strategies from the Lab." />
-        : <div className="strat-card-grid">
-            {sorted.map((s) => <StrategyCard key={s.id} s={s} onOpen={onOpen} onAction={onAction} showLadder={false} viewMode={perfMode} />)}
-          </div>}
+      {perfMode === 'archive' ? (
+        <ArchivePanel data={archive} error={archiveError} onOpen={onOpen} />
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>
+              {perfMode === 'sim' && (simBest
+                ? <>Best OOS return (active only): <b style={{ color: 'var(--text-secondary)' }}>{simBest.name} <span style={{ fontFamily: 'var(--font-mono)' }}>{fmtPct(simBest.returns)}</span></b></>
+                : 'Best OOS return: —')}
+              {perfMode === 'paper' && (bestValidated
+                ? <>Best validated book: <b style={{ color: 'var(--text-secondary)' }}>{bestValidated.name} <span style={{ fontFamily: 'var(--font-mono)' }}>{fmtK(Number(bestValidated._api.paper_pnl_realized))} closed net</span></b></>
+                : 'Best validated book: — (no CORE_PAPER book with ≥20 closed cost-true trades)')}
+              {(perfMode === 'uat' || perfMode === 'live') && 'Headline rankings populate when the book has realized history.'}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 9, color: 'var(--text-faint)' }}>Sort</span>
+              <div className="strat-seg" style={{ display: 'flex', gap: 2, padding: 3, borderRadius: 'var(--radius-md)', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-glass)' }}>
+                {currentSorts.map((o) => (
+                  <button key={o.k} onClick={() => setSortKey(o.k)} style={{ padding: '4px 9px', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 700, background: sortKey === o.k ? 'var(--primary)' : 'transparent', color: sortKey === o.k ? '#fff' : 'var(--text-secondary)' }}>{o.l}</button>
+                ))}
+              </div>
+            </span>
+          </div>
+
+          {sorted.length === 0
+            ? <Placeholder label="No strategies match these filters." hint="Try another mode, asset class, or horizon — or deploy strategies from the Lab." />
+            : <div className="strat-card-grid">
+                {sorted.map((s) => <StrategyCard key={s.id} s={s} onOpen={onOpen} onAction={onAction} showLadder={false} viewMode={perfMode} />)}
+              </div>}
+        </>
+      )}
     </div>
   );
 }
