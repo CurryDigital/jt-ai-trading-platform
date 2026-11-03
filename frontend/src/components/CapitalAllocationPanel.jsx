@@ -3,7 +3,7 @@ import { api, fmtK } from '../utils';
 
 const PRESETS = [25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
 
-export const CapitalAllocationPanel = ({ strategyId, executionMode, activeSignalCount }) => {
+export const CapitalAllocationPanel = ({ strategyId, executionMode, activeSignalCount, title = 'Capital Allocation' }) => {
   const [pool, setPool] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(0);
@@ -64,7 +64,7 @@ export const CapitalAllocationPanel = ({ strategyId, executionMode, activeSignal
     <div className="qr-surface overflow-hidden">
       <div className="px-3 py-2 border-b border-white/[0.05] flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <span className="qr-label">Capital Allocation</span>
+          <span className="qr-label">{title}</span>
           {executionMode && (
             <span className={`qr-chip ${
               executionMode === 'LIVE_TRADING' ? 'qr-chip-rose' :

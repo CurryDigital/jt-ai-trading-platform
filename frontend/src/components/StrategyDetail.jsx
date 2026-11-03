@@ -13,38 +13,70 @@ const addDaysISO = (d, n) => {
   return dt.toISOString().slice(0, 10);
 };
 
-// Tiny inline SVG equity curve --------------------------------------------
-// Hover targets carry per-point values (native <title> tooltips) so the curve
-// stays readable without a chart library. Cumulative realized P&L by exit
-// date — days without exits are carried flat by the line, never interpolated
-// into fake data points.
-const EquityCurve = ({ points, height = 88 }) => {
-  if (!points?.length) {
-    return <div className="text-[10px] text-slate-600 text-center py-4">No closed trades in this window · curve appears after the first exit</div>;
-  }
-  const ys = points.map(p => p.cum_pnl);
+// Labeled cumulative series chart -------------------------------------------
+// Axes always on: y ticks (min / mid / max in the series unit), x date labels
+// (first / mid / last), dashed zero baseline. unit '$' → fmtK, '%' → the
+// series holds decimal fractions and ticks render percent. step=true draws
+// step-after segments (month-end observations) so the chart never implies
+// daily interpolation; step=false carries flat between exit dates (realized
+// P&L only moves when a trade closes). Hover targets carry per-point values.
+const LabeledCurve = ({ points, unit = '$', height = 120, step = false }) => {
+  if (!points?.length) return null;
+  const ys = points.map(p => p.v);
   const min = Math.min(0, ...ys);
   const max = Math.max(0, ...ys);
   const range = (max - min) || 1;
-  const w = 600;
-  const h = height;
-  const step = points.length > 1 ? w / (points.length - 1) : 0;
-  const yOf = (v) => h - ((v - min) / range) * h;
-  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${yOf(p.cum_pnl).toFixed(1)}`).join(' ');
+  const W = 600, H = height;
+  const padL = 46, padR = 8, padT = 8, padB = 16;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const xOf = (i) => padL + (points.length > 1 ? (i / (points.length - 1)) * iw : iw / 2);
+  const yOf = (v) => padT + ih - ((v - min) / range) * ih;
+  const fmtV = (v) => unit === '%'
+    ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
+    : `${v >= 0 ? '+' : ''}${fmtK(v)}`;
+  const fmtAxis = (v) => unit === '%' ? `${(v * 100).toFixed(0)}%` : fmtK(v);
+  let line;
+  if (step) {
+    line = points.map((p, i) => i === 0
+      ? `M${xOf(0)},${yOf(p.v)}`
+      : `H${xOf(i)} V${yOf(p.v)}`).join(' ');
+  } else {
+    line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(p.v).toFixed(1)}`).join(' ');
+  }
   const last = points[points.length - 1];
-  const positive = last.cum_pnl >= 0;
+  const positive = last.v >= 0;
   const stroke = positive ? '#34d399' : '#fb7185';
   const fill = positive ? 'rgba(52,211,153,0.12)' : 'rgba(251,113,133,0.12)';
   const zeroY = yOf(0);
-  const area = `${path} L${(points.length - 1) * step},${zeroY} L0,${zeroY} Z`;
+  const area = `${line} L${xOf(points.length - 1)},${zeroY} L${xOf(0)},${zeroY} Z`;
+  const xLabels = [0, Math.floor((points.length - 1) / 2), points.length - 1]
+    .filter((v, i, a) => a.indexOf(v) === i);
+  const xText = (d) => {
+    const dt = new Date(`${d}T00:00:00Z`);
+    return dt.toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' });
+  };
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full block" style={{ height }}>
-      <line x1="0" y1={zeroY} x2={w} y2={zeroY} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full block" style={{ height }}>
+      {/* y grid + tick labels */}
+      {[min, (min + max) / 2, max].map((v, i) => (
+        <g key={i}>
+          <line x1={padL} y1={yOf(v)} x2={W - padR} y2={yOf(v)} stroke="rgba(255,255,255,0.05)" />
+          <text x={padL - 4} y={yOf(v) + 3} textAnchor="end" fontSize="8" fontFamily="ui-monospace, monospace" fill="#64748b">{fmtAxis(v)}</text>
+        </g>
+      ))}
+      {/* zero baseline */}
+      {min < 0 && max > 0 && (
+        <line x1={padL} y1={zeroY} x2={W - padR} y2={zeroY} stroke="rgba(255,255,255,0.14)" strokeDasharray="3,3" />
+      )}
       <path d={area} fill={fill} />
-      <path d={path} stroke={stroke} strokeWidth="1.5" fill="none" />
+      <path d={line} stroke={stroke} strokeWidth="1.5" fill="none" />
+      {/* x date labels */}
+      {xLabels.map(i => (
+        <text key={i} x={xOf(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'} fontSize="8" fontFamily="ui-monospace, monospace" fill="#64748b">{xText(points[i].date)}</text>
+      ))}
       {points.map((p, i) => (
-        <circle key={`${p.date}-${i}`} cx={i * step} cy={yOf(p.cum_pnl)} r={10} fill="transparent" style={{ pointerEvents: 'all' }}>
-          <title>{`${p.date} · cum ${p.cum_pnl >= 0 ? '+' : ''}${fmtK(p.cum_pnl)} · day ${p.pnl >= 0 ? '+' : ''}${fmtK(p.pnl)}`}</title>
+        <circle key={`${p.date}-${i}`} cx={xOf(i)} cy={yOf(p.v)} r={10} fill="transparent" style={{ pointerEvents: 'all' }}>
+          <title>{`${p.date} · ${fmtV(p.v)}`}</title>
         </circle>
       ))}
     </svg>
@@ -773,10 +805,12 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
 
   // Fetch a specific ledger (paper|live) — the unified layout needs BOTH books
   // on screen at once, so the non-auto book is fetched eagerly on load (not on
-  // a toggle click, which no longer exists).
+  // a toggle click, which no longer exists). days=3650: the `days` param only
+  // windows the realized-P&L curve; a ~10y window makes the curve cover every
+  // closed trade so its endpoint reconciles with the all-time Net P&L KPI.
   const fetchBook = async (b) => {
     setBookLoading(true);
-    const d = normalize(await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/evaluation?trade_limit=1000&book=${b}`));
+    const d = normalize(await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/evaluation?trade_limit=1000&days=3650&book=${b}`));
     if (d) {
       altRef.current = { ...altRef.current, [b]: d };
       setAltBooks(altRef.current);
@@ -786,7 +820,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
   };
 
   const load = async () => {
-    const d = normalize(await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/evaluation?trade_limit=1000`));
+    const d = normalize(await api.get(`/api/strategies/${encodeURIComponent(strategyId)}/evaluation?trade_limit=1000&days=3650`));
     setData(d);
     setRefreshedAt(new Date().toISOString());
     setLoading(false);
@@ -1034,6 +1068,27 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     const simItems = METRIC_SPEC.map(m => ({ label: m.label, tip: KPI_TIP[m.key], ...simValues[m.key] }));
     const paperItems = METRIC_SPEC.map(m => ({ label: m.label, tip: KPI_TIP[m.key], ...paperValues[m.key] }));
 
+    // SIM chart series — compounded published monthly OOS returns (same run
+    // and basis as the SIM KPIs), month-end step points. Empty when the run
+    // published no monthly series → the panel says unavailable, never fakes.
+    const simCurvePts = (() => {
+      const rows = (data.monthly_returns || []).slice().sort((a, b) => a.year - b.year || a.month - b.month);
+      let cum = 1;
+      return rows.map(r => {
+        cum *= 1 + (r.return || 0);
+        return { date: new Date(Date.UTC(r.year, r.month, 0)).toISOString().slice(0, 10), v: cum - 1 };
+      });
+    })();
+    const simCurveFinal = simCurvePts.length ? simCurvePts[simCurvePts.length - 1].v : null;
+    const simCurveKpiDiff = (simCurveFinal != null && simM.total_return != null) ? simCurveFinal - simM.total_return : null;
+
+    // Paper/live chart series — realized cum P&L by exit date (served
+    // equity_curve, days=3650 → all closed trades so the endpoint ties to the
+    // all-time Net P&L KPI).
+    const paperCurvePts = ((paperPayload && paperPayload.equity_curve) || []).map(p => ({ date: p.date, v: p.cum_pnl }));
+    const paperCurveFinal = paperCurvePts.length ? paperCurvePts[paperCurvePts.length - 1].v : null;
+    const paperCurveKpiDiff = (paperCurveFinal != null && paperM.total_pnl != null) ? paperCurveFinal - paperM.total_pnl : null;
+
     return (
       <div className="space-y-3">
         {/* Header — identity, status, and essential config on two lines */}
@@ -1124,15 +1179,42 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
               items={simItems}
             />
 
-            {/* SIM equity: backtests publish no equity time series — keep the
-                slot with an honest empty state so the columns stay mirrored
-                and the paper side never expands across the full page. */}
+            {/* SIM chart: no daily equity series is persisted for backtests
+                (verified — gold.strategy_backtest_runs carries aggregate
+                metrics only, no curve column). What IS served on the same run
+                and basis as the SIM KPIs is the monthly OOS return series, so
+                the chart compounds it into a cumulative-return path (month-end
+                steps, never daily-interpolated) whose endpoint reconciles with
+                the OOS Return KPI. No series → "Backtest equity series
+                unavailable", never a fabricated curve. */}
             <div className="qr-surface overflow-hidden">
-              <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
-                <span className="qr-label" title="No equity time series is served for SIM backtests">Equity · SIM · backtest</span>
+              <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center justify-between gap-2">
+                <span className="qr-label" title="consumption.strategy_monthly_returns · compounded monthly OOS returns of the latest backtest run">Cumulative OOS Return · SIM backtest</span>
+                {simCurvePts.length > 0 && (
+                  <span className={`qr-num text-[11px] font-bold ${pnlCl(simCurveFinal)}`}>{`${simCurveFinal >= 0 ? '+' : ''}${(simCurveFinal * 100).toFixed(1)}%`}</span>
+                )}
               </div>
-              <div className="px-3 py-4 text-center">
-                <div className="text-[10px] text-slate-600">No equity time series is served for SIM backtests — the run publishes aggregate metrics and monthly/yearly returns (below).</div>
+              <div className="p-2">
+                {simCurvePts.length === 0 ? (
+                  <div className="px-3 py-4 text-center">
+                    <div className="text-[10px] text-slate-500 font-semibold">Backtest equity series unavailable</div>
+                    <div className="text-[9px] text-slate-600 mt-1" title="gold.strategy_backtest_runs stores aggregate metrics only — no equity path column exists">
+                      No equity or monthly return series is persisted for this backtest run — not synthesized.
+                    </div>
+                  </div>
+                ) : (
+                  <LabeledCurve points={simCurvePts} unit="%" step height={120} />
+                )}
+                {simCurvePts.length > 0 && (
+                  <div className="text-[9px] text-slate-600 mt-0.5">
+                    Compounded from published monthly OOS returns · month-end steps, not a daily equity path · {simCurvePts[0].date} → {simCurvePts[simCurvePts.length - 1].date} · unit: cumulative return · upd {fmtAge(refreshedAt)}
+                  </div>
+                )}
+                {simCurveKpiDiff != null && Math.abs(simCurveKpiDiff) > 0.005 && (
+                  <div className="text-[9px] text-slate-500 mt-0.5" title="The monthly series is tied to its own backtest run; the headline OOS Return comes from the latest run">
+                    Curve endpoint differs from headline OOS Return by {(simCurveKpiDiff * 100).toFixed(1)}pp — series and headline come from different backtest runs
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1194,11 +1276,19 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
               )}
             />
 
-            {/* Paper equity: realized curve from the paper ledger. */}
+            {/* Paper realized curve. No genuine per-strategy paper NAV history
+                exists (verified: consumption.account_equity_curve holds a
+                single account-level paper row; gold.account_nav_daily is
+                account-level) — so this stays REALIZED CUMULATIVE P&L, labeled
+                as closed-trades-only, and is never derived into a fake NAV.
+                Fetched with days=3650 so the curve endpoint reconciles with
+                the all-time Net P&L KPI. */}
             <div className="qr-surface overflow-hidden">
               <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center justify-between gap-2">
-                <span className="qr-label" title="gold.paper_trades_synthetic · cumulative realized P&L by exit date">Equity · Paper · realized cum P&L · last {paperPayload?.window_days ?? data.window_days}d</span>
-                <span className={`qr-num text-[11px] font-bold ${paperM.total_pnl != null ? pnlCl(paperM.total_pnl) : 'text-slate-500'}`}>{paperM.total_pnl != null ? `${paperM.total_pnl >= 0 ? '+' : ''}${fmtK(paperM.total_pnl)}` : '—'}</span>
+                <span className="qr-label" title="gold.paper_trades_synthetic · realized P&L of closed round-trips by exit date, cleanse-closure legs excluded">Realized Cumulative P&amp;L · Paper</span>
+                {paperCurveFinal != null && (
+                  <span className={`qr-num text-[11px] font-bold ${pnlCl(paperCurveFinal)}`}>{`${paperCurveFinal >= 0 ? '+' : ''}${fmtK(paperCurveFinal)}`}</span>
+                )}
               </div>
               <div className="p-2">
                 {paperPayload == null ? (
@@ -1206,10 +1296,19 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                     <div className={`w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full ${bookLoading ? 'animate-spin' : ''}`} />
                     Loading paper curve…
                   </div>
+                ) : paperCurvePts.length === 0 ? (
+                  <div className="text-[10px] text-slate-600 text-center py-4">No closed paper trades yet — the curve appears after the first exit</div>
                 ) : (
-                  <EquityCurve points={paperPayload.equity_curve} />
+                  <LabeledCurve points={paperCurvePts} unit="$" height={120} />
                 )}
-                <div className="text-[9px] text-slate-600 mt-0.5">Cumulative realized P&L by exit date · flat segments = days with no exits (carried, not interpolated) · hover points for values</div>
+                <div className="text-[9px] text-slate-600 mt-0.5">
+                  Closed trades only · excludes unrealized P&amp;L · flat segments = days with no exits (carried, not interpolated){paperCurvePts.length > 0 && ` · ${paperCurvePts[0].date} → ${paperCurvePts[paperCurvePts.length - 1].date}`} · unit: USD · upd {fmtAge(refreshedAt)}
+                </div>
+                {paperCurveKpiDiff != null && Math.abs(paperCurveKpiDiff) > 1 && (
+                  <div className="text-[9px] text-slate-500 mt-0.5">
+                    Curve endpoint differs from the Net P&amp;L headline by {fmtK(paperCurveKpiDiff)} — the curve excludes non-strategy cleanse legs
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1287,7 +1386,7 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
         {liveHas && (liveM.total_trades || 0) > 0 && (
           <div className="qr-surface overflow-hidden">
             <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center justify-between gap-2">
-              <span className="qr-label" title="gold.trade_executions · cumulative realized P&L by execution date">Equity · Live · realized cum P&L · last {livePayload?.window_days ?? data.window_days}d</span>
+              <span className="qr-label" title="gold.trade_executions · cumulative realized P&L by execution date">Realized Cumulative P&amp;L · Live</span>
               <span className={`qr-num text-[11px] font-bold ${liveM.total_pnl != null ? pnlCl(liveM.total_pnl) : 'text-slate-500'}`}>{liveM.total_pnl != null ? `${liveM.total_pnl >= 0 ? '+' : ''}${fmtK(liveM.total_pnl)}` : '—'}</span>
             </div>
             <div className="p-2">
@@ -1296,10 +1395,12 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
                   <div className={`w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full ${bookLoading ? 'animate-spin' : ''}`} />
                   Loading live curve…
                 </div>
+              ) : (livePayload.equity_curve || []).length === 0 ? (
+                <div className="text-[10px] text-slate-600 text-center py-4">No closed live trades yet</div>
               ) : (
-                <EquityCurve points={livePayload.equity_curve} />
+                <LabeledCurve points={(livePayload.equity_curve || []).map(p => ({ date: p.date, v: p.cum_pnl }))} unit="$" height={120} />
               )}
-              <div className="text-[9px] text-slate-600 mt-0.5">Cumulative realized P&L by execution date · hover points for values</div>
+              <div className="text-[9px] text-slate-600 mt-0.5">Realized cumulative P&amp;L by execution date · closed trades only · unit: USD · upd {fmtAge(refreshedAt)}</div>
             </div>
           </div>
         )}
@@ -1369,57 +1470,81 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           </div>
         )}
 
-        {/* Research notes & disclosures — the registry description verbatim
-            (research-owned text). For EXPERIMENTAL rows this carries the audit
-            trail and caveats. Kept below the performance data; scrolls when long. */}
-        {data.description && (
-          <div className="qr-surface px-3 py-2">
-            <div className="qr-label mb-1">Research notes &amp; disclosures</div>
-            <p className="text-[10px] text-slate-400 leading-relaxed whitespace-pre-line max-h-32 overflow-auto">{data.description}</p>
+        {/* ==================== PAPER OPERATIONS ===========================
+            Capital Allocation and Risk Watch are PAPER-book operations only —
+            never duplicated for SIM (SIM initial capital / position sizing /
+            allocation assumptions are backtest configuration, not paper
+            capital). Desktop: allocation 60% left, risk watch 40% right. */}
+        <div className="space-y-2">
+          <div className="px-1 flex items-baseline gap-2 flex-wrap">
+            <span className="text-[12px] font-bold text-white tracking-wide">PAPER OPERATIONS</span>
+            <span className="qr-label" title="Capital pool and risk rules apply to the synthetic paper book (gold.paper_trades_synthetic). SIM backtest sizing is backtest configuration, not paper capital.">Paper book only · not SIM config</span>
           </div>
-        )}
-
-        {/* Logic + Universe — mode-independent configuration detail */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <div className="qr-surface px-3 py-2">
-            <div className="qr-label mb-1">Entry Logic</div>
-            <p className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed">{data.entry_logic || '—'}</p>
-          </div>
-          <div className="qr-surface px-3 py-2">
-            <div className="qr-label mb-1">Exit Logic</div>
-            <p className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed">{data.exit_logic || '—'}</p>
-          </div>
-          <div className="qr-surface px-3 py-2">
-            <div className="qr-label mb-1">Universe ({data.universe_count})</div>
-            <div className="flex flex-wrap gap-1 max-h-32 overflow-auto no-scrollbar">
-              {data.universe.length === 0 && <span className="text-[10px] text-slate-600">No tickers configured</span>}
-              {data.universe.map(t => (
-                <span key={t} className="qr-chip qr-chip-slate font-mono">{t}</span>
-              ))}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-3 items-start">
+            <div className="lg:col-span-3 min-w-0">
+              <CapitalAllocationPanel
+                title="Paper Capital Allocation"
+                strategyId={strategyId}
+                executionMode={data.execution_mode || 'SIMULATION'}
+                activeSignalCount={activeSignals.length}
+              />
+            </div>
+            <div className="lg:col-span-2 min-w-0">
+              <RiskWatchPanel
+                title="Paper Risk Watch"
+                strategyId={strategyId}
+                executionMode={data.execution_mode || 'SIMULATION'}
+                poolCapital={data.assigned_capital}
+                onDemoted={() => load()}
+              />
             </div>
           </div>
         </div>
 
-        {/* Ops panels — act on the strategy's real deployment mode. The removed
-            statistics-view toggle never touched these; promotion gates are
-            unchanged. */}
+        {/* Promotion Readiness — a separate section below Paper Operations.
+            Promotion gates unchanged. */}
         <PromotionPanel
           strategyId={strategyId}
           currentMode={data.execution_mode || 'SIMULATION'}
           onPromoted={() => load()}
         />
 
-        <CapitalAllocationPanel
-          strategyId={strategyId}
-          executionMode={data.execution_mode || 'SIMULATION'}
-          activeSignalCount={activeSignals.length}
-        />
-
-        <RiskWatchPanel
-          strategyId={strategyId}
-          executionMode={data.execution_mode || 'SIMULATION'}
-          onDemoted={() => load()}
-        />
+        {/* ==================== STRATEGY DEFINITION =======================
+            Mode-independent configuration: entry/exit rules, universe, and
+            the research-owned notes verbatim. */}
+        <div className="space-y-2">
+          <div className="px-1 flex items-baseline gap-2">
+            <span className="text-[12px] font-bold text-white tracking-wide">STRATEGY DEFINITION</span>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div className="qr-surface px-3 py-2">
+              <div className="qr-label mb-1">Entry Logic</div>
+              <p className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed">{data.entry_logic || '—'}</p>
+            </div>
+            <div className="qr-surface px-3 py-2">
+              <div className="qr-label mb-1">Exit Logic</div>
+              <p className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed">{data.exit_logic || '—'}</p>
+            </div>
+            <div className="qr-surface px-3 py-2">
+              <div className="qr-label mb-1">Universe ({data.universe_count})</div>
+              <div className="flex flex-wrap gap-1 max-h-32 overflow-auto no-scrollbar">
+                {data.universe.length === 0 && <span className="text-[10px] text-slate-600">No tickers configured</span>}
+                {data.universe.map(t => (
+                  <span key={t} className="qr-chip qr-chip-slate font-mono">{t}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Research notes & disclosures — the registry description verbatim
+              (research-owned text). For EXPERIMENTAL rows this carries the
+              audit trail and caveats. Scrolls when long. */}
+          {data.description && (
+            <div className="qr-surface px-3 py-2">
+              <div className="qr-label mb-1">Research notes &amp; disclosures</div>
+              <p className="text-[10px] text-slate-400 leading-relaxed whitespace-pre-line max-h-32 overflow-auto">{data.description}</p>
+            </div>
+          )}
+        </div>
       </div>
     );
   })();

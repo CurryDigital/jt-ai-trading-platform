@@ -109,8 +109,13 @@ describe('StrategyDetail parallel SIM/PAPER layout', () => {
     expect(cols[0].textContent).toContain('Simulation ledger');
     expect(cols[1].textContent).toContain('Paper ledger');
 
-    // SIM has no served equity series — an honest empty state holds the slot
-    expect(cols[0].textContent).toContain('No equity time series is served for SIM backtests');
+    // SIM chart: compounded monthly OOS return curve (same basis as the KPIs)
+    expect(cols[0].textContent).toContain('Cumulative OOS Return');
+    expect(cols[0].textContent).toContain('month-end steps');
+    // PAPER chart: honestly labeled realized P&L, closed trades only — no NAV
+    expect(cols[1].textContent).toContain('Realized Cumulative P&L');
+    expect(cols[1].textContent).toContain('Closed trades only · excludes unrealized P&L');
+    expect(cols[1].textContent).not.toContain('NAV');
 
     // Same metric order in both statistics panels
     const metricLabels = ['OOS Return', 'Net P&L', 'Win Rate', 'Profit Factor', 'Max Drawdown', 'Sharpe', 'Closed Trades', 'Avg Hold', 'Last Trade'];
@@ -129,6 +134,52 @@ describe('StrategyDetail parallel SIM/PAPER layout', () => {
     // No combined Δ comparison column anywhere
     expect(screen.queryByText('-47.2pp')).toBeNull();
     expect(screen.queryByText('-54.3d')).toBeNull();
+  });
+
+  it('reconciles the paper curve endpoint with the Net P&L KPI and shows the unavailable state when no SIM series exists', async () => {
+    api.get.mockImplementation(async () => richEvaluation);
+    const { container, unmount } = render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+    await screen.findByText('63.9%');
+
+    // Paper curve endpoint chip = last cum_pnl = KPI Net P&L ($-6.6K) —
+    // appears in the stats panel AND the curve header, so at least 2 matches.
+    expect(screen.getAllByText('$-6.6K').length).toBeGreaterThanOrEqual(2);
+    unmount();
+
+    // No monthly series → explicit unavailable state, never a fabricated curve
+    api.get.mockImplementation(async () => ({ ...richEvaluation, monthly_returns: [] }));
+    const { container: c2 } = render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+    await screen.findByText('63.9%');
+    const cols = c2.querySelectorAll('.sd-split > .sd-col');
+    expect(cols[0].textContent).toContain('Backtest equity series unavailable');
+    expect(cols[0].textContent).not.toContain('month-end steps');
+  });
+
+  it('places Paper Operations after the ledgers and before Promotion Readiness, SIM column untouched', async () => {
+    api.get.mockImplementation(async () => richEvaluation);
+    const { container } = render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+    await screen.findByText('63.9%');
+    // Paper Operations panels render their titles once their fetches resolve
+    await screen.findByText('Paper Capital Allocation');
+    await screen.findByText('Paper Risk Watch');
+
+    const text = document.body.textContent;
+    const iLedger = text.indexOf('Paper ledger');
+    const iOps = text.indexOf('PAPER OPERATIONS');
+    const iPromo = text.indexOf('Mode Promotion');
+    const iDef = text.indexOf('STRATEGY DEFINITION');
+    expect(iLedger).toBeGreaterThanOrEqual(0);
+    expect(iOps).toBeGreaterThan(iLedger);
+    expect(iPromo).toBeGreaterThan(iOps);
+    expect(iDef).toBeGreaterThan(iPromo);
+
+    // Capital Allocation and Risk Watch live ONLY in Paper Operations —
+    // never duplicated inside the parallel analytics columns
+    const cols = container.querySelectorAll('.sd-split > .sd-col');
+    expect(cols[0].textContent).not.toContain('Capital Allocation');
+    expect(cols[0].textContent).not.toContain('Risk Watch');
+    expect(cols[1].textContent).not.toContain('Capital Allocation');
+    expect(text).toContain('Calculation basis: closed trades');
   });
 
   it('renders — for missing paper metrics, never a fabricated zero or fake delta', async () => {
