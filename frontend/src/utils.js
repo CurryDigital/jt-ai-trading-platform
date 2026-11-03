@@ -214,19 +214,31 @@ export const api = {
 // while the browser tab is hidden and fires again the moment it's visible.
 // With ~30 pollers across the app, hidden tabs were hammering the RDS-backed
 // API around the clock — this makes background tabs free.
-export const usePoll = (fn, ms) => {
+export const usePoll = (fn, ms, delayMs = 0) => {
   const fnRef = useRef(fn);
   useEffect(() => { fnRef.current = fn; });
   useEffect(() => {
-    let id = null;
+    let id = null, dId = null;
     const tick = () => fnRef.current();
-    const start = () => { if (id == null) { tick(); id = setInterval(tick, ms); } };
-    const stop = () => { if (id != null) { clearInterval(id); id = null; } };
+    const start = () => {
+      if (id != null || dId != null) return;
+      // Optional first-fire delay staggers mount-time request fan-out so a
+      // busy page doesn't wedge the backend's small DB pool (t_87ccf8a4).
+      if (delayMs > 0) {
+        dId = setTimeout(() => { dId = null; tick(); id = setInterval(tick, ms); }, delayMs);
+      } else {
+        tick(); id = setInterval(tick, ms);
+      }
+    };
+    const stop = () => {
+      if (dId != null) { clearTimeout(dId); dId = null; }
+      if (id != null) { clearInterval(id); id = null; }
+    };
     const onVis = () => (document.hidden ? stop() : start());
     document.addEventListener('visibilitychange', onVis);
     onVis();
     return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
-  }, [ms]);
+  }, [ms, delayMs]);
 };
 
 // Data fetching hook

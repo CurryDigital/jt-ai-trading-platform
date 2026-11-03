@@ -1,25 +1,33 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { api, usePoll, fmtK, fmtKCcy, fmtCcy, fmtPct, fmtAge, pnlCl, marketClock, marketStatus } from '../utils';
+import { api, usePoll, fmtK, fmtKCcy, fmtPct, fmtAge, pnlCl, marketClock, marketStatus } from '../utils';
 import { FR, FR_NAME, PANEL_SOURCES, panelFreshness, useFreshness, fmtAgeSec } from '../freshness';
 
-// Command home — 2026-09-18 redesign (v2). Layout top-to-bottom:
-//   1) Market status strip (slim: indices + sparklines, VIX, US/HK F&G)
-//   2) Environment cards SIM / PAPER / UAT / LIVE (clickable book selectors)
-//   3) Selected book: full-width cumulative realized P&L chart + KPI row
-//      (win rate, open positions, today, cumulative P&L) under it
-//   4) Regime Forecast + Top Opportunities (side by side)
-//   5) Order Book
-// The Action Center moved to Settings ▸ Alerts (components/ActionCenter.jsx);
-// a severity-colored alert badge in the global header links to it.
+// Command home — PAPER trading command center (redesign 2026-11-03).
+// Information hierarchy first: one header, one KPI row, then an operational
+// grid. Layout top-to-bottom:
+//   1) Command header — title, PAPER environment chip, HALT / feed / data
+//      freshness status, slim market ticker (reduced prominence)
+//   2) Environment status strip — one compact row SIM · PAPER · UAT · LIVE
+//      (replaces the four oversized mode cards; PAPER carries no repeated
+//      figures — it is the book detailed below)
+//   3) Primary KPI row (shown ONCE): today P&L · cumulative realized P&L ·
+//      unrealized P&L + exposure · open positions · working orders · risk
+//   4) Operational grid — LEFT ~65%: compact cumulative realized chart
+//      (≤240px) + Open Positions table. RIGHT ~35%: Action Required +
+//      Top Opportunities.
+//   5) Working Orders + Recent Fills (compact, single-line empty states)
+//   6) Market Context — compact regime forecast
+// The Action Center lives in Settings ▸ Alerts; this page surfaces its
+// critical/warning items under Action Required.
 //
 // Restrained palette: colour carries meaning only.
 //   rose  = critical severity   emerald/rose text = signed P&L (via pnlCl)
 //   blue  = interactive links   everything else = neutral slate/white
 
 // Cumulative P&L chart. Width tracks the container via ResizeObserver so the
-// chart truly spans the full page width (a fixed viewBox + preserveAspectRatio
-// would letterbox); height stays fixed.
-function EquityCurve({ data, color, emptyLabel = 'No equity history yet' }) {
+// chart truly spans its panel (a fixed viewBox + preserveAspectRatio would
+// letterbox); height is fixed by prop — kept ≤ 240px so it never dominates.
+function EquityCurve({ data, color, height = 240, emptyLabel = 'No equity history yet' }) {
   const ref = useRef(null);
   const [width, setWidth] = useState(600);
   useEffect(() => {
@@ -32,12 +40,12 @@ function EquityCurve({ data, color, emptyLabel = 'No equity history yet' }) {
   }, []);
 
   if (!data || data.length < 2) {
-    return <div className="h-32 flex items-center justify-center text-[11px] text-slate-600">{emptyLabel}</div>;
+    return <div className="flex items-center justify-center text-[11px] text-slate-600" style={{ height: 96 }}>{emptyLabel}</div>;
   }
   const margin = { left: 46, right: 10, top: 8, bottom: 22 };
   const values = data.map(d => d.equity);
   const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
-  const w = width, h = 190;
+  const w = width, h = height;
   const plotW = w - margin.left - margin.right;
   const plotH = h - margin.top - margin.bottom;
   const x = (i) => margin.left + (i / (values.length - 1)) * plotW;
@@ -80,27 +88,6 @@ function EquityCurve({ data, color, emptyLabel = 'No equity history yet' }) {
         ))}
       </svg>
     </div>
-  );
-}
-
-// Minimal cumulative-P&L sparkline (no axes — trend shape only).
-function Sparkline({ data, height = 36 }) {
-  if (!data || data.length < 2) {
-    return <div className="flex items-center justify-center text-[9px] text-slate-700" style={{ height }}>no history</div>;
-  }
-  const values = data.map(d => d.cum);
-  const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
-  const w = 200, h = height;
-  const x = (i) => (i / (values.length - 1)) * w;
-  const y = (v) => h - 2 - ((v - min) / range) * (h - 4);
-  const line = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const up = values[values.length - 1] >= values[0];
-  const color = up ? '#34d399' : '#fb7185';
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="w-full block" style={{ height }}
-      title={`30d cumulative realized P&L: ${fmtK(values[0])} → ${fmtK(values[values.length - 1])}`}>
-      <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-    </svg>
   );
 }
 
@@ -161,134 +148,496 @@ const LinkBtn = ({ children, onClick }) => (
   <button onClick={onClick} className="text-[10px] font-semibold text-blue-400 hover:text-blue-300">{children}</button>
 );
 
-// Compact KPI tile used by the mode-scoped book grid (Zone 2).
-const KpiTile = ({ label, value, valueCl = 'text-white', sub, tip }) => (
-  <div className="qr-surface p-2.5 flex flex-col justify-center" title={tip}>
-    <div className="qr-label">{label}</div>
-    <div className={`font-mono text-lg font-bold mt-0.5 ${valueCl}`}>{value}</div>
-    {sub != null && <div className="text-[9px] text-slate-500 mt-0.5">{sub}</div>}
+// ---------------------------------------------------------------------------
+// Header — compact command header: title · PAPER environment · HALT / feed /
+// data-freshness status. One line on desktop, wraps on mobile.
+// ---------------------------------------------------------------------------
+const StatusItem = ({ label, children, tip }) => (
+  <span className="flex items-center gap-1.5 flex-none" title={tip}>
+    <span className="text-[9px] uppercase tracking-wide text-slate-500">{label}</span>
+    {children}
+  </span>
+);
+
+const CommandHeader = ({ limits, gateway, sysStatus, dataFresh }) => {
+  const halted = !!limits?.global_halt;
+  const feedOk = gateway?.connected === true;
+  const hb = gateway?.last_heartbeat || gateway?.sessions?.primary?.last_heartbeat || null;
+  const run = sysStatus?.last_run_type
+    ? `${sysStatus.last_run_type} ${sysStatus.last_run_status || ''} ${sysStatus.last_run_date || ''}`.trim()
+    : null;
+  const runBad = sysStatus?.last_run_status && sysStatus.last_run_status !== 'ok';
+  return (
+    <div className="qr-surface px-3 py-2">
+      <div className="flex items-center gap-x-4 gap-y-1 flex-wrap">
+        <span className="flex items-baseline gap-2 flex-none">
+          <h1 className="text-sm font-bold text-white">Command</h1>
+          <span className="qr-chip qr-chip-slate" title={`Global execution mode: ${gateway?.global_mode || 'PAPER_TRADING'} (/api/execution/gateway)`}>PAPER</span>
+        </span>
+        <StatusItem label="HALT" tip={halted ? 'Global halt is ACTIVE — gold.risk_limits.global_halt' : 'No global halt — gold.risk_limits.global_halt = false'}>
+          <span className={`font-mono text-[10px] font-bold ${halted ? 'text-rose-300' : 'text-slate-300'}`}>
+            {limits == null ? '—' : halted ? 'HALTED' : 'off'}
+          </span>
+        </StatusItem>
+        <StatusItem label="Feed" tip={hb ? `IBKR gateway ${feedOk ? 'connected' : 'DISCONNECTED'} · last heartbeat ${hb}` : 'IBKR gateway status unavailable'}>
+          <span className={`w-1.5 h-1.5 rounded-full ${gateway == null ? 'bg-slate-600' : feedOk ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+          <span className="font-mono text-[10px] text-slate-300">{gateway == null ? '—' : feedOk ? (hb ? fmtAge(hb) : 'connected') : 'down'}</span>
+        </StatusItem>
+        <StatusItem label="Last run" tip="Latest paper pipeline run — /api/agents/paper/system-status">
+          <span className={`font-mono text-[10px] ${runBad ? 'text-rose-300' : 'text-slate-300'}`}>{run || '—'}</span>
+        </StatusItem>
+        <StatusItem label="Data" tip="Worst freshness state across the sources feeding this page">
+          <FreshTag fresh={dataFresh} />
+        </StatusItem>
+      </div>
+    </div>
+  );
+};
+
+// Slim market ticker — kept, but visually subordinate: no panel chrome,
+// small muted type, horizontally scrollable on narrow screens.
+const StripSpark = ({ values }) => {
+  if (!values || values.length < 2) return null;
+  const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
+  const w = 40, h = 12;
+  const line = values.map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 1 - ((v - min) / range) * (h - 2)).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="block opacity-70" style={{ width: w, height: h }}>
+      <polyline points={line} fill="none" stroke="rgba(148,163,184,0.8)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+};
+
+const Clocks = () => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const c = marketClock();
+  const s = marketStatus();
+  const Clock = ({ label, t, open }) => (
+    <span className="flex items-center gap-1" title={open ? 'session open' : 'session closed'}>
+      <span className={`w-1 h-1 rounded-full ${open ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+      <span className="text-slate-500">{label}</span>
+      <span className="font-mono text-slate-300">{t}</span>
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-2.5 text-[9px] flex-none">
+      <Clock label="HKT" t={c.hkt} open={s.hk} />
+      <Clock label="LON" t={c.lon} open={s.lon} />
+      <Clock label="NYC" t={c.nyc} open={s.nyc} />
+    </span>
+  );
+};
+
+function MarketTicker({ fresh }) {
+  const [ov, setOv] = useState(null);
+
+  const load = async () => {
+    const res = await api.get('/api/markets/overview?regions=US,HK');
+    if (res) setOv(res);
+  };
+  useEffect(() => { load(); }, []);
+  usePoll(load, 30000);
+
+  const rawIdx = ov?.indices?.data || ov?.indices;
+  const indices = Array.isArray(rawIdx) ? rawIdx : [];
+  const us = indices.filter(i => i.region === 'US').slice(0, 3);
+  const hk = indices.filter(i => i.region === 'HK').slice(0, 2);
+  const sentiment = ov?.sentiment || {};
+  const usS = sentiment?.us || sentiment;
+  const hkS = sentiment?.hk;
+
+  return (
+    <div className="flex items-center gap-3 px-1 overflow-x-auto text-[10px] text-slate-500">
+      <Clocks />
+      <span className="w-px self-stretch bg-white/[0.07] flex-none" />
+      {[...us, ...hk].map(i => (
+        <span key={i.sym} className="flex items-center gap-1.5 flex-none" title={i.name}>
+          <span className="font-bold text-slate-300">{i.sym}</span>
+          <span className="font-mono text-slate-300">{i.last != null ? i.last.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'}</span>
+          <span className={`font-mono ${pnlCl(i.change_pct ?? i.change_1d)}`}>{fmtPct(i.change_pct ?? i.change_1d)}</span>
+          <StripSpark values={i.spark} />
+        </span>
+      ))}
+      <span className="w-px self-stretch bg-white/[0.07] flex-none" />
+      <span className="flex items-center gap-1 flex-none" title="CNN Fear & Greed (US)">
+        <span>US F&amp;G</span><span className="font-mono text-slate-300">{usS?.fear_greed ?? '—'}</span>
+      </span>
+      <span className="flex items-center gap-1 flex-none" title="Fear & Greed (HK)">
+        <span>HK F&amp;G</span><span className="font-mono text-slate-300">{hkS?.fear_greed ?? '—'}</span>
+      </span>
+      <span className="flex items-center gap-1 flex-none" title="CBOE VIX (US)">
+        <span>VIX</span><span className="font-mono text-slate-300">{usS?.vix ?? '—'}</span>
+      </span>
+      <FreshTag fresh={fresh} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Environment status strip — ONE compact row replacing the four big cards.
+// PAPER is the active book (detailed below) so its cell carries no repeated
+// figures — just the selection marker.
+// ---------------------------------------------------------------------------
+const EnvCell = ({ label, active, children, tip, onClick }) => (
+  <button onClick={onClick} title={tip}
+    className={`flex-1 min-w-0 px-3 py-1.5 text-left flex items-center gap-2 ${active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'}`}>
+    <span className={`text-[9px] uppercase tracking-wide font-bold flex-none ${active ? 'text-white' : 'text-slate-500'}`}>{label}</span>
+    <span className="min-w-0 truncate">{children}</span>
+  </button>
+);
+
+const EnvStrip = ({ pnlMode, liveAcct, navigateToTab, fresh }) => {
+  const m = pnlMode?.modes || {};
+  const goExec = () => navigateToTab('execution');
+  const pnlTxt = (v) => v != null ? `${v >= 0 ? '+' : ''}${fmtK(v)}` : '—';
+  return (
+    <div className="qr-surface overflow-hidden">
+      <div className="flex items-stretch divide-x divide-white/[0.05] overflow-x-auto">
+        <EnvCell label="SIM" onClick={goExec} tip="Simulation book — open in Execution ▸ Sim">
+          <span className={`font-mono text-[10px] ${pnlCl(m.sim?.cum_pnl)}`}>{pnlTxt(m.sim?.cum_pnl)}</span>
+          <span className="text-[9px] text-slate-500">{m.sim?.open_trades ?? 0} open</span>
+        </EnvCell>
+        <EnvCell label="PAPER" active onClick={goExec} tip="Active book — detailed below">
+          <span className="text-[9px] text-slate-400">active book · detailed below</span>
+          <FreshTag fresh={fresh} />
+        </EnvCell>
+        <EnvCell label="UAT" onClick={goExec} tip="IBKR paper rehearsal — fills-only ledger (round-trip P&L pending) · open Execution ▸ UAT">
+          <span className="font-mono text-[10px] text-slate-300">{m.uat?.fills ?? 0} fills</span>
+          <span className="text-[9px] text-slate-500">fills-only</span>
+        </EnvCell>
+        <EnvCell label="LIVE" onClick={goExec} tip="Live IBKR book — open Execution ▸ Live">
+          <span className="font-mono text-[10px] text-slate-300">
+            {liveAcct?.equity_native != null ? fmtKCcy(liveAcct.equity_native, liveAcct.native_currency) : '—'}
+          </span>
+          <span className={`font-mono text-[9px] ${pnlCl(liveAcct?.day_pnl)}`}>
+            {liveAcct?.day_pnl != null ? `day ${pnlTxt(liveAcct.day_pnl)}` : ''}
+          </span>
+        </EnvCell>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Primary KPI row — shown ONCE. Compact tiles, label close to value.
+// ---------------------------------------------------------------------------
+const Kpi = ({ label, value, valueCl = 'text-white', sub, tip }) => (
+  <div className="qr-surface px-2.5 py-2 flex flex-col justify-center min-w-0" title={tip}>
+    <div className="qr-label truncate">{label}</div>
+    <div className={`font-mono text-[15px] font-bold leading-tight mt-0.5 truncate ${valueCl}`}>{value}</div>
+    {sub != null && <div className="text-[9px] text-slate-500 leading-tight mt-0.5 truncate">{sub}</div>}
   </div>
 );
 
-// Freshness wrapper for surfaces that are not Panel components (KPI grids,
-// asset-class boxes). Same contract: STALE = desaturate + hatch,
-// DISCONNECTED = masked numbers + muted last-known footer.
-const FreshWrap = ({ fresh, lastKnown, className = '', children }) => {
-  if (fresh?.state === FR.DISCONNECTED) {
-    return (
-      <div className={`qr-surface px-3 py-4 ${className}`}>
-        <div className="font-mono text-lg text-slate-600">--</div>
-        <div className="text-[9px] text-slate-600 mt-1">
-          feed disconnected · last known {lastKnown ?? '—'}{fresh.culprit ? ` · ${fresh.culprit.name}` : ''}
-        </div>
-      </div>
-    );
-  }
-  const stale = fresh?.state === FR.STALE;
+const KpiRow = ({ st, paperAcct, orderCount, risk, fresh }) => {
+  const today = st?.today;
+  const openPnl = paperAcct?.open_pnl;
+  const expPct = paperAcct?.gross_exp_pct;
+  const riskVal = risk.halted ? 'HALTED'
+    : risk.critical > 0 ? `${risk.critical} critical`
+    : risk.warning > 0 ? `${risk.warning} warning`
+    : 'OK';
+  const riskCl = risk.halted || risk.critical > 0 ? 'text-rose-300' : 'text-white';
   return (
-    <div className={`relative ${stale ? 'qr-fresh-desat' : ''} ${className}`}>
-      {children}
-      {stale && <div className="qr-hatch absolute inset-0 pointer-events-none rounded-lg" />}
+    <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 ${fresh?.state === FR.STALE ? 'qr-fresh-desat' : ''}`}>
+      <Kpi label="Today · realized" tip="Realized P&L from today's exits (gold.paper_trades_synthetic, paper book)"
+        value={today ? `${today.pnl >= 0 ? '+' : ''}${fmtK(today.pnl)}` : '—'}
+        valueCl={today ? pnlCl(today.pnl) : 'text-slate-600'}
+        sub={today ? `${today.trades} exit${today.trades === 1 ? '' : 's'} today` : 'no exits today'} />
+      <Kpi label="Cum realized P&L" tip="All-time cumulative realized P&L, paper book"
+        value={st?.cum_pnl != null ? `${st.cum_pnl >= 0 ? '+' : ''}${fmtK(st.cum_pnl)}` : '—'}
+        valueCl={st?.cum_pnl != null ? pnlCl(st.cum_pnl) : 'text-slate-600'}
+        sub={st ? `${st.closed_trades ?? 0} closed · WR ${st.win_rate ?? '—'}%` : null} />
+      <Kpi label="Unrealized P&L" tip="Open P&L, paper book (consumption.account_summary) · exposure = gross % of equity"
+        value={openPnl != null ? `${openPnl >= 0 ? '+' : ''}${fmtKCcy(openPnl, paperAcct?.currency || 'USD')}` : '—'}
+        valueCl={openPnl != null ? pnlCl(openPnl) : 'text-slate-600'}
+        sub={expPct != null ? `exposure ${expPct.toFixed(1)}% gross` : null} />
+      <Kpi label="Open positions" tip="Actively monitored open positions, paper book"
+        value={st?.open_trades ?? '—'} valueCl={st?.open_trades != null ? 'text-white' : 'text-slate-600'} />
+      <Kpi label="Working orders" tip="Pending orders in the paper order book"
+        value={orderCount ?? '—'} />
+      <Kpi label="Risk status" tip="Global halt + critical/warning strategy risk triggers + monitoring gap"
+        value={riskVal} valueCl={riskCl}
+        sub={risk.gap > 0 ? `${risk.gap} unmonitored` : 'monitoring ok'} />
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// ZONE 1 — P&L by Mode (4 clickable book selectors: the card you click
-// drives every figure in the zone below it)
+// Open Positions (paper book) — the operational table under the chart.
 // ---------------------------------------------------------------------------
-const MODE_DEFS = [
-  { key: 'sim', label: 'Sim', title: 'Simulation' },
-  { key: 'paper', label: 'Paper', title: 'Paper' },
-  { key: 'uat', label: 'UAT', title: 'UAT' },
-  { key: 'live', label: 'Live', title: 'Live' },
-];
+const ageDays = (openedAt) => {
+  if (!openedAt) return null;
+  const t = new Date(openedAt.length === 10 ? openedAt + 'T00:00:00Z' : openedAt);
+  if (isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t.getTime()) / 86400000));
+};
 
-const ModePanel = ({ label, modeKey, m, fresh, selected, onSelect }) => {
-  const isUat = modeKey === 'uat';
-  const empty = m == null || (isUat ? !m.fills : (m.closed_trades === 0 && m.open_trades === 0 && m.cum_pnl == null));
+const OpenPositions = ({ rows, stratNames, fresh, navigateToTab }) => (
+  <Panel title="Open Positions" fresh={fresh} action={
+    <span className="flex items-center gap-2">
+      <span className="text-[9px] text-slate-600">{rows.length} open · mkt value = qty × last px (native ccy)</span>
+      <LinkBtn onClick={() => navigateToTab('execution')}>Execution →</LinkBtn>
+    </span>
+  }>
+    {rows.length > 0 ? (
+      <div className="max-h-[300px] overflow-y-auto overflow-x-auto">
+        <table className="w-full min-w-[640px]">
+          <thead className="sticky top-0 bg-[#10141f]">
+            <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
+              <th className="text-left px-3 py-1">Symbol</th>
+              <th className="text-left px-2 py-1">Strategy</th>
+              <th className="text-right px-2 py-1">Qty</th>
+              <th className="text-right px-2 py-1">Entry</th>
+              <th className="text-right px-2 py-1">Current</th>
+              <th className="text-right px-2 py-1">Unreal P&L</th>
+              <th className="text-right px-2 py-1">Mkt value</th>
+              <th className="text-right px-3 py-1">Age</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => {
+              const mv = (p.shares != null && p.current_price != null) ? p.shares * p.current_price : null;
+              const age = ageDays(p.opened_at);
+              return (
+                <tr key={`${p.id || p.ticker}-${i}`} className="border-t border-white/[0.05] text-[11px]">
+                  <td className="px-3 py-1.5 font-mono font-bold text-white whitespace-nowrap">{p.ticker}</td>
+                  <td className="px-2 py-1.5 text-[10px] text-slate-400 max-w-[150px] truncate" title={stratNames[p.strategy_id] || p.strategy_id}>
+                    {stratNames[p.strategy_id] || p.strategy_id}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-200">{p.shares != null ? p.shares.toLocaleString() : '—'}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-300">{p.entry_price != null ? p.entry_price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-300" title={p.price_as_of ? `price as of ${p.price_as_of}` : undefined}>
+                    {p.current_price != null ? p.current_price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+                  </td>
+                  <td className={`px-2 py-1.5 text-right font-mono font-bold whitespace-nowrap ${p.unrealised_pnl != null ? pnlCl(p.unrealised_pnl) : 'text-slate-600'}`}
+                    title={p.unrealised_pnl_pct != null ? `${p.unrealised_pnl_pct >= 0 ? '+' : ''}${p.unrealised_pnl_pct.toFixed(2)}% on entry` : 'no mark'}>
+                    {p.unrealised_pnl != null ? `${p.unrealised_pnl >= 0 ? '+' : ''}${fmtK(p.unrealised_pnl)}` : '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-300">{mv != null ? fmtK(mv) : '—'}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-[10px] text-slate-500">{age != null ? `${age}d` : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div className="px-3 py-2 text-[11px] text-slate-600">No open positions in the paper book</div>
+    )}
+  </Panel>
+);
+
+// ---------------------------------------------------------------------------
+// Action Required — HALT, risk breaches, stale feeds, gateway, monitoring
+// gaps, platform attention items. One compact empty state when clear.
+// ---------------------------------------------------------------------------
+const SEV_DOT = { critical: 'bg-rose-400', warning: 'bg-slate-400', info: 'bg-slate-600' };
+
+const ActionRequired = ({ items, fresh, navigateToTab }) => (
+  <Panel title="Action Required" fresh={fresh} action={
+    items.length > 0
+      ? <span className="text-[9px] text-slate-500">{items.filter(i => i.sev === 'critical').length} critical · {items.filter(i => i.sev === 'warning').length} warning</span>
+      : null
+  }>
+    {items.length === 0 ? (
+      <div className="px-3 py-2 text-[11px] text-slate-500">No action required — halt clear, feeds fresh, no risk breaches</div>
+    ) : (
+      <div className="divide-y divide-white/[0.05] max-h-[260px] overflow-y-auto">
+        {items.map((it, i) => (
+          <button key={`${it.id}-${i}`} onClick={() => it.target ? navigateToTab(it.target) : undefined}
+            className="w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-white/[0.03]"
+            title={it.tip || it.impact || it.title}>
+            <span className={`w-1.5 h-1.5 rounded-full mt-1 flex-none ${SEV_DOT[it.sev] || SEV_DOT.info}`} />
+            <span className="flex-1 min-w-0">
+              <span className="block text-[11px] font-bold text-slate-100 truncate">{it.title}</span>
+              {it.impact && <span className="block text-[9px] text-slate-500 truncate">{it.impact}</span>}
+            </span>
+            {it.age && <span className="flex-none font-mono text-[9px] text-slate-500 mt-0.5">{it.age}</span>}
+          </button>
+        ))}
+      </div>
+    )}
+  </Panel>
+);
+
+// ---------------------------------------------------------------------------
+// Top Opportunities (compact) — symbol · strategy · score · state · time.
+// Score honesty: the displayed score is the signal engine's raw 'potential'
+// field (consumption.signal_setups, 0–100), a heuristic ranking with no
+// published formula — the tooltip says so instead of inventing a breakdown.
+// ---------------------------------------------------------------------------
+const MARKET_LABEL = { US: 'US Equity', HK: 'HK Equity', CRYPTO: 'Crypto', FX: 'FX', METAL: 'Metals' };
+
+const SCORE_TIP = 'Engine conviction score (consumption.signal_setups.potential, 0–100). '
+  + 'The signal pipeline publishes no formula or component breakdown for this field — '
+  + 'treat it as a heuristic ranking, not a decomposable model output.';
+
+const Opportunities = ({ picks, positions, orders, navigateToTab, fresh }) => {
+  const held = useMemo(() => new Set((positions || []).map(p => p.ticker)), [positions]);
+  const pending = useMemo(() => new Set((orders || []).map(o => o.ticker)), [orders]);
   return (
-    <div role="button" tabIndex={0} onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
-      className={`rounded-lg cursor-pointer transition-shadow ${selected ? 'ring-1 ring-slate-300/50 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' : 'ring-1 ring-transparent hover:ring-white/[0.15]'}`}
-      title={selected ? `${label} book selected — the figures below follow this mode` : `Show the ${label} book below`}>
-    <Panel title={label} fresh={fresh} action={
-      isUat
-        ? <span className="text-[8px] font-bold uppercase tracking-wide text-slate-500" title="gold.paper_uat_fills is a fills ledger — round-trip P&L / win rate stay pending until qr_etl builds the UAT round-trip ledger">fills only</span>
-        : m?.win_rate != null
-          ? <span className="font-mono text-[10px] text-slate-400" title="Win rate over closed trades">WR {m.win_rate}%</span>
-          : null
+    <Panel title="Top Opportunities" fresh={fresh} action={
+      <span className="flex items-center gap-2">
+        <span className="text-[9px] text-slate-600" title={SCORE_TIP}>best per class · heuristic score ⓘ</span>
+        <LinkBtn onClick={() => navigateToTab('research')}>Signals →</LinkBtn>
+      </span>
     }>
-      {isUat ? (
-        <div className="px-3 pt-2.5 pb-2">
-          <div className="flex items-end justify-between">
-            <div>
-              <div className="font-mono text-[22px] font-black leading-none text-slate-600">—</div>
-              <div className="text-[9px] text-slate-500 mt-1">round-trip P&amp;L pending</div>
+      <div className="divide-y divide-white/[0.05]">
+        {picks.map((p, i) => {
+          const isHeld = held.has(p.ticker);
+          const hasPending = pending.has(p.ticker);
+          return (
+            <div key={`${p.market}-${p.ticker}`} className="flex items-center gap-2 px-3 py-1.5"
+              title={`${p.reason || ''}${p.signalDate ? ` · signal ${p.signalDate.slice(0, 10)} ${p.signalDate.slice(11, 16)}Z` : ''}${p.price != null ? ` · px ${fmtK(p.price)}` : ''}${p.changePct != null ? ` · 1d ${fmtPct(p.changePct)}` : ''}`}>
+              <span className="font-mono text-[9px] text-slate-600 w-3 flex-none">#{i + 1}</span>
+              <div className="flex-none w-[86px] min-w-0">
+                <div className="font-mono text-[12px] font-black text-white leading-tight truncate">{p.ticker}</div>
+                <div className="text-[8px] text-slate-500 truncate">{p.name || MARKET_LABEL[p.market] || p.market}</div>
+              </div>
+              <div className="flex-none w-[64px]">
+                <div className="flex items-baseline gap-1" title={SCORE_TIP}>
+                  <span className="font-mono text-[12px] font-bold text-slate-100">{p.potential != null ? p.potential.toFixed(0) : '—'}</span>
+                  <span className="text-[8px] text-slate-500">/100</span>
+                </div>
+                <div className="h-0.5 mt-0.5 rounded bg-white/[0.06] overflow-hidden">
+                  <div className="h-full bg-slate-300" style={{ width: `${Math.max(0, Math.min(100, p.potential ?? 0))}%` }} />
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-bold text-slate-200 truncate">{p.strategyName || '—'}</div>
+                <div className="text-[8px] text-slate-500 truncate">{p.direction || 'BUY'}{p.signalDate ? ` · ${p.signalDate.slice(0, 10)}` : ''}</div>
+              </div>
+              <span className="flex-none flex items-center gap-1">
+                {isHeld && <span className="qr-chip qr-chip-slate" title="Already held in the book">held</span>}
+                {hasPending && <span className="qr-chip qr-chip-slate" title="A working order for this ticker is in the order book">pending</span>}
+              </span>
             </div>
-            <div className="text-right">
-              <div className="text-[9px] uppercase tracking-wide text-slate-500">Fills today</div>
-              <div className="font-mono text-[13px] font-bold text-slate-200">{m?.fills_today ?? 0}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 mt-2 text-[10px] font-mono text-slate-400">
-            <span title="Broker-rehearsal fills (gold.paper_uat_fills)">{m?.fills ?? 0} fills</span>
-            <span title="Distinct strategies with fills">{m?.strategies_active ?? 0} strateg{(m?.strategies_active ?? 0) === 1 ? 'y' : 'ies'}</span>
-            {m?.last_fill_at && <span title={`Last fill ${m.last_fill_at}`}>last {fmtAge(m.last_fill_at)}</span>}
-          </div>
-          <div className="mt-1.5 h-[36px] flex items-center justify-center text-[9px] text-slate-700">no round-trip history — fills only</div>
-        </div>
-      ) : (
-      <div className="px-3 pt-2.5 pb-2">
-        <div className="flex items-end justify-between">
-          <div>
-            <div className={`font-mono text-[22px] font-black leading-none ${m?.cum_pnl != null ? pnlCl(m.cum_pnl) : 'text-slate-600'}`}>
-              {m?.cum_pnl != null ? `${m.cum_pnl >= 0 ? '+' : ''}${fmtK(m.cum_pnl)}` : '—'}
-            </div>
-            <div className="text-[9px] text-slate-500 mt-1">cumulative realized P&amp;L</div>
-          </div>
-          <div className="text-right">
-            <div className="text-[9px] uppercase tracking-wide text-slate-500">Today</div>
-            <div className={`font-mono text-[13px] font-bold ${m?.today ? pnlCl(m.today.pnl) : 'text-slate-600'}`}
-              title={m?.today ? `${m.today.trades} closed trade${m.today.trades === 1 ? '' : 's'} today` : 'no exits today'}>
-              {m?.today ? `${m.today.pnl >= 0 ? '+' : ''}${fmtK(m.today.pnl)}` : '—'}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 mt-2 text-[10px] font-mono text-slate-400">
-          <span title="Closed trades (all time)">{m?.closed_trades ?? 0} closed</span>
-          <span title="Open positions">{m?.open_trades ?? 0} open</span>
-        </div>
-
-        <div className="text-[9px] text-slate-600 mt-2 h-[18px] flex items-center">
-          {empty ? 'no trades in this mode yet' : (m?.open_trades ? '' : 'no open positions')}
-        </div>
-
-        <div className="mt-1.5">
-          <Sparkline data={m?.spark} />
-        </div>
+          );
+        })}
+        {picks.length === 0 && (
+          <div className="px-3 py-2 text-[11px] text-slate-600">No active BUY candidates across asset classes</div>
+        )}
       </div>
-      )}
     </Panel>
-    </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// ZONE 3a — Regime Forecast (redesign 2026-09-18).
-// Data truth (traced, not assumed):
+// Working Orders (paper book) — compact table, single-line empty state.
+// ---------------------------------------------------------------------------
+const WorkingOrders = ({ orders, fresh, navigateToTab }) => (
+  <Panel title="Working Orders" fresh={fresh} action={
+    <span className="flex items-center gap-2">
+      <span className="text-[9px] text-slate-600" title="Working orders in the paper book. Est gain = limit vs latest daily close; blank for market orders.">
+        {orders.length} working · paper book
+      </span>
+      <LinkBtn onClick={() => navigateToTab('execution')}>Orders →</LinkBtn>
+    </span>
+  }>
+    {orders.length > 0 ? (
+      <div className="max-h-[220px] overflow-y-auto overflow-x-auto">
+        <table className="w-full min-w-[560px]">
+          <thead className="sticky top-0 bg-[#10141f]">
+            <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
+              <th className="text-left px-3 py-1">Ticker</th>
+              <th className="text-left px-2 py-1">Side</th>
+              <th className="text-right px-2 py-1">Qty</th>
+              <th className="text-right px-2 py-1">Limit</th>
+              <th className="text-right px-2 py-1">Last</th>
+              <th className="text-right px-2 py-1">Est Gain</th>
+              <th className="text-left px-2 py-1">Strategy</th>
+              <th className="text-right px-3 py-1">Age</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((o, i) => (
+              <tr key={`${o.source}-${o.ticker}-${i}`} className="border-t border-white/[0.05] text-[11px]">
+                <td className="px-3 py-1 font-mono font-bold text-white">{o.ticker}</td>
+                <td className={`px-2 py-1 font-mono font-bold ${o.side === 'BUY' ? 'text-emerald-400' : o.side === 'SELL' || o.side === 'CLOSE' ? 'text-rose-400' : 'text-slate-400'}`}>{o.side ?? '—'}</td>
+                <td className="px-2 py-1 text-right font-mono text-slate-200">{o.qty != null ? o.qty.toLocaleString() : '—'}</td>
+                <td className="px-2 py-1 text-right font-mono text-slate-300">{o.limit_price != null ? o.limit_price.toLocaleString() : 'MKT'}</td>
+                <td className="px-2 py-1 text-right font-mono text-slate-300" title={o.last_price_as_of ? `daily close as of ${o.last_price_as_of}` : 'no daily close for this ticker'}>
+                  {o.last_price != null ? o.last_price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+                </td>
+                <td className={`px-2 py-1 text-right font-mono font-bold ${o.est_gain != null ? pnlCl(o.est_gain) : 'text-slate-600'}`}>
+                  {o.est_gain != null ? `${o.est_gain >= 0 ? '+' : ''}${fmtK(o.est_gain)}` : '—'}
+                </td>
+                <td className="px-2 py-1 text-[10px] text-slate-400 max-w-[140px] truncate" title={o.strategy_name || o.venue}>
+                  {o.strategy_name || o.venue}
+                </td>
+                <td className="px-3 py-1 text-right font-mono text-[10px] text-slate-500">{o.submitted_at ? fmtAge(o.submitted_at) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div className="px-3 py-2 text-[11px] text-slate-600">No working orders in the paper book</div>
+    )}
+  </Panel>
+);
+
+// ---------------------------------------------------------------------------
+// Recent Fills (paper book) — closed trades, last 30 days
+// (gold.v_paper_trade_history). Single-line empty state.
+// ---------------------------------------------------------------------------
+const RecentFills = ({ trades, fresh }) => (
+  <Panel title="Recent Fills" fresh={fresh} action={
+    <span className="text-[9px] text-slate-600" title="Closed paper trades, last 30 days (gold.v_paper_trade_history)">closed trades · 30d</span>
+  }>
+    {trades.length > 0 ? (
+      <div className="max-h-[220px] overflow-y-auto overflow-x-auto">
+        <table className="w-full min-w-[560px]">
+          <thead className="sticky top-0 bg-[#10141f]">
+            <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
+              <th className="text-left px-3 py-1">Ticker</th>
+              <th className="text-left px-2 py-1">Strategy</th>
+              <th className="text-left px-2 py-1">Dir</th>
+              <th className="text-right px-2 py-1">Qty</th>
+              <th className="text-right px-2 py-1">Entry → Exit</th>
+              <th className="text-right px-2 py-1">Realized P&L</th>
+              <th className="text-right px-3 py-1">Closed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.map((t, i) => (
+              <tr key={`${t.id || t.ticker}-${i}`} className="border-t border-white/[0.05] text-[11px]">
+                <td className="px-3 py-1 font-mono font-bold text-white">{t.ticker}</td>
+                <td className="px-2 py-1 text-[10px] text-slate-400 max-w-[140px] truncate" title={t.strategy_id}>{t.strategy_id}</td>
+                <td className="px-2 py-1 font-mono text-slate-300 uppercase">{t.direction ?? '—'}</td>
+                <td className="px-2 py-1 text-right font-mono text-slate-200">{t.shares != null ? t.shares.toLocaleString() : '—'}</td>
+                <td className="px-2 py-1 text-right font-mono text-slate-300 whitespace-nowrap">
+                  {t.entry_price != null ? t.entry_price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+                  {' → '}
+                  {t.exit_price != null ? t.exit_price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+                </td>
+                <td className={`px-2 py-1 text-right font-mono font-bold whitespace-nowrap ${t.pnl != null ? pnlCl(t.pnl) : 'text-slate-600'}`}
+                  title={t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(2)}% · held ${t.hold_days ?? '—'}d` : undefined}>
+                  {t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}${fmtK(t.pnl)}` : '—'}
+                </td>
+                <td className="px-3 py-1 text-right font-mono text-[10px] text-slate-500">{t.closed_at ? fmtAge(t.closed_at) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div className="px-3 py-2 text-[11px] text-slate-600">No closed paper trades in the last 30 days</div>
+    )}
+  </Panel>
+);
+
+// ---------------------------------------------------------------------------
+// Market Context — compact regime forecast near the bottom.
 //   current regime label  — consumption.market_sentiment (canonical, US + HK)
-//   probability           — HMM posterior, gold.regime_label (US scope only,
-//                           SPY/VIX features; labels in the data: TREND,
-//                           MEAN_REV, CARRY, EVENT, FLAT — HK has no posterior)
-//   change vs yesterday   — /api/command/regime-change (US HMM daily history;
-//                           HK market_sentiment is latest-only → honest note)
-//   7-day strip           — consumption.macro_regime_7d, method=momentum_nowcast
-//                           (risk-on % per calendar day; HK currently emits a
-//                           flat carry-forward — flagged in the cell tooltip)
-// Only real labels are rendered; every panel names its model source in a
-// tooltip.
+//   probability           — HMM posterior, gold.regime_label (US scope only)
+//   change vs yesterday   — /api/command/regime-change (US HMM daily history)
+//   7-day strip           — consumption.macro_regime_7d, momentum_nowcast
 // ---------------------------------------------------------------------------
 const REGIME_MEANING = {
   TREND: 'Trending tape — momentum and trend-following books should keep working; fade entries get run over.',
@@ -309,8 +658,6 @@ const RegimeRegion = ({ region, fc, chg }) => {
   const days = fc?.days || [];
   const regime = chg?.regime ?? null;
   const allSame = days.length > 1 && days.every(d => d.risk_on === days[0].risk_on);
-  // What changed vs yesterday: run length 1 = changed today, 2 = changed
-  // yesterday, longer = unchanged. No history → honest note.
   let changeLine = null;
   if (chg) {
     if (!chg.history) {
@@ -324,54 +671,40 @@ const RegimeRegion = ({ region, fc, chg }) => {
     }
   }
   return (
-    <div className="px-3 py-2.5">
-      <div className="flex items-baseline justify-between flex-wrap gap-1">
-        <span className="flex items-baseline gap-2">
-          <span className="font-mono text-[11px] font-black text-white">{region}</span>
-          <span className="text-[13px] font-bold text-slate-100" title={chg?.source || ''}>
-            {regime ?? '—'}
-          </span>
+    <div className="px-3 py-2">
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className="font-mono text-[10px] font-black text-white flex-none">{region}</span>
+        <span className="text-[12px] font-bold text-slate-100" title={`${chg?.source || ''}${regime ? `\n${REGIME_MEANING[regime] || ''}` : ''}`}>
+          {regime ?? '—'}
         </span>
-        <span className="font-mono text-[10px] text-slate-400"
+        <span className="font-mono text-[9px] text-slate-400"
           title={region === 'US' ? 'HMM posterior probability of the current regime (gold.regime_label)' : 'No regime posterior for HK — the HMM is US-scope (SPY/VIX features)'}>
           P {fmtConf(chg?.confidence)}
         </span>
+        <span className="text-[9px] font-mono text-slate-500 truncate" title={chg?.source || ''}>{changeLine ?? '—'}</span>
       </div>
-      <div className="text-[10px] text-slate-400 mt-1 leading-snug">
-        {regime ? REGIME_MEANING[regime] || 'Regime label without a glossary entry.' : '—'}
-      </div>
-      <div className="text-[9px] font-mono text-slate-500 mt-1" title={chg?.source || ''}>
-        {changeLine ?? '—'}
-      </div>
-      {days.length > 0 ? (
-        <div className="mt-2">
-          <div className="grid grid-cols-7 gap-1">
-            {days.map((d, i) => (
-              <div key={d.date || i}
-                className={`rounded px-0.5 py-1 text-center ${RISK_CELL(d.risk_on)}`}
-                title={`${d.date ?? ''} · ${d.risk_on != null ? `${d.risk_on.toFixed(1)}%` : '—'} risk-on — momentum_nowcast (consumption.macro_regime_7d)${allSame ? ' · flat carry-forward nowcast' : ''}`}>
-                <div className="text-[8px] font-mono opacity-80">
-                  {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }) : '·'}
-                </div>
-                <div className="text-[8px] font-mono opacity-60">
-                  {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }) : ''}
-                </div>
-                <div className="text-[10px] font-mono font-bold mt-0.5">
-                  {d.risk_on != null ? `${d.risk_on.toFixed(0)}%` : '—'}
-                </div>
+      {days.length > 0 && (
+        <div className="grid grid-cols-7 gap-0.5 mt-1.5">
+          {days.map((d, i) => (
+            <div key={d.date || i}
+              className={`rounded px-0.5 py-0.5 text-center ${RISK_CELL(d.risk_on)}`}
+              title={`${d.date ?? ''} · ${d.risk_on != null ? `${d.risk_on.toFixed(1)}%` : '—'} risk-on — momentum_nowcast (consumption.macro_regime_7d)${allSame ? ' · flat carry-forward nowcast' : ''}`}>
+              <div className="text-[8px] font-mono opacity-80">
+                {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'narrow' }) : '·'}
               </div>
-            ))}
-          </div>
+              <div className="text-[9px] font-mono font-bold">
+                {d.risk_on != null ? `${d.risk_on.toFixed(0)}%` : '—'}
+              </div>
+            </div>
+          ))}
         </div>
-      ) : (
-        <div className="h-[52px] flex items-center justify-center text-[10px] text-slate-600">no forecast</div>
       )}
     </div>
   );
 };
 
-const RegimePanel = ({ fc, chg, fresh }) => (
-  <Panel title="Regime Forecast" fresh={fresh} action={
+const MarketContext = ({ fc, chg, fresh }) => (
+  <Panel title="Market Context · Regime" fresh={fresh} action={
     <span className="text-[9px] text-slate-600"
       title="Current regime: consumption.market_sentiment (canonical) + HMM posterior from gold.regime_label (US, SPY/VIX features). 7-day strip: momentum_nowcast (consumption.macro_regime_7d). Legend: ≥60% risk-on = emerald · ≤40% = rose · else neutral.">
       HMM daily + 7d nowcast · ≥60% on / ≤40% off
@@ -385,304 +718,98 @@ const RegimePanel = ({ fc, chg, fresh }) => (
 );
 
 // ---------------------------------------------------------------------------
-// ZONE 3b — Top Opportunities (redesign 2026-09-18).
-// Score honesty: the displayed score is the signal engine's raw 'potential'
-// field (consumption.signal_setups, 0–100). The pipeline publishes NO formula
-// or component breakdown for it (the note column is empty engine-side), so the
-// UI shows the raw context fields and says what the score is — a heuristic
-// ranking — instead of inventing a decomposition.
-// Held / pending-order flags are a client-side join against the sim book
-// positions (data prop) and the Command order book — no new backend state.
+// Command page — PAPER trading command center
 // ---------------------------------------------------------------------------
-const MARKET_LABEL = { US: 'US Equity', HK: 'HK Equity', CRYPTO: 'Crypto', FX: 'FX', METAL: 'Metals' };
-
-const SCORE_TIP = 'Engine conviction score (consumption.signal_setups.potential, 0–100). '
-  + 'The signal pipeline publishes no formula or component breakdown for this field — '
-  + 'treat it as a heuristic ranking, not a decomposable model output.';
-
-const Opportunities = ({ picks, positions, orders, navigateToTab, fresh }) => {
-  const [open, setOpen] = useState(null);
-  const held = useMemo(() => new Set((positions || []).map(p => p.ticker)), [positions]);
-  const pending = useMemo(() => new Set((orders || []).map(o => o.ticker)), [orders]);
-  return (
-    <Panel title="Top Opportunities" fresh={fresh} action={
-      <span className="flex items-center gap-2">
-        <span className="text-[9px] text-slate-600" title={SCORE_TIP}>best per class · heuristic score ⓘ</span>
-        <LinkBtn onClick={() => navigateToTab('research')}>Signals →</LinkBtn>
-      </span>
-    }>
-      <div className="divide-y divide-white/[0.05]">
-        {picks.map((p, i) => {
-          const isOpen = open === p.ticker;
-          const isHeld = held.has(p.ticker);
-          const hasPending = pending.has(p.ticker);
-          return (
-            <div key={`${p.market}-${p.ticker}`}>
-              <button onClick={() => setOpen(isOpen ? null : p.ticker)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.03] text-left"
-                title={isOpen ? 'Collapse detail' : 'Expand score context'}>
-                <span className="font-mono text-[10px] text-slate-600 w-4 flex-none">#{i + 1}</span>
-                <div className="flex-none w-[110px] min-w-0">
-                  <div className="font-mono text-[13px] font-black text-white leading-tight">{p.ticker}</div>
-                  <div className="text-[9px] text-slate-500 truncate" title={p.name || ''}>{p.name || MARKET_LABEL[p.market] || p.market}</div>
-                </div>
-                <div className="flex-none w-[86px]">
-                  <div className="flex items-baseline gap-1" title={SCORE_TIP}>
-                    <span className="font-mono text-[13px] font-bold text-slate-100">{p.potential != null ? p.potential.toFixed(0) : '—'}</span>
-                    <span className="text-[8px] text-slate-500">/ 100</span>
-                  </div>
-                  <div className="h-1 mt-0.5 rounded bg-white/[0.06] overflow-hidden">
-                    <div className="h-full bg-slate-300" style={{ width: `${Math.max(0, Math.min(100, p.potential ?? 0))}%` }} />
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[10px] font-bold text-slate-200 truncate">{p.strategyName || '—'}</div>
-                  <div className="text-[9px] text-slate-500 truncate">{p.reason}</div>
-                </div>
-                <span className="flex-none flex items-center gap-1">
-                  {isHeld && <span className="qr-chip qr-chip-slate" title="Already held in the sim book">held</span>}
-                  {hasPending && <span className="qr-chip qr-chip-slate" title="A working order for this ticker is in the order book">order pending</span>}
-                  <span className="text-slate-600 text-[10px]">{isOpen ? '▾' : '▸'}</span>
-                </span>
-              </button>
-              {isOpen && (
-                <div className="px-3 pb-2.5 pt-0.5 pl-9">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 rounded overflow-hidden bg-white/[0.05]">
-                    {[
-                      ['Direction', p.direction || '—'],
-                      ['Signal date', p.signalDate ? `${p.signalDate.slice(0, 10)} ${p.signalDate.slice(11, 16)}Z` : '—'],
-                      ['Price', p.price != null ? `${fmtK(p.price)}` : '—'],
-                      ['1d change', p.changePct != null ? fmtPct(p.changePct) : '—'],
-                    ].map(([l, v]) => (
-                      <div key={l} className="px-2.5 py-1.5 bg-[#10141f]">
-                        <div className="text-[8px] uppercase tracking-wide text-slate-500">{l}</div>
-                        <div className="font-mono text-[11px] font-bold text-white mt-0.5 truncate">{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="text-[9px] text-slate-500 mt-1.5 leading-snug">
-                    <span className="font-bold text-slate-400">Score:</span> {SCORE_TIP}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {picks.length === 0 && (
-          <div className="py-6 text-center text-[11px] text-slate-600">No active BUY candidates across asset classes</div>
-        )}
-      </div>
-    </Panel>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// ZONE 4 — Order Book
-// ---------------------------------------------------------------------------
-const OrderBook = ({ orders, fresh }) => (
-  <Panel title="Order Book" fresh={fresh} action={
-    <span className="text-[9px] text-slate-600" title="Working orders across live (IBKR) and paper books. Est gain = limit vs latest daily close; blank for market orders.">
-      {orders.length} working · est gain = limit vs last close
-    </span>
-  }>
-    {orders.length > 0 ? (
-      <table className="w-full">
-        <thead>
-          <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
-            <th className="text-left px-3 py-1">Ticker</th>
-            <th className="text-left px-2 py-1">Side</th>
-            <th className="text-right px-2 py-1">Qty</th>
-            <th className="text-right px-2 py-1">Limit</th>
-            <th className="text-right px-2 py-1">Last</th>
-            <th className="text-right px-2 py-1">Est Gain</th>
-            <th className="text-left px-2 py-1">Status</th>
-            <th className="text-left px-2 py-1">Book</th>
-            <th className="text-right px-3 py-1">Age</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((o, i) => (
-            <tr key={`${o.source}-${o.ticker}-${i}`} className="border-t border-white/[0.05] text-[11px]">
-              <td className="px-3 py-1.5 font-mono font-bold text-white">{o.ticker}</td>
-              <td className={`px-2 py-1.5 font-mono font-bold ${o.side === 'BUY' ? 'text-emerald-400' : o.side === 'SELL' ? 'text-rose-400' : 'text-slate-400'}`}>{o.side ?? '—'}</td>
-              <td className="px-2 py-1.5 text-right font-mono text-slate-200">{o.qty != null ? o.qty.toLocaleString() : '—'}</td>
-              <td className="px-2 py-1.5 text-right font-mono text-slate-300">{o.limit_price != null ? o.limit_price.toLocaleString() : 'MKT'}</td>
-              <td className="px-2 py-1.5 text-right font-mono text-slate-300" title={o.last_price_as_of ? `daily close as of ${o.last_price_as_of}` : 'no daily close for this ticker'}>
-                {o.last_price != null ? o.last_price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
-              </td>
-              <td className={`px-2 py-1.5 text-right font-mono font-bold ${o.est_gain != null ? pnlCl(o.est_gain) : 'text-slate-600'}`}>
-                {o.est_gain != null ? `${o.est_gain >= 0 ? '+' : ''}${fmtK(o.est_gain)}` : '—'}
-              </td>
-              <td className="px-2 py-1.5">
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300">{o.status}</span>
-              </td>
-              <td className="px-2 py-1.5 text-[10px] text-slate-400 max-w-[160px] truncate" title={o.strategy_name || o.venue}>
-                {o.strategy_name || o.venue}
-              </td>
-              <td className="px-3 py-1.5 text-right font-mono text-[10px] text-slate-500">{o.submitted_at ? fmtAge(o.submitted_at) : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    ) : (
-      <div className="py-6 text-center text-[11px] text-slate-600">No working orders</div>
-    )}
-  </Panel>
-);
-
-// ---------------------------------------------------------------------------
-// ZONE 1 — Market Status strip (slim, top of page): clocks · indices with
-// sparklines · VIX · US + HK Fear & Greed. Breadth detail lives on
-// Research ▸ Macro.
-// ---------------------------------------------------------------------------
-const StripSpark = ({ values }) => {
-  if (!values || values.length < 2) return null;
-  const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
-  const w = 48, h = 14;
-  const line = values.map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 1 - ((v - min) / range) * (h - 2)).toFixed(1)}`).join(' ');
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="block" style={{ width: w, height: h }}>
-      <polyline points={line} fill="none" stroke="rgba(148,163,184,0.8)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-};
-
-const Clocks = () => {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const c = marketClock();
-  const s = marketStatus();
-  const Clock = ({ label, t, open }) => (
-    <span className="flex items-center gap-1" title={open ? 'session open' : 'session closed'}>
-      <span className={`w-1.5 h-1.5 rounded-full ${open ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-      <span className="text-slate-500">{label}</span>
-      <span className="font-mono text-slate-200">{t}</span>
-    </span>
-  );
-  return (
-    <span className="flex items-center gap-3 text-[10px] flex-none">
-      <Clock label="HKT" t={c.hkt} open={s.hk} />
-      <Clock label="LON" t={c.lon} open={s.lon} />
-      <Clock label="NYC" t={c.nyc} open={s.nyc} />
-    </span>
-  );
-};
-
-function MarketStrip({ navigateToTab, fresh }) {
-  const [ov, setOv] = useState(null);
-
-  const load = async () => {
-    const res = await api.get('/api/markets/overview?regions=US,HK');
-    if (res) setOv(res);
-  };
-  useEffect(() => { load(); }, []);
-  usePoll(load, 30000);
-
-  const rawIdx = ov?.indices?.data || ov?.indices;
-  const indices = Array.isArray(rawIdx) ? rawIdx : [];
-  const us = indices.filter(i => i.region === 'US').slice(0, 3);
-  const hk = indices.filter(i => i.region === 'HK').slice(0, 2);
-  const sentiment = ov?.sentiment || {};
-  const usS = sentiment?.us || sentiment;
-  const hkS = sentiment?.hk;
-
-  const Divider = () => <span className="w-px self-stretch bg-white/[0.07] flex-none" />;
-
-  return (
-    <Panel title="Market Status" fresh={fresh} action={<LinkBtn onClick={() => navigateToTab('research')}>Markets →</LinkBtn>}>
-      <div className="flex items-center gap-4 px-3 py-1.5 overflow-x-auto text-[10px]">
-        <Clocks />
-        <Divider />
-        {[...us, ...hk].map(i => (
-          <span key={i.sym} className="flex items-center gap-1.5 flex-none" title={i.name}>
-            <span className="font-bold text-slate-200">{i.sym}</span>
-            <span className="font-mono text-slate-200">{i.last != null ? i.last.toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'}</span>
-            <span className={`font-mono ${pnlCl(i.change_pct ?? i.change_1d)}`}>{fmtPct(i.change_pct ?? i.change_1d)}</span>
-            <StripSpark values={i.spark} />
-          </span>
-        ))}
-        <Divider />
-        <span className="flex items-center gap-1.5 flex-none" title="CNN Fear & Greed (US)">
-          <span className="text-slate-400">US F&amp;G</span>
-          <span className="font-mono text-slate-200">{usS?.fear_greed ?? '—'}</span>
-          <span className="text-slate-500">{usS?.fear_greed_label || ''}</span>
-        </span>
-        <span className="flex items-center gap-1.5 flex-none" title="Fear & Greed (HK)">
-          <span className="text-slate-400">HK F&amp;G</span>
-          <span className="font-mono text-slate-200">{hkS?.fear_greed ?? '—'}</span>
-          <span className="text-slate-500">{hkS?.fear_greed_label || ''}</span>
-        </span>
-        <span className="flex items-center gap-1.5 flex-none" title="CBOE VIX (US)">
-          <span className="text-slate-400">VIX</span>
-          <span className="font-mono text-slate-200">{usS?.vix ?? '—'}</span>
-        </span>
-      </div>
-    </Panel>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Command page
-// ---------------------------------------------------------------------------
-export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
+export const CommandCenter = ({ navigateToTab }) => {
   const [overview, setOverview] = useState(null);
   const [pnlMode, setPnlMode] = useState(null);
   const [orders, setOrders] = useState(null);
   const [regimeFc, setRegimeFc] = useState(null);
-  const [oppPicks, setOppPicks] = useState([]);
-  // Selected book (Zone 1 cards drive Zone 2). Default Paper — the book with
-  // live signal flow; Live starts empty and Sim is a pure backtest replay.
-  const [selMode, setSelMode] = useState('paper');
-  // Per-book overview for the selected mode (sim/paper/uat only — the live
-  // book reads from overview.account.books.live instead). Tagged with the
-  // book it was fetched for so a stale payload never shows under a new mode.
-  const [bookOv, setBookOv] = useState(null);
-  const registry = useFreshness();
   const [regimeChg, setRegimeChg] = useState(null);
+  const [oppPicks, setOppPicks] = useState([]);
+  const [bookOv, setBookOv] = useState(null);
+  const [limits, setLimits] = useState(null);
+  const [gateway, setGateway] = useState(null);
+  const [sysStatus, setSysStatus] = useState(null);
+  const [paperPos, setPaperPos] = useState(null);
+  const [stratNames, setStratNames] = useState({});
+  const [fills, setFills] = useState(null);
+  const registry = useFreshness();
 
   usePoll(async () => {
     const res = await api.get('/api/command/overview');
     if (res) setOverview(res);
-  }, 60000);
+  }, 60000, 4500);
 
   usePoll(async () => {
     const res = await api.get('/api/command/pnl-by-mode');
     if (res) setPnlMode(res);
   }, 60000);
 
-  useEffect(() => {
-    if (selMode === 'live') return;
-    let cancelled = false;
-    api.get(`/api/execution/book-overview?book=${selMode}`).then(res => {
-      if (res && !cancelled) setBookOv({ book: selMode, payload: res });
-    });
-    return () => { cancelled = true; };
-  }, [selMode]);
+  // Paper book stats + YTD realized curve (fixed scope — this page is the
+  // PAPER command center; other modes ride in the env strip).
   usePoll(async () => {
-    if (selMode === 'live') return;
-    const res = await api.get(`/api/execution/book-overview?book=${selMode}`);
-    if (res) setBookOv({ book: selMode, payload: res });
+    const res = await api.get('/api/execution/book-overview?book=paper');
+    if (res) setBookOv(res);
   }, 60000);
 
   usePoll(async () => {
     const res = await api.get('/api/command/order-book');
     if (res) setOrders(res.orders || []);
-  }, 60000);
+  }, 60000, 1500);
+
+  usePoll(async () => {
+    const res = await api.get('/api/execution/limits');
+    if (res) setLimits(res);
+  }, 60000, 3000);
+
+  usePoll(async () => {
+    const res = await api.get('/api/execution/gateway');
+    if (res) setGateway(res);
+  }, 60000, 1600);
+
+  usePoll(async () => {
+    const res = await api.get('/api/agents/paper/system-status');
+    if (res) setSysStatus(res);
+  }, 60000, 3200);
+
+  usePoll(async () => {
+    const res = await api.get('/api/agents/paper/open-positions');
+    if (res) setPaperPos(Array.isArray(res?.positions) ? res.positions : []);
+  }, 60000, 3400);
+
+  // strategy_id → display name map for the positions table.
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.get('/api/paper-strategies').then(res => {
+        const rows = Array.isArray(res) ? res : (res?.strategies || res?.data || []);
+        if (!cancelled && Array.isArray(rows)) {
+          const map = {};
+          for (const r of rows) if (r.strategy_id && r.strategy_name) map[r.strategy_id] = r.strategy_name;
+          setStratNames(map);
+        }
+      });
+    }, 6000);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, []);
+
+  usePoll(async () => {
+    const res = await api.get('/api/agents/paper/trade-history?limit=12');
+    if (res) setFills(Array.isArray(res?.trades) ? res.trades : []);
+  }, 60000, 4600);
 
   usePoll(async () => {
     const res = await api.get('/api/command/regime-forecast');
     if (res) setRegimeFc(res.markets || {});
-  }, 300000);
+  }, 300000, 7000);
 
-  // Change-vs-yesterday per region (read-only addition, 2026-09-18): US from
-  // the HMM daily series, HK honestly reports no daily history.
+  // Change-vs-yesterday per region: US from the HMM daily series, HK honestly
+  // reports no daily history.
   usePoll(async () => {
     const res = await api.get('/api/command/regime-change');
     if (res) setRegimeChg(res.regions || {});
-  }, 300000);
+  }, 300000, 7400);
 
   usePoll(async () => {
     const [u, fams] = await Promise.all([
@@ -723,20 +850,7 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
       : null;
     const dateMap = dates?.dates || {};
     setOppPicks(top3.map(p => ({ ...p, signalDate: dateMap[p.ticker.toUpperCase()] || null })));
-  }, 120000);
-
-  const positions = data?.positions || [];
-  // (longMV/shortMV removed t_22dee93d: `positions` is the all-book list —
-  // a live-book L/S ratio from it mixed books and currencies.)
-  const openPnl = positions.reduce((s, p) => s + (p.unrealized_pnl || p.pnl || 0), 0);
-
-  const account = overview?.account;
-  const eqCurve = overview?.equity_curve || [];
-  const ret30 = eqCurve.length > 1 ? ((eqCurve[eqCurve.length - 1].equity - eqCurve[0].equity) / eqCurve[0].equity) * 100 : null;
-
-  // The Action Center (alerts, data quality, approvals/gates) moved to
-  // Settings ▸ Alerts — components/ActionCenter.jsx. The global header badge
-  // in App.jsx surfaces the live alert count.
+  }, 120000, 8000);
 
   // Per-panel freshness from the source→panel dependency map (never tagged
   // by hand — panels inherit the worst state of their upstream sources).
@@ -746,234 +860,122 @@ export const CommandCenter = ({ data, navigateToTab, onSelectStrategy }) => {
   const fOrders = panelFreshness(PANEL_SOURCES.orderBook, registry);
   const fOpps = panelFreshness(PANEL_SOURCES.opportunities, registry);
   const fRegime = panelFreshness(PANEL_SOURCES.regime, registry);
+  const fPos = panelFreshness(PANEL_SOURCES.paperBookAsset, registry);
+  const fAttn = panelFreshness(PANEL_SOURCES.attention, registry);
+
+  // Header data-freshness = worst state across the panels on this page.
+  const FR_RANK = { [FR.DISCONNECTED]: 4, [FR.STALE]: 3, [FR.LAGGING]: 2, [FR.UNKNOWN]: 1, [FR.FRESH]: 0 };
+  const dataFresh = [fMarket, fBook, fPnlMode, fOrders, fOpps, fRegime, fPos]
+    .filter(Boolean)
+    .sort((a, b) => (FR_RANK[b.state] ?? 0) - (FR_RANK[a.state] ?? 0))[0] || null;
+
+  // Paper-scoped working orders (this is the PAPER command center).
+  const paperOrders = useMemo(() => (orders || []).filter(o => o.source === 'paper'), [orders]);
+
+  // Open positions sorted by market value desc.
+  const posRows = useMemo(() => {
+    const rows = (paperPos || []).slice();
+    rows.sort((a, b) => ((b.shares ?? 0) * (b.current_price ?? 0)) - ((a.shares ?? 0) * (a.current_price ?? 0)));
+    return rows;
+  }, [paperPos]);
+
+  // Risk rollup for the KPI tile.
+  const risks = useMemo(() => overview?.strategy_risks || [], [overview]);
+  const attn = useMemo(() => overview?.attention || [], [overview]);
+  const risk = {
+    halted: !!limits?.global_halt,
+    critical: risks.filter(r => r.sev === 'critical').length + attn.filter(a => a.sev === 'critical').length,
+    warning: risks.filter(r => r.sev === 'warning').length + attn.filter(a => a.sev === 'warning').length,
+    gap: overview?.monitoring_gap || 0,
+  };
+
+  // Action Required items — operational issues only, severity-ordered.
+  const actionItems = useMemo(() => {
+    const items = [];
+    if (limits?.global_halt) {
+      items.push({ id: 'halt', sev: 'critical', title: 'Global HALT active', impact: 'Working orders cancelled and book flattened — gold.risk_limits.global_halt', target: 'settings' });
+    }
+    if (gateway && gateway.connected === false) {
+      items.push({ id: 'gw', sev: 'critical', title: 'IBKR gateway disconnected', impact: 'No order routing or account feed', target: 'settings' });
+    }
+    if (sysStatus?.last_run_status && sysStatus.last_run_status !== 'ok') {
+      items.push({ id: 'run', sev: 'warning', title: `Last paper run: ${sysStatus.last_run_status}`, impact: `${sysStatus.last_run_type || ''} run ${sysStatus.last_run_date || ''}`.trim(), target: 'execution' });
+    }
+    for (const r of risks) {
+      items.push({
+        id: `risk-${r.strategy_id}`, sev: r.sev || 'warning',
+        title: `${r.name || r.strategy_id}: risk trigger`,
+        impact: (r.triggers || []).join(' · '), target: 'strategies',
+      });
+    }
+    for (const a of attn) {
+      if (a.sev === 'info') continue;
+      items.push({
+        id: a.id, sev: a.sev || 'info', title: a.title, impact: a.impact,
+        target: a.target || null, age: a.created_at ? fmtAge(a.created_at) : null,
+      });
+    }
+    if ((overview?.monitoring_gap || 0) > 0) {
+      items.push({ id: 'gap', sev: 'warning', title: `${overview.monitoring_gap} position${overview.monitoring_gap === 1 ? '' : 's'} without monitoring`, impact: 'Open legs not actively monitored', target: 'execution' });
+    }
+    if (dataFresh && (dataFresh.state === FR.STALE || dataFresh.state === FR.DISCONNECTED)) {
+      items.push({
+        id: 'stale', sev: 'warning',
+        title: `Data ${dataFresh.state === FR.STALE ? 'stale' : 'disconnected'}${dataFresh.culprit ? `: ${dataFresh.culprit.name}` : ''}`,
+        impact: dataFresh.culprit?.budgetH != null ? `staleness budget ${dataFresh.culprit.budgetH}h exceeded` : 'source refresh overdue',
+        target: 'settings',
+      });
+    }
+    const rank = { critical: 0, warning: 1, info: 2 };
+    items.sort((a, b) => (rank[a.sev] ?? 3) - (rank[b.sev] ?? 3));
+    return items;
+  }, [limits, gateway, sysStatus, risks, attn, overview, dataFresh]);
+
+  const st = bookOv?.stats;
+  const boCurve = (bookOv?.ytd_curve || []).map(p => ({ d: p.d, equity: p.cum }));
+  const paperAcct = overview?.account?.books?.paper;
+  const liveAcct = overview?.account?.books?.live;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-sm font-bold text-white">Command</h1>
-          <p className="text-[10px] text-slate-500">P&amp;L · book · opportunities · orders</p>
-        </div>
-      </div>
+    <div className="space-y-2.5">
+      {/* 1 — Command header + slim market ticker */}
+      <CommandHeader limits={limits} gateway={gateway} sysStatus={sysStatus} dataFresh={dataFresh} />
+      <MarketTicker fresh={fMarket} />
 
-      {/* ZONE 1 — Market Status strip (slim, always first) */}
-      <MarketStrip navigateToTab={navigateToTab} fresh={fMarket} />
+      {/* 2 — Environment status strip (replaces the four big mode cards) */}
+      <EnvStrip pnlMode={pnlMode} liveAcct={liveAcct} navigateToTab={navigateToTab} fresh={fPnlMode} />
 
-      {/* ZONE 2 — Environment cards: the most important information on the page.
-          Cards are selectors — clicking one re-scopes the book zone below. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {MODE_DEFS.map(md => (
-          <ModePanel key={md.key} label={md.label} modeKey={md.key} m={pnlMode?.modes?.[md.key]}
-            fresh={fPnlMode} selected={selMode === md.key} onSelect={() => setSelMode(md.key)} />
-        ))}
-      </div>
+      {/* 3 — Primary KPI row (shown once) */}
+      <KpiRow st={st} paperAcct={paperAcct} orderCount={orders == null ? null : paperOrders.length} risk={risk} fresh={fBook} />
 
-      {/* ZONE 3 — selected Book: full-width chart, KPI row under it.
-          Every figure follows the card clicked above. */}
-      {(() => {
-        const modeTitle = MODE_DEFS.find(md => md.key === selMode)?.title || selMode;
-        const isLive = selMode === 'live';
-        const isUat = selMode === 'uat';
-        // Live book: canonical consumption.account_summary row (verbatim),
-        // falling back to the combined aggregate when the live row is absent.
-        const acctLive = account?.books?.live || account;
-        // Currency-labeled live book (t_22dee93d): equity_native = account
-        // base currency (HKD), equity_usd = backend-converted via the stored
-        // daily rate (fx_date). The frontend never converts — it only renders
-        // backend-labeled values; missing labels render unlabeled-marked,
-        // never a bare '$'.
-        const liveFx = acctLive?.fx || account?.fx;
-        const curveCcy = overview?.equity_curve_currency;
-        // Sim/Paper/UAT: per-book overview (stats + YTD realized curve).
-        const bo = bookOv && bookOv.book === selMode ? bookOv.payload : null;
-        const st = bo?.stats;
-        const boCurve = (bo?.ytd_curve || []).map(p => ({ d: p.d, equity: p.cum }));
-        return (
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="qr-label flex items-center gap-2">{modeTitle} Book <FreshTag fresh={fBook} /></span>
-          <LinkBtn onClick={() => navigateToTab('execution')}>Portfolio →</LinkBtn>
-        </div>
-        <div className="space-y-2">
-          {isLive ? (
-          <Panel title={`Last 30 Sessions${curveCcy ? ` · ${curveCcy}` : ''}`} fresh={{ ...fBook, lastKnown: acctLive?.equity != null ? fmtKCcy(acctLive.equity, acctLive.currency) : '—' }} action={
-            ret30 != null ? <span className={`qr-num text-[11px] font-bold ${pnlCl(ret30)}`}>{fmtPct(ret30)}</span> : null
-          }>
-            <div className="px-3.5 pt-2.5 pb-1 flex items-end justify-between">
-              <div>
-                <div className="font-mono text-2xl font-black text-white leading-none">{acctLive?.equity_native != null ? fmtKCcy(acctLive.equity_native, acctLive.native_currency) : acctLive?.equity != null ? fmtKCcy(acctLive.equity, acctLive.currency) : '—'}</div>
-                {acctLive?.equity_usd != null && (
-                  <div className="text-[9px] text-slate-500 mt-0.5">≈ {fmtKCcy(acctLive.equity_usd, 'USD')}{liveFx?.base_per_usd ? ` @ ${Number(liveFx.base_per_usd).toFixed(4)} ${liveFx.base_currency}/USD` : ''}{liveFx?.fx_date ? ` · rate ${liveFx.fx_date}` : ''}</div>
-                )}
-                <div className="text-[10px] text-slate-500 mt-1">{acctLive?.positions ?? positions.length} open positions{acctLive?.cash_pct != null ? ` · ${Math.round(acctLive.cash_pct)}% cash` : ''}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[9px] uppercase tracking-wide text-slate-500">Day P&L</div>
-                <div className="flex items-baseline gap-1.5 justify-end">
-                  <span className={`font-mono text-[17px] font-black ${pnlCl(acctLive?.day_pnl)}`}>{acctLive?.day_pnl != null ? fmtK(acctLive.day_pnl) : '—'}</span>
-                  {/* bps, not %: 1dp percent is below the resolution of a multi-$M book */}
-                  {acctLive?.day_pnl != null && acctLive?.equity ? (
-                    <span className={`font-mono text-[11px] ${pnlCl(acctLive.day_pnl)}`} title="Day P&L as basis points of equity">
-                      {(acctLive.day_pnl / acctLive.equity * 1e4) >= 0 ? '+' : ''}{(acctLive.day_pnl / acctLive.equity * 1e4).toFixed(1)} bps
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-            <EquityCurve data={eqCurve} color="#60a5fa" />
-          </Panel>
-          ) : (
-          <Panel title={isUat ? 'UAT Fills' : 'Cumulative Realized · YTD'} fresh={fBook} action={
-            !isUat && st?.win_rate != null
+      {/* 4 — Operational grid: chart + positions (left, ~65%) · actions +
+              opportunities (right, ~35%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,65fr)_minmax(0,35fr)] gap-2.5">
+        <div className="space-y-2.5 min-w-0">
+          <Panel title="Cumulative Realized P&L · YTD" fresh={fBook} action={
+            st?.win_rate != null
               ? <span className="font-mono text-[10px] text-slate-400" title="Win rate over closed trades">WR {st.win_rate}%</span>
               : null
           }>
-            <div className="px-3.5 pt-2.5 pb-1 flex items-end justify-between">
-              <div>
-                {isUat ? (
-                  <>
-                    <div className="font-mono text-2xl font-black text-slate-600 leading-none">—</div>
-                    <div className="text-[10px] text-slate-500 mt-1"
-                      title="gold.paper_uat_fills is a fills ledger, not round-trips — a per-strategy UAT P&L ledger is qr_etl's domain">
-                      fills-only ledger · round-trip P&amp;L pending
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className={`font-mono text-2xl font-black leading-none ${st?.ytd_pnl != null ? pnlCl(st.ytd_pnl) : 'text-slate-600'}`}>
-                      {st?.ytd_pnl != null ? `${st.ytd_pnl >= 0 ? '+' : ''}${fmtK(st.ytd_pnl)}` : '—'}
-                    </div>
-                    <div className="text-[10px] text-slate-500 mt-1">
-                      YTD realized{st?.cum_pnl != null ? ` · all-time ${st.cum_pnl >= 0 ? '+' : ''}${fmtK(st.cum_pnl)}` : ''}
-                    </div>
-                  </>
-                )}
-              </div>
-              <div className="text-right">
-                <div className="text-[9px] uppercase tracking-wide text-slate-500">Today</div>
-                {isUat ? (
-                  <div className="font-mono text-[17px] font-black text-slate-200" title="Fills today">{st?.today?.trades ?? 0} fills</div>
-                ) : (
-                  <div className={`font-mono text-[17px] font-black ${st?.today ? pnlCl(st.today.pnl) : 'text-slate-600'}`}
-                    title={st?.today ? `${st.today.trades} closed trade${st.today.trades === 1 ? '' : 's'} today` : 'no exits today'}>
-                    {st?.today ? `${st.today.pnl >= 0 ? '+' : ''}${fmtK(st.today.pnl)}` : '—'}
-                  </div>
-                )}
-              </div>
-            </div>
-            <EquityCurve data={boCurve} color="#60a5fa"
-              emptyLabel={isUat ? 'no round-trip history — fills only' : bo == null ? 'Loading book…' : 'No realized P&L this year'} />
+            <EquityCurve data={boCurve} color="#60a5fa" height={240}
+              emptyLabel={bookOv == null ? 'Loading book…' : 'No realized P&L this year'} />
           </Panel>
-          )}
-
-          {isLive ? (
-          /* KPI row under the chart: Open P&L · Net Cash Flow · Buying Power · Net Exposure */
-          <FreshWrap fresh={fBook} lastKnown={acctLive?.open_pnl != null ? fmtK(acctLive.open_pnl) : fmtK(openPnl)} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="qr-surface p-2.5 flex flex-col justify-center">
-              <div className="qr-label">Open P&amp;L{acctLive?.open_pnl_currency ? ` · ${acctLive.open_pnl_currency}` : ''}</div>
-              <div className={`font-mono text-lg font-bold mt-0.5 ${pnlCl(acctLive?.open_pnl ?? openPnl)}`}>
-                {acctLive?.open_pnl != null ? fmtKCcy(acctLive.open_pnl, acctLive.open_pnl_currency || acctLive.currency) : fmtKCcy(openPnl, 'USD')}
-              </div>
-              {acctLive?.open_pnl_pct_of_equity != null ? (
-                <div className="text-[9px] text-slate-500 mt-0.5" title="Open P&L (USD, position-derived) ÷ USD equity — same-unit ratio">{fmtPct(acctLive.open_pnl_pct_of_equity)} of equity</div>
-              ) : null}
-            </div>
-
-            {/* Net Cash Flow (t_98afd0f5): overview.cash_flow from
-                consumption.account_cash_flow_summary. NULL = no data → '—',
-                never a coerced 0. Paper book is wired (t_b662b4e9); the live
-                book has NO cash-flow source yet (IBKR cash transactions not
-                ingested) → distinct 'no live source' treatment. */}
-            {(() => {
-              const cfL = overview?.cash_flow?.live;
-              const liveHasSource = !!(cfL && (cfL.mtd_net != null || cfL.net_all_time != null || cfL.last_flow_date != null));
-              const tip = 'Net cash flow (deposits − withdrawals), consumption.account_cash_flow_summary — live book.'
-                + (liveHasSource
-                    ? ` MTD ${cfL.mtd_net != null ? fmtK(cfL.mtd_net) : '—'} (${cfL.flows_mtd_count} flows, last ${cfL.last_flow_date ?? '—'}).`
-                    : ' No cash-flow source yet (IBKR cash transactions not yet ingested).');
-              return (
-                <div className="qr-surface p-2.5 flex flex-col justify-center" title={tip}>
-                  <div className="qr-label flex items-center gap-1.5">Net Cash Flow
-                    <span className="text-[8px] uppercase tracking-wide text-slate-500">mtd</span>
-                  </div>
-                  <div className={`font-mono text-lg font-bold mt-0.5 ${cfL?.mtd_net != null ? pnlCl(cfL.mtd_net) : 'text-slate-600'}`}>
-                    {cfL?.mtd_net != null ? `${cfL.mtd_net >= 0 ? '+' : ''}${fmtK(cfL.mtd_net)}` : '—'}
-                  </div>
-                  <div className="text-[9px] text-slate-500 mt-0.5">
-                    today {cfL?.today_net != null ? `${cfL.today_net >= 0 ? '+' : ''}${fmtK(cfL.today_net)}` : '—'}
-                    {cfL?.flows_mtd_count ? ` · ${cfL.flows_mtd_count} flows` : ''}
-                  </div>
-                  {!liveHasSource && (
-                    <div className="text-[8px] text-slate-600 mt-0.5">live book: no source</div>
-                  )}
-                </div>
-              );
-            })()}
-
-            <div className="qr-surface p-2.5 flex flex-col justify-center">
-              <div className="qr-label">Buying Power{acctLive?.currency ? ` · ${acctLive.currency}` : ''}</div>
-              <div className="font-mono text-lg font-bold mt-0.5 text-white">
-                {acctLive?.buying_power != null ? fmtKCcy(acctLive.buying_power, acctLive.currency) : '—'}
-              </div>
-              {acctLive?.buying_power_usd != null && acctLive?.currency !== 'USD' && (
-                <div className="text-[9px] text-slate-500 mt-0.5">≈ {fmtKCcy(acctLive.buying_power_usd, 'USD')}{liveFx?.fx_date ? ` · rate ${liveFx.fx_date}` : ''}</div>
-              )}
-              {acctLive?.cash_pct != null && (
-                <div className="text-[9px] text-slate-500 mt-0.5">{Number(acctLive.cash_pct).toFixed(1)}% cash</div>
-              )}
-            </div>
-
-            <div className="qr-surface p-2.5 flex flex-col justify-center"
-              title={`Canonical per-book exposures (consumption.account_summary, live book only) · gross ${acctLive?.gross_exp_pct != null ? acctLive.gross_exp_pct.toFixed(1) : '—'}%`}>
-              <div className="qr-label">Net Exposure</div>
-              <div className={`font-mono text-lg font-bold mt-0.5 ${acctLive?.net_exp_pct != null ? pnlCl(acctLive.net_exp_pct) : 'text-slate-600'}`}>
-                {acctLive?.net_exp_pct != null ? `${acctLive.net_exp_pct >= 0 ? '+' : ''}${acctLive.net_exp_pct.toFixed(1)}%` : '—'}
-              </div>
-              {/* No L/S split here: the positions prop is the ALL-book list
-                  (77 paper + 7 live), so a client-side long/short ÷ live
-                  equity mixes books AND currencies — the old '88%' was an
-                  accident of the combined-equity denominator (t_22dee93d). */}
-              <div className="text-[9px] text-slate-500 mt-0.5">
-                gross {acctLive?.gross_exp_pct != null ? `${acctLive.gross_exp_pct.toFixed(1)}%` : '—'} · live book only
-              </div>
-            </div>
-          </FreshWrap>
-          ) : isUat ? (
-          <FreshWrap fresh={fBook} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <KpiTile label="Total Fills" value={st?.total_fills ?? '—'} sub={`${st?.ytd_trades ?? 0} this year`}
-              tip="Broker-rehearsal fills (gold.paper_uat_fills) — fills, not round-trips" />
-            <KpiTile label="Fills Today" value={st?.today?.trades ?? 0} />
-            <KpiTile label="Last Fill" value={st?.last_fill_at ? fmtAge(st.last_fill_at) : '—'} sub={st?.last_fill_at || undefined} />
-            <KpiTile label="Round-Trip P&L" value="—" valueCl="text-slate-600" sub="ledger pending"
-              tip="A per-strategy UAT round-trip P&L ledger is qr_etl's domain — never derived serve-time" />
-          </FreshWrap>
-          ) : (
-          <FreshWrap fresh={fBook} lastKnown={st?.cum_pnl != null ? fmtK(st.cum_pnl) : '—'} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <KpiTile label="Win Rate" value={st?.win_rate != null ? `${st.win_rate}%` : '—'}
-              valueCl={st?.win_rate != null ? 'text-white' : 'text-slate-600'}
-              sub={`${st?.closed_trades ?? 0} closed all-time`} tip="Wins / closed trades" />
-            <KpiTile label="Open Positions" value={st?.open_trades ?? '—'} sub="actively monitored" />
-            <KpiTile label="Today" value={st?.today ? `${st.today.pnl >= 0 ? '+' : ''}${fmtK(st.today.pnl)}` : '—'}
-              valueCl={st?.today ? pnlCl(st.today.pnl) : 'text-slate-600'}
-              sub={st?.today ? `${st.today.trades} exits` : 'no exits today'} />
-            <KpiTile label="Cum P&L" value={st?.cum_pnl != null ? `${st.cum_pnl >= 0 ? '+' : ''}${fmtK(st.cum_pnl)}` : '—'}
-              valueCl={st?.cum_pnl != null ? pnlCl(st.cum_pnl) : 'text-slate-600'} sub="all-time realized" />
-          </FreshWrap>
-          )}
+          <OpenPositions rows={posRows} stratNames={stratNames} fresh={fPos} navigateToTab={navigateToTab} />
+        </div>
+        <div className="space-y-2.5 min-w-0">
+          <ActionRequired items={actionItems} fresh={fAttn} navigateToTab={navigateToTab} />
+          <Opportunities picks={oppPicks} positions={paperPos || []} orders={paperOrders} navigateToTab={navigateToTab} fresh={fOpps} />
         </div>
       </div>
-        );
-      })()}
 
-      {/* ZONE 4 — Regime Forecast + Top Opportunities, side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <RegimePanel fc={regimeFc} chg={regimeChg} fresh={fRegime} />
-        <Opportunities picks={oppPicks} positions={positions} orders={orders || []} navigateToTab={navigateToTab} fresh={fOpps} />
+      {/* 5 — Working orders + recent fills, compact side by side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+        <WorkingOrders orders={paperOrders} fresh={fOrders} navigateToTab={navigateToTab} />
+        <RecentFills trades={fills || []} fresh={fOrders} />
       </div>
 
-      {/* ZONE 5 — Order Book */}
-      <OrderBook orders={orders || []} fresh={fOrders} />
-
+      {/* 6 — Market context (compact regime forecast) */}
+      <MarketContext fc={regimeFc} chg={regimeChg} fresh={fRegime} />
     </div>
   );
 };
