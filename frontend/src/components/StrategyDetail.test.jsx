@@ -23,6 +23,7 @@ const baseEvaluation = {
   direction: 'Long',
   time_horizon: 'Medium-term',
   execution_mode: 'PAPER_TRADING',
+  book: 'paper',
   venue: 'HK Equities',
   assigned_capital: 100000,
   in_market_capital: 50000,
@@ -41,6 +42,100 @@ const baseEvaluation = {
   recent_signals: [],
   window_days: 30,
 };
+
+describe('StrategyDetail unified statistics panel', () => {
+  const richEvaluation = {
+    ...baseEvaluation,
+    book: 'paper',
+    metrics: {
+      backtest: { win_rate: 0.6389, profit_factor: 4.7674, sharpe: 2.2022, max_drawdown: -0.0662, total_trades: 36, total_return: 0.558, avg_holding_days: 75.1 },
+      live: { total_trades: 6, win_rate: 0.1667, profit_factor: 0.339, total_pnl: -6607.65, last_trade_at: '2026-10-02', first_trade_at: '2026-08-11', avg_holding_days: 20.8 },
+    },
+    metrics_by_mode: {
+      sim: { win_rate: 0.6389, profit_factor: 4.7674, sharpe: 2.2022, max_drawdown: -0.0662, total_trades: 36, total_return: 0.558, avg_holding_days: 75.1, total_pnl: null },
+      paper: { total_trades: 6, win_rate: 0.1667, profit_factor: 0.339, total_pnl: -6607.65, last_trade_at: '2026-10-02', first_trade_at: '2026-08-11', avg_holding_days: 20.8 },
+      uat: { total_fills: 0, total_trades: null, win_rate: null, profit_factor: null, total_pnl: null, last_trade_at: null },
+      live: { total_trades: 0, win_rate: null, profit_factor: null, total_pnl: null, last_trade_at: null },
+    },
+    divergence: { verdict: 'insufficient_live_data', win_rate_delta_pp: -47.22, profit_factor_delta: -4.428 },
+    monthly_returns: [{ year: 2026, month: 1, return: 0.068 }],
+    monthly_returns_paper: [{ year: 2026, month: 9, return: -0.05 }],
+    yearly_returns: { sim: { '2026': 0.1324 }, paper: { '2026': -0.0529 } },
+    equity_curve: [{ date: '2026-09-01', pnl: -1000, cum_pnl: -1000 }, { date: '2026-09-17', pnl: -5607.65, cum_pnl: -6607.65 }],
+    recent_trades: [],
+    backtest_trades: [],
+    paper_skips: [],
+    uat_fills: [],
+  };
+
+  it('renders SIM and PAPER KPIs simultaneously on first load — no toggle click required', async () => {
+    api.get.mockImplementation(async () => richEvaluation);
+    render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+
+    // SIM column (OOS backtest baseline)
+    expect(await screen.findByText('63.9%')).toBeTruthy();   // win rate
+    expect(screen.getByText('4.77')).toBeTruthy();           // profit factor
+    expect(screen.getByText('+55.8%')).toBeTruthy();         // OOS return
+    expect(screen.getByText('-6.6%')).toBeTruthy();          // max drawdown
+    expect(screen.getByText('2.20')).toBeTruthy();           // sharpe
+    expect(screen.getByText('75.1d')).toBeTruthy();          // avg hold
+
+    // PAPER column, same initial view, no click
+    expect(screen.getByText('16.7%')).toBeTruthy();          // win rate
+    expect(screen.getAllByText('$-6.6K').length).toBeGreaterThanOrEqual(1); // net P&L (table + curve header)
+    expect(screen.getByText('0.34')).toBeTruthy();           // profit factor
+    expect(screen.getByText('20.8d')).toBeTruthy();          // avg hold
+
+    // Delta column — win-rate difference in pp, profit factor arithmetic delta
+    expect(screen.getByText('-47.2pp')).toBeTruthy();
+    expect(screen.getByText('-4.43')).toBeTruthy();
+    expect(screen.getByText('-54.3d')).toBeTruthy();
+
+    // The old SIM/PAPER statistics-view toggle tiles are gone
+    expect(screen.queryByText('SIM · BACKTEST')).toBeNull();
+    expect(screen.queryByText('ACTIVE MODE')).toBeNull();
+    expect(screen.queryByText('stage not reached')).toBeNull();
+  });
+
+  it('renders — for missing paper metrics, never a fabricated zero or fake delta', async () => {
+    const emptyPaper = {
+      ...richEvaluation,
+      metrics_by_mode: {
+        ...richEvaluation.metrics_by_mode,
+        paper: { total_trades: 0, win_rate: null, profit_factor: null, total_pnl: null, last_trade_at: null },
+      },
+      metrics: { ...richEvaluation.metrics, live: { total_trades: 0, win_rate: null, profit_factor: null, total_pnl: 0.0, last_trade_at: null, first_trade_at: null, avg_holding_days: null } },
+      divergence: { verdict: 'insufficient_live_data', win_rate_delta_pp: null, profit_factor_delta: null },
+      monthly_returns_paper: [],
+      yearly_returns: { sim: { '2026': 0.1324 }, paper: {} },
+      equity_curve: [],
+    };
+    api.get.mockImplementation(async () => emptyPaper);
+    render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+
+    // SIM column still renders
+    expect(await screen.findByText('63.9%')).toBeTruthy();
+    // No pp delta and no fabricated $0 / 0.00 paper values
+    expect(screen.queryByText(/pp$/)).toBeNull();
+    expect(screen.queryByText('$0')).toBeNull();
+    expect(screen.queryByText('0.00')).toBeNull();
+  });
+
+  it('eagerly fetches the paper book for live-mode strategies so both ledgers are on screen', async () => {
+    const calls = [];
+    api.get.mockImplementation(async (url) => {
+      calls.push(url);
+      return {
+        ...richEvaluation,
+        book: url.includes('book=paper') ? 'paper' : 'live',
+        execution_mode: 'LIVE_TRADING',
+      };
+    });
+    render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+    await screen.findByText('63.9%');
+    expect(calls.some(u => u.includes('book=paper'))).toBe(true);
+  });
+});
 
 describe('StrategyDetail rebalances', () => {
   it('renders all SELL rows even when the same ticker trades multiple times on one day', async () => {
@@ -98,8 +193,8 @@ describe('StrategyDetail rebalances', () => {
     render(<StrategyDetail strategyId="HK_Quality_BlueChips" onBack={() => {}} />);
     fireEvent.click(await screen.findByText('Allocation (5)'));
 
-    // Date column shows the signal date (one per active signal).
-    expect(await screen.findAllByText('25/07/2026')).toHaveLength(5);
+    // Purchased column shows the ledger BUY date for the two held positions.
+    expect(await screen.findAllByText('24/07/2026')).toHaveLength(2);
 
     // P&L column is rendered for an active position with a live trade.
     expect(screen.getByText('+$230')).toBeTruthy(); // 0001.HK: 100 * (70.8 - 68.5)
@@ -109,14 +204,15 @@ describe('StrategyDetail rebalances', () => {
     expect(screen.getByText('5/5')).toBeTruthy();
   });
 
-  it('computes allocation P&L from the last BUY price even when the position is currently closed', async () => {
+  it('shows explicit zeros and a no-fill note for a signal whose position is currently flat', async () => {
     const signals = [
       { ticker: '0001.HK', signal: 'BUY', strength: 0.2, confidence: 0.8, price: 70.8, ts: '2026-07-25T15:16:33.589123' },
     ];
     const trades = [
+      // recent_trades arrives DESC by ts — the component walks it oldest→newest.
       // Position was bought and then fully sold, so net qty is 0.
-      { ts: '2026-07-24T10:00:00Z', ticker: '0001.HK', side: 'BUY', quantity: 100, price: 68.5, pnl: null, mode: 'PAPER' },
       { ts: '2026-07-24T11:00:00Z', ticker: '0001.HK', side: 'SELL', quantity: 100, price: 69.0, pnl: 50, mode: 'PAPER' },
+      { ts: '2026-07-24T10:00:00Z', ticker: '0001.HK', side: 'BUY', quantity: 100, price: 68.5, pnl: null, mode: 'PAPER' },
     ];
 
     api.get.mockImplementation(async (url) => {
@@ -138,10 +234,11 @@ describe('StrategyDetail rebalances', () => {
     render(<StrategyDetail strategyId="HK_Quality_BlueChips" onBack={() => {}} />);
     fireEvent.click(await screen.findByText('Allocation (1)'));
 
-    // Implied qty = round(0.2 * 100000 / 70.8) = 282.
-    // P&L = 282 * (70.8 - 68.5) = 648.6, formatted as +$649.
-    expect(screen.getByText('+$649')).toBeTruthy();
-    // The allocation table should show the whole-lot implied quantity.
-    expect(screen.getByText('282')).toBeTruthy();
+    // Position is flat (bought then fully sold): the row stays visible with
+    // explicit zeros and a factual no-fill note — never a hidden row and never
+    // an invented quantity or P&L.
+    expect(await screen.findByText('signal only · no fill')).toBeTruthy();
+    expect(screen.getAllByText('0%').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('$0').length).toBeGreaterThanOrEqual(1);
   });
 });
