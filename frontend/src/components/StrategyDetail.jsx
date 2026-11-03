@@ -374,54 +374,52 @@ const BookLedgerPanel = ({ label, source, payload, loading, isPaper, activeSigna
               {rebalances.length === 0 && (
                 <div className="py-6 text-center text-slate-600 text-[11px]">No rebalance history yet</div>
               )}
-              {rebalances.map((g) => {
-                const realized = g.sells.length > 0 ? g.pnl : null;
-                return (
-                  <div key={g.date} className="border-b border-white/[0.04] last:border-0">
-                    <div className="px-3 py-2 flex items-center justify-between bg-white/[0.02] sticky top-0">
-                      <div className="flex items-center gap-2">
-                        <span className="qr-num text-[11px] font-bold text-white">{new Date(g.date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit', year: '2-digit' })}</span>
-                        <span className="qr-label">Rebalance</span>
-                        <span className="qr-chip qr-chip-slate text-[9px]">-{g.sells.length} / +{g.buys.length}</span>
-                        {g.held.length > 0 && <span className="qr-chip qr-chip-slate text-[9px]">held {g.held.length}</span>}
-                      </div>
-                      <div className={`qr-num text-[11px] font-bold ${realized != null ? pnlCl(realized) : 'text-slate-500'}`}>{realized != null ? `${realized >= 0 ? '+' : ''}${fmtK(realized)}` : '—'}</div>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <tbody className="divide-y divide-white/[0.04]">
-                          {g.held.length > 0 && (
-                            <tr className="qr-tr-hover">
-                              <td className="py-1 px-2 qr-label text-[9px] text-slate-500 w-16">HELD</td>
-                              <td className="py-1 px-2 text-[10px] text-slate-300 font-mono" colSpan={6}>{g.held.join(' ')}</td>
-                            </tr>
-                          )}
-                          {g.sells.map((t, i) => (
-                            <tr key={`${t.ts}-${t.ticker}-sell-${i}`} className="qr-tr-hover">
-                              <td className="py-1 px-2 qr-label text-[9px] text-rose-400 w-16">SELL</td>
-                              <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{t.ticker}</td>
-                              <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.quantity, 0)}</td>
-                              <td className="py-1 px-2 qr-num text-slate-300 text-right">@{fmt(t.price)}</td>
-                              <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(t.pnl)}`}>{t.pnl != null ? fmtK(t.pnl) : '—'}</td>
-                              <td className="py-1 px-2 text-right text-[9px] text-slate-500 w-32">dropped from top 5</td>
-                            </tr>
-                          ))}
-                          {g.buys.map((t, i) => (
-                            <tr key={`${t.ts}-${t.ticker}-buy-${i}`} className="qr-tr-hover">
-                              <td className="py-1 px-2 qr-label text-[9px] text-emerald-400 w-16">BUY</td>
-                              <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{t.ticker}</td>
-                              <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.quantity, 0)}</td>
-                              <td className="py-1 px-2 qr-num text-slate-300 text-right">@{fmt(t.price)}</td>
-                              <td className="py-1 px-2 qr-num text-right text-slate-500">—</td>
-                              <td className="py-1 px-2 text-right text-[9px] text-slate-500 w-32">entered top 5</td>
+              {rebalances.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-slate-900 z-10">
+                      <tr className="border-b border-white/[0.06]">
+                        <th className="qr-label text-left py-1 px-2">Date</th>
+                        <th className="qr-label text-left py-1 px-2">Side</th>
+                        <th className="qr-label text-left py-1 px-2">Symbol</th>
+                        <th className="qr-label text-right py-1 px-2">Qty</th>
+                        <th className="qr-label text-right py-1 px-2">Price</th>
+                        <th className="qr-label text-right py-1 px-2">Realized P&L</th>
+                        <th className="qr-label text-right py-1 px-2">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rebalances.map((g) => (
+                        <React.Fragment key={g.date}>
+                          {/* sells first, then buys — same intra-day order as before */}
+                          {[...g.sells, ...g.buys].map((t, i) => (
+                            <tr key={`${t.ts}-${t.ticker}-${i}`} className={`qr-tr-hover border-t border-white/[0.04] ${t.non_strategy ? 'opacity-50' : ''}`} title={t.non_strategy ? `Non-strategy bookkeeping — ${t.non_strategy_label?.skip_kind || 'cleanse closure'}${t.non_strategy_label?.reason ? `: ${t.non_strategy_label.reason}` : ''} · excluded from all performance figures` : undefined}>
+                              <td className="py-0.5 px-2 qr-num text-slate-300 text-[10px] whitespace-nowrap">{t.ts ? t.ts.slice(0, 10) : '—'}</td>
+                              <td className="py-0.5 px-2">
+                                <span className={`qr-chip ${t.side === 'BUY' || t.side === 'LONG' ? 'qr-chip-emerald' : 'qr-chip-rose'}`}>{t.side}</span>
+                              </td>
+                              <td className="py-0.5 px-2 text-white text-[11px] font-mono">{t.ticker}{t.non_strategy && <span className="qr-chip qr-chip-slate text-[8px] ml-1" title="Cleanse-closure leg — excluded from strategy performance">bookkeeping</span>}</td>
+                              <td className="py-0.5 px-2 qr-num text-slate-300 text-right">{fmt(t.quantity, 0)}</td>
+                              <td className="py-0.5 px-2 qr-num text-slate-300 text-right">{fmt(t.price)}</td>
+                              <td className={`py-0.5 px-2 qr-num text-right font-bold ${pnlCl(t.pnl)}`}>{t.pnl != null ? fmtK(t.pnl) : '—'}</td>
+                              <td className="py-0.5 px-2 text-right text-[9px] text-slate-500">{t.side === 'SELL' ? 'dropped from top 5' : 'entered top 5'}</td>
                             </tr>
                           ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                );
-              })}
+                          {/* small secondary per-date summary — never a heading,
+                              the leftmost DATE column carries the date */}
+                          <tr className="border-t border-white/[0.04]">
+                            <td colSpan={7} className="py-0.5 px-2 text-[9px] text-slate-600 text-right whitespace-nowrap overflow-hidden text-ellipsis max-w-[320px]" title={g.held.length ? `Held into next session: ${g.held.join(' ')}` : undefined}>
+                              -{g.sells.length} / +{g.buys.length}
+                              {g.sells.length > 0 && <> · realized <span className={pnlCl(g.pnl)}>{g.pnl >= 0 ? '+' : ''}{fmtK(g.pnl)}</span></>}
+                              {g.held.length > 0 && <> · held {g.held.join(' ')}</>}
+                            </td>
+                          </tr>
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -584,37 +582,51 @@ const SimLedgerPanel = ({ trades, rebalances, open, strategyId, simBuyWatch, act
           {rebalances.length === 0 && (
             <div className="py-6 text-center text-slate-600 text-[11px] px-4">No per-trade backtest records — this strategy's backtest stored aggregate metrics only</div>
           )}
-          {rebalances.map((g) => {
-            const pnls = g.closed.map(t => t.pnl_pct).filter(v => v != null);
-            const avg = pnls.length ? pnls.reduce((s, v) => s + v, 0) / pnls.length : null;
-            return (
-              <div key={g.date} className="border-b border-white/[0.04] last:border-0">
-                <div className="px-3 py-2 flex items-center justify-between bg-white/[0.02] sticky top-0">
-                  <div className="flex items-center gap-2">
-                    <span className="qr-num text-[11px] font-bold text-white">{new Date(g.date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit', year: '2-digit' })}</span>
-                    <span className="qr-chip qr-chip-slate text-[9px]">{g.closed.length} closed</span>
-                  </div>
-                  <div className={`qr-num text-[11px] font-bold ${avg != null ? pnlCl(avg) : 'text-slate-500'}`}>{avg != null ? `${avg >= 0 ? '+' : ''}${(avg * 100).toFixed(1)}% avg` : '—'}</div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <tbody className="divide-y divide-white/[0.04]">
-                      {g.closed.map((t, i) => (
-                        <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
-                          <td className="py-1 px-2 text-white text-[11px] font-mono w-20">{t.ticker}</td>
-                          <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date ? new Date(t.entry_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : '—'} → {t.exit_date ? new Date(t.exit_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : 'open'}</td>
-                          <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
-                          <td className="py-1 px-2 qr-num text-slate-300 text-right">→ {fmt(t.exit_price)}</td>
-                          <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(t.pnl_pct)}`}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${(t.pnl_pct * 100).toFixed(1)}%` : '—'}</td>
-                          <td className="py-1 px-2 text-right text-[9px] text-slate-500 w-28">{t.exit_reason || '—'}</td>
+          {rebalances.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-slate-900 z-10">
+                  <tr className="border-b border-white/[0.06]">
+                    <th className="qr-label text-left py-1 px-2">Date</th>
+                    <th className="qr-label text-left py-1 px-2">Symbol</th>
+                    <th className="qr-label text-left py-1 px-2">Entry → Exit</th>
+                    <th className="qr-label text-right py-1 px-2">Entry px</th>
+                    <th className="qr-label text-right py-1 px-2">Exit px</th>
+                    <th className="qr-label text-right py-1 px-2">Return</th>
+                    <th className="qr-label text-right py-1 px-2">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rebalances.map((g) => {
+                    const pnls = g.closed.map(t => t.pnl_pct).filter(v => v != null);
+                    const avg = pnls.length ? pnls.reduce((s, v) => s + v, 0) / pnls.length : null;
+                    return (
+                      <React.Fragment key={g.date}>
+                        {g.closed.map((t, i) => (
+                          <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover border-t border-white/[0.04]">
+                            <td className="py-0.5 px-2 qr-num text-slate-300 text-[10px] whitespace-nowrap">{t.exit_date.slice(0, 10)}</td>
+                            <td className="py-0.5 px-2 text-white text-[11px] font-mono">{t.ticker}</td>
+                            <td className="py-0.5 px-2 qr-num text-slate-400 text-[10px] whitespace-nowrap">{t.entry_date ? new Date(t.entry_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : '—'} → {t.exit_date ? new Date(t.exit_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : 'open'}</td>
+                            <td className="py-0.5 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
+                            <td className="py-0.5 px-2 qr-num text-slate-300 text-right">{fmt(t.exit_price)}</td>
+                            <td className={`py-0.5 px-2 qr-num text-right font-bold ${pnlCl(t.pnl_pct)}`}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${(t.pnl_pct * 100).toFixed(1)}%` : '—'}</td>
+                            <td className="py-0.5 px-2 text-right text-[9px] text-slate-500">{t.exit_reason || '—'}</td>
+                          </tr>
+                        ))}
+                        {/* small secondary per-date summary — never a heading,
+                            the leftmost DATE column carries the date */}
+                        <tr className="border-t border-white/[0.04]">
+                          <td colSpan={7} className="py-0.5 px-2 text-[9px] text-slate-600 text-right">
+                            {g.closed.length} closed{avg != null && <> · avg <span className={pnlCl(avg)}>{avg >= 0 ? '+' : ''}{(avg * 100).toFixed(1)}%</span></>}
+                          </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

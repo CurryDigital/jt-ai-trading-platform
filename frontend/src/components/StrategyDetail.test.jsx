@@ -245,9 +245,36 @@ describe('StrategyDetail rebalances', () => {
 
     render(<StrategyDetail strategyId="HK_Quality_BlueChips" onBack={() => {}} />);
 
-    await screen.findByText('02/08/21');
+    await screen.findAllByText('2021-08-02');
     const sellRows = screen.getAllByText('SELL');
     expect(sellRows.length).toBe(10);
+  });
+
+  it('rebalances rows are date-first YYYY-MM-DD and drop no ledger records', async () => {
+    const sells = [
+      { ts: '2021-08-02', ticker: '0006.HK', side: 'SELL', quantity: 410, price: 39.21, pnl: 704.64, mode: 'PAPER' },
+      { ts: '2021-08-02', ticker: '0001.HK', side: 'SELL', quantity: 321, price: 45.34, pnl: -799.92, mode: 'PAPER' },
+      { ts: '2021-08-03', ticker: '0016.HK', side: 'SELL', quantity: 168, price: 89.19, pnl: -1062.39, mode: 'PAPER' },
+      { ts: '2021-08-03', ticker: '0700.HK', side: 'BUY', quantity: 100, price: 500.0, pnl: null, mode: 'PAPER' },
+    ];
+    api.get.mockImplementation(async () => ({ ...baseEvaluation, recent_trades: sells }));
+    const { container } = render(<StrategyDetail strategyId="HK_Quality_BlueChips" onBack={() => {}} />);
+    await screen.findAllByText('2021-08-02');
+
+    // Paper ledger is the default rebalances view — 4 trade rows, each with
+    // the date as the leftmost cell in YYYY-MM-DD form.
+    const paperPanel = [...container.querySelectorAll('.qr-surface')].find(e => e.textContent.includes('Paper ledger'));
+    const rows = [...paperPanel.querySelectorAll('tbody tr')].filter(r => r.querySelectorAll('td').length === 7);
+    expect(rows.length).toBe(4);
+    for (const r of rows) {
+      expect(r.children[0].textContent).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+    // Newest date first, sells before buys within a day
+    const dates = rows.map(r => r.children[0].textContent);
+    expect(dates).toEqual(['2021-08-03', '2021-08-03', '2021-08-02', '2021-08-02']);
+    // Small secondary summary rows carry counts, not headings
+    expect(paperPanel.textContent).toContain('-1 / +1');
+    expect(paperPanel.textContent).toContain('-2 / +0');
   });
 
   it('shows the allocation date, P&L and active position count', async () => {
