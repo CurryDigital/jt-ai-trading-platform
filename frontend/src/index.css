@@ -491,6 +491,32 @@ body {
   min-width: 0;
 }
 
+/* Strategy detail: mirrored SIM (left) / PAPER (right) analytics columns.
+   Desktop (>=1280px): two equal columns; corresponding sections share grid
+   rows via subgrid so SIM stats sit beside PAPER stats, chart beside chart,
+   returns beside returns, ledger beside ledger. Below 1280px the columns
+   stack — complete SIM column first, then the complete PAPER column. */
+.sd-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.sd-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  align-content: start;
+}
+@media (min-width: 1280px) {
+  .sd-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .sd-col {
+    grid-template-rows: subgrid;
+    /* spans every section row of the split grid (header + 4 sections) */
+    grid-row: span 5;
+  }
+}
+
 /* Bottom nav for mobile */
 .bottom-nav {
   @apply fixed bottom-0 left-0 right-0 z-50 bg-slate-950/95 backdrop-blur-xl border-t border-white/5;

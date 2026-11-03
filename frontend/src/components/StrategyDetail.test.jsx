@@ -43,7 +43,7 @@ const baseEvaluation = {
   window_days: 30,
 };
 
-describe('StrategyDetail unified statistics panel', () => {
+describe('StrategyDetail parallel SIM/PAPER layout', () => {
   const richEvaluation = {
     ...baseEvaluation,
     book: 'paper',
@@ -82,19 +82,53 @@ describe('StrategyDetail unified statistics panel', () => {
 
     // PAPER column, same initial view, no click
     expect(screen.getByText('16.7%')).toBeTruthy();          // win rate
-    expect(screen.getAllByText('$-6.6K').length).toBeGreaterThanOrEqual(1); // net P&L (table + curve header)
+    expect(screen.getAllByText('$-6.6K').length).toBeGreaterThanOrEqual(1); // net P&L (stats + curve header)
     expect(screen.getByText('0.34')).toBeTruthy();           // profit factor
     expect(screen.getByText('20.8d')).toBeTruthy();          // avg hold
-
-    // Delta column — win-rate difference in pp, profit factor arithmetic delta
-    expect(screen.getByText('-47.2pp')).toBeTruthy();
-    expect(screen.getByText('-4.43')).toBeTruthy();
-    expect(screen.getByText('-54.3d')).toBeTruthy();
 
     // The old SIM/PAPER statistics-view toggle tiles are gone
     expect(screen.queryByText('SIM · BACKTEST')).toBeNull();
     expect(screen.queryByText('ACTIVE MODE')).toBeNull();
     expect(screen.queryByText('stage not reached')).toBeNull();
+  });
+
+  it('lays SIM and PAPER out as parallel columns — stats, returns and ledgers mirrored in the same order', async () => {
+    api.get.mockImplementation(async () => richEvaluation);
+    const { container } = render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+    await screen.findByText('63.9%');
+
+    const cols = container.querySelectorAll('.sd-split > .sd-col');
+    expect(cols.length).toBe(2);
+
+    // LEFT = SIM / BACKTEST, RIGHT = PAPER
+    expect(cols[0].textContent).toContain('SIM / BACKTEST');
+    expect(cols[1].textContent).toContain('PAPER');
+    expect(cols[0].textContent.indexOf('PAPER')).toBe(-1);
+
+    // Each column carries its own ledger
+    expect(cols[0].textContent).toContain('Simulation ledger');
+    expect(cols[1].textContent).toContain('Paper ledger');
+
+    // SIM has no served equity series — an honest empty state holds the slot
+    expect(cols[0].textContent).toContain('No equity time series is served for SIM backtests');
+
+    // Same metric order in both statistics panels
+    const metricLabels = ['OOS Return', 'Net P&L', 'Win Rate', 'Profit Factor', 'Max Drawdown', 'Sharpe', 'Closed Trades', 'Avg Hold', 'Last Trade'];
+    for (const col of cols) {
+      const panel = col.querySelector('.qr-surface');
+      const positions = metricLabels.map(l => panel.textContent.indexOf(l));
+      expect(positions.every(p => p >= 0)).toBe(true);
+      const sorted = [...positions].sort((a, b) => a - b);
+      expect(positions).toEqual(sorted);
+    }
+
+    // Metrics unavailable for a book keep their slot as '—', never fabricated
+    expect(cols[0].textContent).not.toContain('$-6.6K'); // paper P&L never leaks into the SIM column
+    expect(cols[1].textContent).not.toContain('+55.8%'); // SIM return never leaks into the PAPER column
+
+    // No combined Δ comparison column anywhere
+    expect(screen.queryByText('-47.2pp')).toBeNull();
+    expect(screen.queryByText('-54.3d')).toBeNull();
   });
 
   it('renders — for missing paper metrics, never a fabricated zero or fake delta', async () => {
@@ -111,12 +145,16 @@ describe('StrategyDetail unified statistics panel', () => {
       equity_curve: [],
     };
     api.get.mockImplementation(async () => emptyPaper);
-    render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
+    const { container } = render(<StrategyDetail strategyId="ETF_Multi_Asset_Tactical_Allocation" onBack={() => {}} />);
 
     // SIM column still renders
     expect(await screen.findByText('63.9%')).toBeTruthy();
-    // No pp delta and no fabricated $0 / 0.00 paper values
-    expect(screen.queryByText(/pp$/)).toBeNull();
+    // PAPER column is preserved (not collapsed/expanded away) with empty states
+    const cols = container.querySelectorAll('.sd-split > .sd-col');
+    expect(cols.length).toBe(2);
+    expect(cols[1].textContent).toContain('PAPER');
+    expect(cols[1].textContent).toContain('No closed paper trades yet');
+    // No fabricated $0 / 0.00 paper values
     expect(screen.queryByText('$0')).toBeNull();
     expect(screen.queryByText('0.00')).toBeNull();
   });

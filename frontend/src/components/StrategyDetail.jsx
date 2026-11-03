@@ -195,19 +195,57 @@ const fmtDollar = (v) => {
   return v != null && Number.isFinite(n) ? `$${Math.round(n).toLocaleString('en-US')}` : null;
 };
 
-// Unified statistics row ---------------------------------------------------
-// One row of the SIM-vs-PAPER comparison table. Every value is rendered from
-// the evaluation payload verbatim (formatting only) — nothing is summed or
-// averaged across the two evidence classes, and missing data renders '—'
-// with the reason in the tooltip, never a fabricated zero.
-const CmpRow = ({ label, tip, simText, simCl, simTip, paperText, paperCl, paperTip, deltaText, deltaCl, deltaTip }) => (
-  <tr className="border-t border-white/[0.04]">
-    <td className="py-1.5 px-2 sm:px-3 text-[10px] text-slate-400 whitespace-nowrap" title={tip}>{label}</td>
-    <td className={`py-1.5 px-2 sm:px-3 qr-num text-[12px] font-bold whitespace-nowrap ${simText == null ? 'text-slate-600' : simCl || 'text-slate-200'}`} title={simTip}>{simText ?? '—'}</td>
-    <td className={`py-1.5 px-2 sm:px-3 qr-num text-[12px] font-bold whitespace-nowrap ${paperText == null ? 'text-slate-600' : paperCl || 'text-slate-200'}`} title={paperTip}>{paperText ?? '—'}</td>
-    <td className={`py-1.5 px-2 sm:px-3 qr-num text-[11px] whitespace-nowrap ${deltaText == null ? 'text-slate-600' : deltaCl || 'text-slate-300'}`} title={deltaTip}>{deltaText ?? '—'}</td>
-  </tr>
+// Compact KPI statistics panel (one per evidence book) ----------------------
+// Short label/value rows (~30px), numbers tabular and right-aligned inside a
+// narrow local group — values stay close to their labels, never spread across
+// a wide card. The two groups sit side by side when the panel is wide enough.
+// Every value is rendered from the evaluation payload verbatim (formatting
+// only) — nothing is summed or averaged across books, and a metric the API
+// does not serve for a book renders '—' with the reason in the tooltip,
+// never a fabricated value. Both columns share METRIC_SPEC ordering.
+const KpiRow = ({ label, tip, value, valueCl, valueTip }) => (
+  <div className="flex items-baseline justify-between gap-2 px-2 py-[5px] min-h-[30px] border-t border-white/[0.04] first:border-t-0" title={tip}>
+    <span className="text-[10px] text-slate-400 whitespace-nowrap">{label}</span>
+    <span className={`qr-num text-[12px] font-semibold whitespace-nowrap ${value == null ? 'text-slate-600' : valueCl || 'text-slate-200'}`} title={valueTip}>{value ?? '—'}</span>
+  </div>
 );
+
+const BookStatsPanel = ({ heading, source, items, badge }) => {
+  const half = Math.ceil(items.length / 2);
+  const groups = [items.slice(0, half), items.slice(half)];
+  return (
+    <div className="qr-surface overflow-hidden">
+      <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
+        <span className="qr-label" title={source}>{heading}</span>
+        {badge}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 px-1 py-1">
+        {groups.map((g, gi) => (
+          <div key={gi} className="min-w-0">
+            {g.map(it => (
+              <KpiRow key={it.label} label={it.label} tip={it.tip} value={it.value} valueCl={it.valueCl} valueTip={it.valueTip} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Shared metric ordering for the SIM and PAPER statistics panels. A book
+// that cannot serve a metric keeps its slot and shows '—' so the rows line
+// up when scanning horizontally across the two columns.
+const METRIC_SPEC = [
+  { key: 'total_return',     label: 'OOS Return' },
+  { key: 'total_pnl',        label: 'Net P&L' },
+  { key: 'win_rate',         label: 'Win Rate' },
+  { key: 'profit_factor',    label: 'Profit Factor' },
+  { key: 'max_drawdown',     label: 'Max Drawdown' },
+  { key: 'sharpe',           label: 'Sharpe' },
+  { key: 'total_trades',     label: 'Closed Trades' },
+  { key: 'avg_holding_days', label: 'Avg Hold' },
+  { key: 'last_trade_at',    label: 'Last Trade' },
+];
 
 // One book's ledger panel (paper or live) ----------------------------------
 // Extracted from the old mode-toggle view so BOTH ledgers can stay on screen
@@ -481,13 +519,232 @@ const BookLedgerPanel = ({ label, source, payload, loading, isPaper, activeSigna
   );
 };
 
+// Simulation ledger panel ---------------------------------------------------
+// Per-trade OOS backtest records (gold.strategy_backtest_trades). Mirrors the
+// paper BookLedgerPanel anatomy — own sub-tab state, same tab order — so the
+// two ledgers can sit beside each other as parallel columns.
+const SimLedgerPanel = ({ trades, rebalances, open, strategyId, simBuyWatch, activeSignals }) => {
+  const [tab, setTab] = useState('rebalances');
+  const isIpo = strategyId.startsWith('hk_ipo');
+  return (
+    <div className="qr-surface overflow-hidden">
+      <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
+        <span className="qr-label" title="gold.strategy_backtest_trades · OOS rows of the latest run">Simulation ledger · OOS backtest</span>
+        <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(trades || []).length} trades</span>
+      </div>
+      <div className="px-3 py-1 border-b border-white/[0.05] flex items-center gap-1 flex-wrap">
+        {[
+          { id: 'rebalances', label: `Rebalances (${rebalances.length})` },
+          { id: 'allocation', label: `Allocation (${open.length})` },
+          { id: 'trades',     label: `Ledger (${(trades || []).length})` },
+          { id: 'signals',    label: `Signals (${isIpo ? (simBuyWatch || []).length : activeSignals.length})` },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors ${tab === t.id ? 'bg-white/[0.08] text-white' : 'text-slate-400 hover:text-slate-200'}`}
+          >{t.label}</button>
+        ))}
+      </div>
+
+      {tab === 'rebalances' && (
+        <div className="max-h-[520px] overflow-auto">
+          {rebalances.length === 0 && (
+            <div className="py-6 text-center text-slate-600 text-[11px] px-4">No per-trade backtest records — this strategy's backtest stored aggregate metrics only</div>
+          )}
+          {rebalances.map((g) => {
+            const pnls = g.closed.map(t => t.pnl_pct).filter(v => v != null);
+            const avg = pnls.length ? pnls.reduce((s, v) => s + v, 0) / pnls.length : null;
+            return (
+              <div key={g.date} className="border-b border-white/[0.04] last:border-0">
+                <div className="px-3 py-2 flex items-center justify-between bg-white/[0.02] sticky top-0">
+                  <div className="flex items-center gap-2">
+                    <span className="qr-num text-[11px] font-bold text-white">{new Date(g.date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit', year: '2-digit' })}</span>
+                    <span className="qr-chip qr-chip-slate text-[9px]">{g.closed.length} closed</span>
+                  </div>
+                  <div className={`qr-num text-[11px] font-bold ${avg != null ? pnlCl(avg) : 'text-slate-500'}`}>{avg != null ? `${avg >= 0 ? '+' : ''}${(avg * 100).toFixed(1)}% avg` : '—'}</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {g.closed.map((t, i) => (
+                        <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
+                          <td className="py-1 px-2 text-white text-[11px] font-mono w-20">{t.ticker}</td>
+                          <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date ? new Date(t.entry_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : '—'} → {t.exit_date ? new Date(t.exit_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : 'open'}</td>
+                          <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
+                          <td className="py-1 px-2 qr-num text-slate-300 text-right">→ {fmt(t.exit_price)}</td>
+                          <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(t.pnl_pct)}`}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${(t.pnl_pct * 100).toFixed(1)}%` : '—'}</td>
+                          <td className="py-1 px-2 text-right text-[9px] text-slate-500 w-28">{t.exit_reason || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'allocation' && (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="sticky top-0 bg-slate-900 z-10">
+              <tr className="border-b border-white/[0.06]">
+                <th className="qr-label text-left py-1 px-2">Ticker</th>
+                <th className="qr-label text-right py-1 px-2">Entry</th>
+                <th className="qr-label text-right py-1 px-2">Entry px</th>
+                <th className="qr-label text-right py-1 px-2" title="Latest close (silver.unified_prices, gold.daily_ohlcv fallback)">Current px</th>
+                <th className="qr-label text-right py-1 px-2" title="Calendar days held at the backtest as-of date">Days</th>
+                <th className="qr-label text-right py-1 px-2" title="Open positions: unrealized P&L marked to the latest close (◦)">P&L %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.04]">
+              {open.map((t, i) => (
+                <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
+                  <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{t.ticker}</td>
+                  <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300 text-right" title={t.current_price_date ? `Close ${t.current_price_date} · ${t.price_source || ''}` : undefined}>{t.current_price != null ? fmt(t.current_price) : '—'}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
+                  <td className={`py-1 px-2 qr-num text-right font-bold ${t.unrealized_pnl_pct != null ? pnlCl(t.unrealized_pnl_pct) : 'text-slate-500'}`} title={t.unrealized_pnl_pct != null ? `Unrealized — marked to latest close ${t.current_price_date || ''}` : 'No current price available'}>{t.unrealized_pnl_pct != null ? `${t.unrealized_pnl_pct >= 0 ? '+' : ''}${(t.unrealized_pnl_pct * 100).toFixed(1)}% ◦` : 'open'}</td>
+                </tr>
+              ))}
+              {!open.length && (
+                <tr><td colSpan={6} className="py-6 text-center text-slate-600 text-[11px]">No open positions — every OOS backtest trade is closed</td></tr>
+              )}
+            </tbody>
+          </table>
+          {open.length > 0 && (
+            <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
+              Open at the OOS backtest as-of date · days held measured to that date · ◦ = unrealized, marked to the latest close
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'trades' && (
+        <div className="overflow-x-auto max-h-[520px] overflow-auto">
+          <table className="w-full">
+            <thead className="sticky top-0 bg-slate-900 z-10">
+              <tr className="border-b border-white/[0.06]">
+                <th className="qr-label text-right py-1 px-2">Entry</th>
+                <th className="qr-label text-right py-1 px-2">Exit</th>
+                <th className="qr-label text-left py-1 px-2">Ticker</th>
+                <th className="qr-label text-right py-1 px-2">Entry px</th>
+                <th className="qr-label text-right py-1 px-2">Exit px</th>
+                <th className="qr-label text-right py-1 px-2">P&L %</th>
+                <th className="qr-label text-right py-1 px-2">Days</th>
+                <th className="qr-label text-right py-1 px-2">Reason</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.04]">
+              {(trades || []).map((t, i) => {
+                const mtmPnl = t.pnl_pct != null ? t.pnl_pct : t.unrealized_pnl_pct;
+                const isMtm = t.pnl_pct == null && t.unrealized_pnl_pct != null;
+                return (
+                <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
+                  <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
+                  <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.exit_date || 'open'}</td>
+                  <td className="py-1 px-2 text-white text-[11px] font-mono">{t.ticker}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300 text-right" title={isMtm && t.current_price_date ? `Latest close ${t.current_price_date} · ${t.price_source || ''}` : undefined}>{t.exit_price != null ? fmt(t.exit_price) : (t.current_price != null ? `${fmt(t.current_price)} ◦` : '—')}</td>
+                  <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(mtmPnl)}`} title={isMtm ? `Unrealized — marked to latest close ${t.current_price_date || ''}` : undefined}>{mtmPnl != null ? `${mtmPnl >= 0 ? '+' : ''}${(mtmPnl * 100).toFixed(1)}%${isMtm ? ' ◦' : ''}` : '—'}</td>
+                  <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
+                  <td className="py-1 px-2 text-right text-[9px] text-slate-500">{t.exit_reason || '—'}</td>
+                </tr>
+                );
+              })}
+              {!(trades || []).length && (
+                <tr><td colSpan={8} className="py-6 text-center text-slate-600 text-[11px]">No per-trade backtest records</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'signals' && (
+        isIpo ? (
+          <div className="overflow-x-auto max-h-[520px] overflow-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-slate-900 z-10">
+                <tr className="border-b border-white/[0.06]">
+                  <th className="qr-label text-left py-1 px-2">Decision</th>
+                  <th className="qr-label text-left py-1 px-2">Ticker</th>
+                  <th className="qr-label text-left py-1 px-2">Name</th>
+                  <th className="qr-label text-right py-1 px-2">Listing</th>
+                  <th className="qr-label text-right py-1 px-2" title="20th trading day after listing (measured close date; calendar estimate until then)">Entry +20td</th>
+                  <th className="qr-label text-right py-1 px-2">Exit +40td</th>
+                  <th className="qr-label text-right py-1 px-2" title="Retail oversubscription — the 100–500x band is the trade filter">Oversub</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.04]">
+                {(simBuyWatch || []).map((r, i) => (
+                  <tr key={`${r.ticker}-${i}`} className="qr-tr-hover">
+                    <td className="py-1 px-2 w-40">
+                      <span className={`text-[10px] font-bold ${r.word === 'BUY ON' || r.word === 'ENTERED' ? 'text-white' : r.word === 'WATCH' ? 'text-slate-400' : 'text-slate-600'}`}>{r.word}</span>
+                      <span className="block text-[9px] text-slate-500">{r.sub}</span>
+                    </td>
+                    <td className="py-1 px-2 text-white text-[11px] font-mono w-20">{r.ticker}</td>
+                    <td className="py-1 px-2 text-slate-300 text-[10px] max-w-[180px] truncate" title={r.name}>{r.name || '—'}</td>
+                    <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{r.listing}</td>
+                    <td className="py-1 px-2 qr-num text-slate-300 text-[10px]">{r.entry}</td>
+                    <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{r.exit}</td>
+                    <td className="py-1 px-2 qr-num text-slate-300 text-right">{r.oversub != null ? `${Math.round(r.oversub)}x` : '—'}</td>
+                  </tr>
+                ))}
+                {simBuyWatch && !simBuyWatch.length && (
+                  <tr><td colSpan={7} className="py-6 text-center text-slate-600 text-[11px]">No IPOs in an entry window — nothing to buy or queue right now</td></tr>
+                )}
+                {!simBuyWatch && (
+                  <tr><td colSpan={7} className="py-6 text-center text-slate-600 text-[11px]">Loading IPO calendar…</td></tr>
+                )}
+              </tbody>
+            </table>
+            <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
+              RULE MIRROR of the documented entry rule (oversub 100–500x · D1 close ≥ offer · entry px 0.9–1.3× D1 close · enter +20td, hold 20td) over /api/hkex/ipos — not an engine signal. The 0.9–1.3× D1-close band decides at the entry close; slot cap not modelled.
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto max-h-[520px] overflow-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-slate-900 z-10">
+                <tr className="border-b border-white/[0.06]">
+                  <th className="qr-label text-left py-1 px-2">Ticker</th>
+                  <th className="qr-label text-left py-1 px-2">Signal</th>
+                  <th className="qr-label text-right py-1 px-2">Strength</th>
+                  <th className="qr-label text-right py-1 px-2">Price</th>
+                  <th className="qr-label text-right py-1 px-2">As of</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.04]">
+                {activeSignals.map((s, i) => (
+                  <tr key={`${s.ticker}-${i}`} className="qr-tr-hover">
+                    <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{s.ticker}</td>
+                    <td className="py-1 px-2 text-white text-[10px] font-bold">{s.signal}</td>
+                    <td className="py-1 px-2 qr-num text-slate-300 text-right">{s.strength != null ? Number(s.strength).toFixed(2) : '—'}</td>
+                    <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(s.price)}</td>
+                    <td className="py-1 px-2 qr-num text-slate-500 text-right text-[10px]">{s.ts ? fmtAge(s.ts) : '—'}</td>
+                  </tr>
+                ))}
+                {!activeSignals.length && (
+                  <tr><td colSpan={5} className="py-6 text-center text-slate-600 text-[11px]">No current BUY signals from the engine (consumption.strategies_signals_current)</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+};
+
 // Main component --------------------------------------------------------
 export const StrategyDetail = ({ strategyId, onBack }) => {
   const [data, setData] = useState(null);        // book=auto payload (header, signals, sim, strip)
   const [altBooks, setAltBooks] = useState({});  // { paper|live: payload } for the non-auto ledger
   const [loading, setLoading] = useState(true);
   const [bookLoading, setBookLoading] = useState(false);
-  const [simTab, setSimTab] = useState('rebalances');
   const [ipoWatch, setIpoWatch] = useState(null);  // HK IPO rule-mirror forward watchlist feed
   const [refreshedAt, setRefreshedAt] = useState(null);
   const altRef = useRef({});
@@ -729,20 +986,6 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
     // payload's live block (gold.paper_trades_synthetic closed round-trips).
     const paperAvgHold = paperM.avg_holding_days ?? (paperPayload && paperPayload.metrics && paperPayload.metrics.live && paperPayload.metrics.live.avg_holding_days);
 
-    // Δ column — Paper − SIM, only where the two values are directly
-    // comparable. Win-rate and profit-factor deltas are served by the backend
-    // (divergence.*) when paper is the auto book; otherwise derived from the
-    // two served values on screen. Counts/returns get no delta: different
-    // sample windows make the arithmetic meaningless.
-    const div = data.divergence || {};
-    const wrDelta = (data.book === 'paper' && div.win_rate_delta_pp != null)
-      ? div.win_rate_delta_pp
-      : (paperM.win_rate != null && simM.win_rate != null ? (paperM.win_rate - simM.win_rate) * 100 : null);
-    const pfDelta = (data.book === 'paper' && div.profit_factor_delta != null)
-      ? div.profit_factor_delta
-      : (paperM.profit_factor != null && simM.profit_factor != null ? paperM.profit_factor - simM.profit_factor : null);
-    const holdDelta = (paperAvgHold != null && simM.avg_holding_days != null) ? paperAvgHold - simM.avg_holding_days : null;
-
     // Value formatters — fixed units per field, never magnitude-sniffed.
     // SIM metrics arrive as fractions; paper P&L arrives in dollars.
     const pctText = (v) => (v != null ? `${(v * 100).toFixed(1)}%` : null);
@@ -751,6 +994,45 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
 
     const uatHas = (uatM.total_fills || 0) > 0 || execMode.includes('UAT');
     const liveHas = (liveM.total_trades || 0) > 0 || execMode === 'LIVE_TRADING';
+
+    // Per-book KPI items, both columns in METRIC_SPEC order. A metric the API
+    // does not serve for a book renders '—' with the reason in the tooltip —
+    // never fabricated, never reordered.
+    const KPI_TIP = {
+      total_return: 'Total out-of-sample backtest return (fraction → %)',
+      total_pnl: 'Realized net P&L in dollars',
+      win_rate: 'Closed-trade win rate (fraction → %)',
+      profit_factor: 'Gross win ÷ gross loss over closed trades',
+      max_drawdown: 'OOS backtest max drawdown (fraction → %)',
+      sharpe: 'OOS backtest Sharpe ratio',
+      total_trades: 'SIM: OOS backtest trades · Paper: closed round-trips — different sample windows',
+      avg_holding_days: 'Average holding period of closed trades (calendar days)',
+      last_trade_at: 'Most recent closed trade in the book',
+    };
+    const simValues = {
+      total_return: { value: signedPctText(simM.total_return), valueCl: pnlCl(simM.total_return), valueTip: 'OOS backtest total return · gold.strategy_backtest_runs (fraction → %)' },
+      total_pnl: { value: null, valueTip: 'Backtests store per-trade pnl_pct, not dollars — no $ P&L exists for SIM' },
+      win_rate: { value: pctText(simM.win_rate), valueTip: 'OOS backtest win rate (fraction → %)' },
+      profit_factor: { value: simM.profit_factor != null ? simM.profit_factor.toFixed(2) : null },
+      max_drawdown: { value: signedPctText(simM.max_drawdown), valueCl: simM.max_drawdown != null ? 'qr-pnl-neg' : undefined },
+      sharpe: { value: simM.sharpe != null ? simM.sharpe.toFixed(2) : null },
+      total_trades: { value: simM.total_trades != null ? String(simM.total_trades) : null, valueTip: 'OOS backtest trades (latest run)' },
+      avg_holding_days: { value: simM.avg_holding_days != null ? `${simM.avg_holding_days}d` : null, valueTip: simM.avg_holding_days == null ? 'No per-trade OOS rows — aggregate-only backtest' : 'OOS closed trades' },
+      last_trade_at: { value: null, valueTip: 'Not served as a headline metric — see the Simulation ledger below for per-trade dates' },
+    };
+    const paperValues = {
+      total_return: { value: null, valueTip: 'No paper total-return figure served by the API — not derived client-side' },
+      total_pnl: { value: signedKText(paperM.total_pnl), valueCl: pnlCl(paperM.total_pnl), valueTip: 'gold.paper_trades_synthetic · closed round-trips, cleanse-closure legs excluded' },
+      win_rate: { value: pctText(paperM.win_rate), valueTip: 'Paper closed round-trip win rate (fraction → %)' },
+      profit_factor: { value: paperM.profit_factor != null ? paperM.profit_factor.toFixed(2) : null },
+      max_drawdown: { value: null, valueTip: 'No paper max-drawdown figure served by the API' },
+      sharpe: { value: null, valueTip: 'No paper Sharpe figure served by the API' },
+      total_trades: { value: paperM.total_trades != null ? String(paperM.total_trades) : null, valueTip: 'Closed paper round-trips' },
+      avg_holding_days: { value: paperAvgHold != null ? `${paperAvgHold}d` : null, valueTip: paperAvgHold == null ? 'No closed paper round-trips' : 'Closed paper round-trips · gold.paper_trades_synthetic' },
+      last_trade_at: { value: paperM.last_trade_at ? fmtAge(paperM.last_trade_at) : null, valueTip: paperM.last_trade_at ? `Last closed paper trade ${paperM.last_trade_at}` : 'No closed paper trades yet' },
+    };
+    const simItems = METRIC_SPEC.map(m => ({ label: m.label, tip: KPI_TIP[m.key], ...simValues[m.key] }));
+    const paperItems = METRIC_SPEC.map(m => ({ label: m.label, tip: KPI_TIP[m.key], ...paperValues[m.key] }));
 
     return (
       <div className="space-y-3">
@@ -819,433 +1101,208 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
           </div>
         )}
 
-        {/* ================= UNIFIED STATISTICS (SIM vs PAPER) ==============
-            One comparison table, both evidence classes on screen at once —
-            the old SIM/PAPER statistics-view toggle is gone. Values are never
-            summed or averaged across books; each column keeps its source label
-            and unit, and the Δ column is filled only where the two values are
-            directly comparable. */}
-        <div className="qr-surface overflow-hidden">
-          <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2 flex-wrap">
-            <span className="qr-label">Performance · SIM backtest vs Paper</span>
-            <span className="text-[9px] text-slate-600">side by side — never aggregated; Δ = Paper − SIM where comparable</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[320px] table-fixed">
-              <thead>
-                <tr className="border-b border-white/[0.06]">
-                  <th className="qr-label text-left py-1.5 px-2 sm:px-3">Metric</th>
-                  <th className="qr-label text-right py-1.5 px-2 sm:px-3 w-[86px] sm:w-[128px]" title="OOS backtest baseline · gold.strategy_backtest_runs (fractions → %)">SIM · Backtest</th>
-                  <th className="qr-label text-right py-1.5 px-2 sm:px-3 w-[86px] sm:w-[128px]" title="Synthetic paper ledger · gold.paper_trades_synthetic closed round-trips">Paper</th>
-                  <th className="qr-label text-right py-1.5 px-2 sm:px-3 w-[72px] sm:w-[96px]" title="Paper − SIM, only where directly comparable">Δ</th>
-                </tr>
-              </thead>
-              <tbody>
-                <CmpRow
-                  label="OOS Return" tip="Total out-of-sample backtest return (fraction → %). Paper has no served total-return figure — its realized $ P&L is the row below; monthly realized returns are in the Returns section."
-                  simText={signedPctText(simM.total_return)} simCl={pnlCl(simM.total_return)}
-                  paperText={null} paperTip="No paper total-return figure served by the API — not derived client-side"
-                  deltaText={null} deltaTip="Return vs $ P&L measure different things — no delta" />
-                <CmpRow
-                  label="Net P&L" tip="Realized net P&L in dollars"
-                  simText={null} simTip="Backtests store per-trade pnl_pct, not dollars — no $ P&L exists for SIM"
-                  paperText={signedKText(paperM.total_pnl)} paperCl={pnlCl(paperM.total_pnl)} paperTip="gold.paper_trades_synthetic · closed round-trips, cleanse-closure legs excluded"
-                  deltaText={null} deltaTip="SIM has no $ P&L — no delta" />
-                <CmpRow
-                  label="Win Rate" tip="Closed-trade win rate"
-                  simText={pctText(simM.win_rate)} simTip="OOS backtest win rate (fraction → %)"
-                  paperText={pctText(paperM.win_rate)} paperTip="Paper closed round-trip win rate (fraction → %)"
-                  deltaText={wrDelta != null ? `${wrDelta >= 0 ? '+' : ''}${wrDelta.toFixed(1)}pp` : null}
-                  deltaCl={pnlCl(wrDelta)}
-                  deltaTip={wrDelta != null ? `Paper − SIM in percentage points${data.book === 'paper' ? ' · backend divergence.win_rate_delta_pp' : ''}` : 'Both win rates required for a delta'} />
-                <CmpRow
-                  label="Profit Factor" tip="Gross win ÷ gross loss over closed trades"
-                  simText={simM.profit_factor != null ? simM.profit_factor.toFixed(2) : null}
-                  paperText={paperM.profit_factor != null ? paperM.profit_factor.toFixed(2) : null}
-                  deltaText={pfDelta != null ? `${pfDelta >= 0 ? '+' : ''}${pfDelta.toFixed(2)}` : null}
-                  deltaCl={pnlCl(pfDelta)}
-                  deltaTip={pfDelta != null ? `Paper − SIM${data.book === 'paper' ? ' · backend divergence.profit_factor_delta' : ''}` : 'Both profit factors required for a delta'} />
-                <CmpRow
-                  label="Max Drawdown" tip="OOS backtest max drawdown (fraction → %)"
-                  simText={signedPctText(simM.max_drawdown)} simCl="qr-pnl-neg"
-                  paperText={null} paperTip="No paper max-drawdown figure served by the API"
-                  deltaText={null} />
-                <CmpRow
-                  label="Sharpe" tip="OOS backtest Sharpe ratio"
-                  simText={simM.sharpe != null ? simM.sharpe.toFixed(2) : null}
-                  paperText={null} paperTip="No paper Sharpe figure served by the API"
-                  deltaText={null} />
-                <CmpRow
-                  label="Closed Trades" tip="SIM: OOS backtest trades · Paper: closed round-trips — different sample windows, so no count delta"
-                  simText={simM.total_trades != null ? String(simM.total_trades) : null} simTip="OOS backtest trades (latest run)"
-                  paperText={paperM.total_trades != null && paperM.total_trades > 0 ? String(paperM.total_trades) : (paperM.total_trades === 0 ? '0' : null)} paperTip="Closed paper round-trips"
-                  deltaText={null} deltaTip="Different sample windows — a count delta is not meaningful" />
-                <CmpRow
-                  label="Avg Hold" tip="Average holding period of closed trades (calendar days)"
-                  simText={simM.avg_holding_days != null ? `${simM.avg_holding_days}d` : null} simTip={simM.avg_holding_days == null ? 'No per-trade OOS rows — aggregate-only backtest' : 'OOS closed trades'}
-                  paperText={paperAvgHold != null ? `${paperAvgHold}d` : null} paperTip={paperAvgHold == null ? 'No closed paper round-trips' : 'Closed paper round-trips · gold.paper_trades_synthetic'}
-                  deltaText={holdDelta != null ? `${holdDelta >= 0 ? '+' : ''}${holdDelta.toFixed(1)}d` : null}
-                  deltaCl={pnlCl(holdDelta)}
-                  deltaTip={holdDelta != null ? 'Paper − SIM, calendar days' : 'Both averages required for a delta'} />
-                <CmpRow
-                  label="Last Trade" tip="Most recent closed trade in each book"
-                  simText={null} simTip="Not served as a headline metric — see the Simulation ledger below for per-trade dates"
-                  paperText={paperM.last_trade_at ? fmtAge(paperM.last_trade_at) : null} paperTip={paperM.last_trade_at ? `Last closed paper trade ${paperM.last_trade_at}` : 'No closed paper trades yet'}
-                  deltaText={null} />
-              </tbody>
-            </table>
-          </div>
-          {(uatHas || liveHas) && (
-            <div className="px-3 py-1.5 border-t border-white/[0.05] flex items-center gap-x-4 gap-y-1 flex-wrap text-[10px] text-slate-500">
-              {(liveM.total_trades || 0) > 0 && (
-                <span title="gold.trade_executions">
-                  <span className="qr-label mr-1">LIVE</span>
-                  <span className="qr-num text-slate-300">{liveM.total_trades} exec</span>
-                  {liveM.win_rate != null && <> · WR <span className="qr-num text-slate-300">{(liveM.win_rate * 100).toFixed(1)}%</span></>}
-                  {liveM.total_pnl != null && <> · P&L <span className={`qr-num font-bold ${pnlCl(liveM.total_pnl)}`}>{liveM.total_pnl >= 0 ? '+' : ''}{fmtK(liveM.total_pnl)}</span></>}
-                  {liveM.last_trade_at && <> · last {fmtAge(liveM.last_trade_at)}</>}
-                </span>
-              )}
-              {uatHas && (
-                <span title="IBKR broker rehearsal · gold.paper_uat_fills — fills carry no per-fill P&L">
-                  <span className="qr-label mr-1">UAT</span>
-                  {(uatM.total_fills || 0) > 0
-                    ? <><span className="qr-num text-slate-300">{uatM.total_fills} fills</span>{uatM.last_trade_at && <> · last {fmtAge(uatM.last_trade_at)}</>} · WR/P&L pending round-trip ledger</>
-                    : <>no strategy fills yet · UAT live 2026-08-24</>}
-                </span>
-              )}
+        {/* ============ PARALLEL ANALYTICS — SIM left / PAPER right =========
+            Mirrored comparison workspace: every analytics section exists once
+            per evidence book, in the same order in both columns, and
+            corresponding sections share a grid row (subgrid) at >=1280px so
+            they start at the same vertical position. Below 1280px the complete
+            SIM column stacks above the complete PAPER column. Nothing is
+            summed or averaged across books; a metric the API does not serve
+            for a book renders '—' in its slot. No SIM/PAPER toggle — both
+            columns render on load. */}
+        <div className="sd-split">
+          {/* LEFT COLUMN — SIM / BACKTEST */}
+          <div className="sd-col">
+            <div className="px-1 flex items-baseline gap-2">
+              <span className="text-[12px] font-bold text-white tracking-wide">SIM / BACKTEST</span>
+              <span className="qr-label" title="gold.strategy_backtest_runs · latest OOS run">OOS evidence · backtest run</span>
             </div>
-          )}
-        </div>
 
-        {/* ===================== EQUITY & RETURNS ==========================
-            Paper (and live, when it has rows) realized curves side by side.
-            SIM has no served equity series — backtests publish monthly/yearly
-            returns instead, shown below next to the paper realized series. */}
-        <div className={`grid grid-cols-1 ${liveHas && (liveM.total_trades || 0) > 0 ? 'lg:grid-cols-2' : ''} gap-3`}>
-          <div className="qr-surface overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center justify-between gap-2">
-              <span className="qr-label" title="gold.paper_trades_synthetic · cumulative realized P&L by exit date">Equity · Paper · realized cum P&L · last {paperPayload?.window_days ?? data.window_days}d</span>
-              <span className={`qr-num text-[11px] font-bold ${paperM.total_pnl != null ? pnlCl(paperM.total_pnl) : 'text-slate-500'}`}>{paperM.total_pnl != null ? `${paperM.total_pnl >= 0 ? '+' : ''}${fmtK(paperM.total_pnl)}` : '—'}</span>
+            <BookStatsPanel
+              heading="Statistics"
+              source="gold.strategy_backtest_runs · OOS metrics of the latest run"
+              items={simItems}
+            />
+
+            {/* SIM equity: backtests publish no equity time series — keep the
+                slot with an honest empty state so the columns stay mirrored
+                and the paper side never expands across the full page. */}
+            <div className="qr-surface overflow-hidden">
+              <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
+                <span className="qr-label" title="No equity time series is served for SIM backtests">Equity · SIM · backtest</span>
+              </div>
+              <div className="px-3 py-4 text-center">
+                <div className="text-[10px] text-slate-600">No equity time series is served for SIM backtests — the run publishes aggregate metrics and monthly/yearly returns (below).</div>
+              </div>
             </div>
-            <div className="p-2">
-              {paperPayload == null ? (
-                <div className="flex items-center gap-2 py-4 justify-center text-slate-500 text-[11px]">
-                  <div className={`w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full ${bookLoading ? 'animate-spin' : ''}`} />
-                  Loading paper curve…
+
+            {/* Monthly + yearly returns — SIM: portfolio-level OOS monthly
+                returns (consumption.strategy_monthly_returns, compounded YTD);
+                yearly from the same backtest run. */}
+            <div className="qr-surface overflow-hidden">
+              <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
+                <span className="qr-label" title="consumption.strategy_monthly_returns · portfolio-level OOS monthly returns (decimal fractions, compounded YTD)">Monthly Returns (%) · SIM · OOS backtest</span>
+                <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.monthly_returns || []).length} mo</span>
+              </div>
+              <div className="p-2 grid grid-cols-1 xl:grid-cols-[1fr_104px] gap-2">
+                <div>
+                  {(data.monthly_returns || []).length === 0 ? (
+                    <div className="text-[10px] text-slate-600 text-center py-4" title="Monthly aggregation task t_fdfdf106">
+                      {(data.backtest_trades || []).length > 0
+                        ? 'No monthly return series published for this run — per-trade OOS ledger exists; monthly aggregation pending'
+                        : 'No monthly return data — this backtest stored aggregate metrics only'}
+                    </div>
+                  ) : (
+                    <MonthlyHeatmap rows={data.monthly_returns} />
+                  )}
                 </div>
-              ) : (
-                <EquityCurve points={paperPayload.equity_curve} />
-              )}
-              <div className="text-[9px] text-slate-600 mt-0.5">Cumulative realized P&L by exit date · flat segments = days with no exits (carried, not interpolated) · hover points for values</div>
+                <div className="xl:border-l xl:border-white/[0.05] xl:pl-2">
+                  <div className="qr-label pb-1" title="gold.strategy_backtest_runs annual_pnl_* · same run as the metrics above">Yearly (%)</div>
+                  <YearlyReturns
+                    yearly={(data.yearly_returns || {}).sim}
+                    emptyNote="No annual figures on the backtest run"
+                  />
+                </div>
+              </div>
             </div>
+
+            <SimLedgerPanel
+              trades={data.backtest_trades}
+              rebalances={simRebalances}
+              open={simOpen}
+              strategyId={strategyId}
+              simBuyWatch={simBuyWatch}
+              activeSignals={activeSignals}
+            />
           </div>
-          {liveHas && (liveM.total_trades || 0) > 0 && (
+
+          {/* RIGHT COLUMN — PAPER */}
+          <div className="sd-col">
+            <div className="px-1 flex items-baseline gap-2">
+              <span className="text-[12px] font-bold text-white tracking-wide">PAPER</span>
+              <span className="qr-label" title="gold.paper_trades_synthetic · synthetic paper ledger">Synthetic paper ledger</span>
+            </div>
+
+            <BookStatsPanel
+              heading="Statistics"
+              source="gold.paper_trades_synthetic · closed round-trips (cleanse-closure legs excluded)"
+              items={paperItems}
+              badge={(data.paper_skips || []).length > 0 && (
+                <span className="qr-chip qr-chip-slate text-[9px]" title="BUY signals the paper rebalancer could not fill — see the paper ledger Allocation tab">
+                  {(data.paper_skips || []).length} unfilled
+                </span>
+              )}
+            />
+
+            {/* Paper equity: realized curve from the paper ledger. */}
             <div className="qr-surface overflow-hidden">
               <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center justify-between gap-2">
-                <span className="qr-label" title="gold.trade_executions · cumulative realized P&L by execution date">Equity · Live · realized cum P&L · last {livePayload?.window_days ?? data.window_days}d</span>
-                <span className={`qr-num text-[11px] font-bold ${liveM.total_pnl != null ? pnlCl(liveM.total_pnl) : 'text-slate-500'}`}>{liveM.total_pnl != null ? `${liveM.total_pnl >= 0 ? '+' : ''}${fmtK(liveM.total_pnl)}` : '—'}</span>
+                <span className="qr-label" title="gold.paper_trades_synthetic · cumulative realized P&L by exit date">Equity · Paper · realized cum P&L · last {paperPayload?.window_days ?? data.window_days}d</span>
+                <span className={`qr-num text-[11px] font-bold ${paperM.total_pnl != null ? pnlCl(paperM.total_pnl) : 'text-slate-500'}`}>{paperM.total_pnl != null ? `${paperM.total_pnl >= 0 ? '+' : ''}${fmtK(paperM.total_pnl)}` : '—'}</span>
               </div>
               <div className="p-2">
-                {livePayload == null ? (
+                {paperPayload == null ? (
                   <div className="flex items-center gap-2 py-4 justify-center text-slate-500 text-[11px]">
                     <div className={`w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full ${bookLoading ? 'animate-spin' : ''}`} />
-                    Loading live curve…
+                    Loading paper curve…
                   </div>
                 ) : (
-                  <EquityCurve points={livePayload.equity_curve} />
+                  <EquityCurve points={paperPayload.equity_curve} />
                 )}
-                <div className="text-[9px] text-slate-600 mt-0.5">Cumulative realized P&L by execution date · hover points for values</div>
+                <div className="text-[9px] text-slate-600 mt-0.5">Cumulative realized P&L by exit date · flat segments = days with no exits (carried, not interpolated) · hover points for values</div>
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Monthly + yearly returns — both series side by side, each labeled
-            with its own basis. SIM: portfolio-level OOS monthly returns
-            (consumption.strategy_monthly_returns, compounded YTD). Paper:
-            realized P&L by exit month as a fraction of assigned capital
-            (simple sum, fixed capital base). Different bases — presented
-            adjacent, never merged. */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <div className="qr-surface overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
-              <span className="qr-label" title="consumption.strategy_monthly_returns · portfolio-level OOS monthly returns (decimal fractions, compounded YTD)">Monthly Returns (%) · SIM · OOS backtest</span>
-              <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.monthly_returns || []).length} mo</span>
-            </div>
-            <div className="p-2 grid grid-cols-1 xl:grid-cols-[1fr_104px] gap-2">
-              <div>
-                {(data.monthly_returns || []).length === 0 ? (
-                  <div className="text-[10px] text-slate-600 text-center py-4" title="Monthly aggregation task t_fdfdf106">
-                    {(data.backtest_trades || []).length > 0
-                      ? 'No monthly return series published for this run — per-trade OOS ledger exists; monthly aggregation pending'
-                      : 'No monthly return data — this backtest stored aggregate metrics only'}
-                  </div>
-                ) : (
-                  <MonthlyHeatmap rows={data.monthly_returns} />
-                )}
+            {/* Monthly + yearly returns — paper realized P&L by exit month as
+                a fraction of assigned capital (simple sum, fixed capital
+                base). Different basis from SIM — adjacent, never merged. */}
+            <div className="qr-surface overflow-hidden">
+              <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
+                <span className="qr-label" title={`gold.paper_trades_synthetic closed rows by exit month · % of assigned capital${data.assigned_capital ? ` ($${Math.round(data.assigned_capital).toLocaleString()})` : ' (not set)'}`}>Monthly Returns (%) · Paper realized</span>
+                <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.monthly_returns_paper || []).length} mo</span>
               </div>
-              <div className="xl:border-l xl:border-white/[0.05] xl:pl-2">
-                <div className="qr-label pb-1" title="gold.strategy_backtest_runs annual_pnl_* · same run as the metrics above">Yearly (%)</div>
-                <YearlyReturns
-                  yearly={(data.yearly_returns || {}).sim}
-                  emptyNote="No annual figures on the backtest run"
-                />
-              </div>
-            </div>
-          </div>
-          <div className="qr-surface overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
-              <span className="qr-label" title={`gold.paper_trades_synthetic closed rows by exit month · % of assigned capital${data.assigned_capital ? ` ($${Math.round(data.assigned_capital).toLocaleString()})` : ' (not set)'}`}>Monthly Returns (%) · Paper realized</span>
-              <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.monthly_returns_paper || []).length} mo</span>
-            </div>
-            <div className="p-2 grid grid-cols-1 xl:grid-cols-[1fr_104px] gap-2">
-              <div>
-                {(data.monthly_returns_paper || []).length === 0 ? (
-                  <div className="text-[10px] text-slate-600 text-center py-4">
-                    {!data.assigned_capital
-                      ? 'No assigned capital — set a capital pool before paper returns can be computed'
-                      : 'No closed paper trades yet — realized returns appear after the first exit'}
-                  </div>
-                ) : (
-                  <MonthlyHeatmap rows={data.monthly_returns_paper} />
-                )}
-              </div>
-              <div className="xl:border-l xl:border-white/[0.05] xl:pl-2">
-                <div className="qr-label pb-1" title="Realized P&L per exit year · % of assigned capital (simple sum, fixed capital base)">Yearly (%)</div>
-                <YearlyReturns
-                  yearly={(data.yearly_returns || {}).paper}
-                  emptyNote="No realized yearly returns yet"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ===================== LEDGERS (both on screen) ================== */}
-        <BookLedgerPanel
-          label="Paper ledger"
-          source="gold.paper_trades_synthetic"
-          payload={paperPayload}
-          loading={bookLoading}
-          isPaper
-          activeSignals={activeSignals}
-          watchSignals={watchSignals}
-          assignedCapital={data.assigned_capital}
-          skipMap={skipMap}
-          skipsCount={(data.paper_skips || []).length}
-        />
-
-        {/* Simulation ledger — per-trade OOS backtest records (gold.strategy_backtest_trades) */}
-        <div className="qr-surface overflow-hidden">
-          <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center gap-2">
-            <span className="qr-label" title="gold.strategy_backtest_trades · OOS rows of the latest run">Simulation ledger · OOS backtest</span>
-            <span className="qr-chip qr-chip-slate text-[9px] ml-auto">{(data.backtest_trades || []).length} trades</span>
-          </div>
-          <div className="px-3 py-1 border-b border-white/[0.05] flex items-center gap-1">
-            {[
-              { id: 'rebalances', label: `Rebalances (${simRebalances.length})` },
-              { id: 'allocation', label: `Allocation (${simOpen.length})` },
-              { id: 'trades',     label: `Ledger (${(data.backtest_trades || []).length})` },
-              { id: 'signals',    label: `Signals (${strategyId.startsWith('hk_ipo') ? (simBuyWatch || []).length : activeSignals.length})` },
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => setSimTab(t.id)}
-                className={`px-2 py-1 rounded text-[11px] font-semibold transition-colors ${simTab === t.id ? 'bg-white/[0.08] text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >{t.label}</button>
-            ))}
-          </div>
-
-          {simTab === 'rebalances' && (
-            <div className="max-h-[520px] overflow-auto">
-              {simRebalances.length === 0 && (
-                <div className="py-6 text-center text-slate-600 text-[11px] px-4">No per-trade backtest records — this strategy's backtest stored aggregate metrics only</div>
-              )}
-              {simRebalances.map((g) => {
-                const pnls = g.closed.map(t => t.pnl_pct).filter(v => v != null);
-                const avg = pnls.length ? pnls.reduce((s, v) => s + v, 0) / pnls.length : null;
-                return (
-                  <div key={g.date} className="border-b border-white/[0.04] last:border-0">
-                    <div className="px-3 py-2 flex items-center justify-between bg-white/[0.02] sticky top-0">
-                      <div className="flex items-center gap-2">
-                        <span className="qr-num text-[11px] font-bold text-white">{new Date(g.date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit', year: '2-digit' })}</span>
-                        <span className="qr-chip qr-chip-slate text-[9px]">{g.closed.length} closed</span>
-                      </div>
-                      <div className={`qr-num text-[11px] font-bold ${avg != null ? pnlCl(avg) : 'text-slate-500'}`}>{avg != null ? `${avg >= 0 ? '+' : ''}${(avg * 100).toFixed(1)}% avg` : '—'}</div>
+              <div className="p-2 grid grid-cols-1 xl:grid-cols-[1fr_104px] gap-2">
+                <div>
+                  {(data.monthly_returns_paper || []).length === 0 ? (
+                    <div className="text-[10px] text-slate-600 text-center py-4">
+                      {!data.assigned_capital
+                        ? 'No assigned capital — set a capital pool before paper returns can be computed'
+                        : 'No closed paper trades yet — realized returns appear after the first exit'}
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <tbody className="divide-y divide-white/[0.04]">
-                          {g.closed.map((t, i) => (
-                            <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
-                              <td className="py-1 px-2 text-white text-[11px] font-mono w-20">{t.ticker}</td>
-                              <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date ? new Date(t.entry_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : '—'} → {t.exit_date ? new Date(t.exit_date).toLocaleDateString('en-GB', { month: '2-digit', day: '2-digit' }) : 'open'}</td>
-                              <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
-                              <td className="py-1 px-2 qr-num text-slate-300 text-right">→ {fmt(t.exit_price)}</td>
-                              <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(t.pnl_pct)}`}>{t.pnl_pct != null ? `${t.pnl_pct >= 0 ? '+' : ''}${(t.pnl_pct * 100).toFixed(1)}%` : '—'}</td>
-                              <td className="py-1 px-2 text-right text-[9px] text-slate-500 w-28">{t.exit_reason || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {simTab === 'allocation' && (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="sticky top-0 bg-slate-900 z-10">
-                  <tr className="border-b border-white/[0.06]">
-                    <th className="qr-label text-left py-1 px-2">Ticker</th>
-                    <th className="qr-label text-right py-1 px-2">Entry</th>
-                    <th className="qr-label text-right py-1 px-2">Entry px</th>
-                    <th className="qr-label text-right py-1 px-2" title="Latest close (silver.unified_prices, gold.daily_ohlcv fallback)">Current px</th>
-                    <th className="qr-label text-right py-1 px-2" title="Calendar days held at the backtest as-of date">Days</th>
-                    <th className="qr-label text-right py-1 px-2" title="Open positions: unrealized P&L marked to the latest close (◦)">P&L %</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04]">
-                  {simOpen.map((t, i) => (
-                    <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
-                      <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{t.ticker}</td>
-                      <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300 text-right" title={t.current_price_date ? `Close ${t.current_price_date} · ${t.price_source || ''}` : undefined}>{t.current_price != null ? fmt(t.current_price) : '—'}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
-                      <td className={`py-1 px-2 qr-num text-right font-bold ${t.unrealized_pnl_pct != null ? pnlCl(t.unrealized_pnl_pct) : 'text-slate-500'}`} title={t.unrealized_pnl_pct != null ? `Unrealized — marked to latest close ${t.current_price_date || ''}` : 'No current price available'}>{t.unrealized_pnl_pct != null ? `${t.unrealized_pnl_pct >= 0 ? '+' : ''}${(t.unrealized_pnl_pct * 100).toFixed(1)}% ◦` : 'open'}</td>
-                    </tr>
-                  ))}
-                  {!simOpen.length && (
-                    <tr><td colSpan={6} className="py-6 text-center text-slate-600 text-[11px]">No open positions — every OOS backtest trade is closed</td></tr>
+                  ) : (
+                    <MonthlyHeatmap rows={data.monthly_returns_paper} />
                   )}
-                </tbody>
-              </table>
-              {simOpen.length > 0 && (
-                <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
-                  Open at the OOS backtest as-of date · days held measured to that date · ◦ = unrealized, marked to the latest close
                 </div>
-              )}
-            </div>
-          )}
-
-          {simTab === 'trades' && (
-            <div className="overflow-x-auto max-h-[520px] overflow-auto">
-              <table className="w-full">
-                <thead className="sticky top-0 bg-slate-900 z-10">
-                  <tr className="border-b border-white/[0.06]">
-                    <th className="qr-label text-right py-1 px-2">Entry</th>
-                    <th className="qr-label text-right py-1 px-2">Exit</th>
-                    <th className="qr-label text-left py-1 px-2">Ticker</th>
-                    <th className="qr-label text-right py-1 px-2">Entry px</th>
-                    <th className="qr-label text-right py-1 px-2">Exit px</th>
-                    <th className="qr-label text-right py-1 px-2">P&L %</th>
-                    <th className="qr-label text-right py-1 px-2">Days</th>
-                    <th className="qr-label text-right py-1 px-2">Reason</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04]">
-                  {(data.backtest_trades || []).map((t, i) => {
-                    const mtmPnl = t.pnl_pct != null ? t.pnl_pct : t.unrealized_pnl_pct;
-                    const isMtm = t.pnl_pct == null && t.unrealized_pnl_pct != null;
-                    return (
-                    <tr key={`${t.ticker}-${t.entry_date}-${i}`} className="qr-tr-hover">
-                      <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.entry_date || '—'}</td>
-                      <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{t.exit_date || 'open'}</td>
-                      <td className="py-1 px-2 text-white text-[11px] font-mono">{t.ticker}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(t.entry_price)}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300 text-right" title={isMtm && t.current_price_date ? `Latest close ${t.current_price_date} · ${t.price_source || ''}` : undefined}>{t.exit_price != null ? fmt(t.exit_price) : (t.current_price != null ? `${fmt(t.current_price)} ◦` : '—')}</td>
-                      <td className={`py-1 px-2 qr-num text-right font-bold ${pnlCl(mtmPnl)}`} title={isMtm ? `Unrealized — marked to latest close ${t.current_price_date || ''}` : undefined}>{mtmPnl != null ? `${mtmPnl >= 0 ? '+' : ''}${(mtmPnl * 100).toFixed(1)}%${isMtm ? ' ◦' : ''}` : '—'}</td>
-                      <td className="py-1 px-2 qr-num text-slate-300 text-right">{t.holding_days ?? '—'}</td>
-                      <td className="py-1 px-2 text-right text-[9px] text-slate-500">{t.exit_reason || '—'}</td>
-                    </tr>
-                    );
-                  })}
-                  {!(data.backtest_trades || []).length && (
-                    <tr><td colSpan={8} className="py-6 text-center text-slate-600 text-[11px]">No per-trade backtest records</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {simTab === 'signals' && (
-            strategyId.startsWith('hk_ipo') ? (
-              <div className="overflow-x-auto max-h-[520px] overflow-auto">
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-slate-900 z-10">
-                    <tr className="border-b border-white/[0.06]">
-                      <th className="qr-label text-left py-1 px-2">Decision</th>
-                      <th className="qr-label text-left py-1 px-2">Ticker</th>
-                      <th className="qr-label text-left py-1 px-2">Name</th>
-                      <th className="qr-label text-right py-1 px-2">Listing</th>
-                      <th className="qr-label text-right py-1 px-2" title="20th trading day after listing (measured close date; calendar estimate until then)">Entry +20td</th>
-                      <th className="qr-label text-right py-1 px-2">Exit +40td</th>
-                      <th className="qr-label text-right py-1 px-2" title="Retail oversubscription — the 100–500x band is the trade filter">Oversub</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.04]">
-                    {(simBuyWatch || []).map((r, i) => (
-                      <tr key={`${r.ticker}-${i}`} className="qr-tr-hover">
-                        <td className="py-1 px-2 w-40">
-                          <span className={`text-[10px] font-bold ${r.word === 'BUY ON' || r.word === 'ENTERED' ? 'text-white' : r.word === 'WATCH' ? 'text-slate-400' : 'text-slate-600'}`}>{r.word}</span>
-                          <span className="block text-[9px] text-slate-500">{r.sub}</span>
-                        </td>
-                        <td className="py-1 px-2 text-white text-[11px] font-mono w-20">{r.ticker}</td>
-                        <td className="py-1 px-2 text-slate-300 text-[10px] max-w-[180px] truncate" title={r.name}>{r.name || '—'}</td>
-                        <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{r.listing}</td>
-                        <td className="py-1 px-2 qr-num text-slate-300 text-[10px]">{r.entry}</td>
-                        <td className="py-1 px-2 qr-num text-slate-400 text-[10px]">{r.exit}</td>
-                        <td className="py-1 px-2 qr-num text-slate-300 text-right">{r.oversub != null ? `${Math.round(r.oversub)}x` : '—'}</td>
-                      </tr>
-                    ))}
-                    {simBuyWatch && !simBuyWatch.length && (
-                      <tr><td colSpan={7} className="py-6 text-center text-slate-600 text-[11px]">No IPOs in an entry window — nothing to buy or queue right now</td></tr>
-                    )}
-                    {!simBuyWatch && (
-                      <tr><td colSpan={7} className="py-6 text-center text-slate-600 text-[11px]">Loading IPO calendar…</td></tr>
-                    )}
-                  </tbody>
-                </table>
-                <div className="px-3 py-2 border-t border-white/[0.05] text-[10px] text-slate-600">
-                  RULE MIRROR of the documented entry rule (oversub 100–500x · D1 close ≥ offer · entry px 0.9–1.3× D1 close · enter +20td, hold 20td) over /api/hkex/ipos — not an engine signal. The 0.9–1.3× D1-close band decides at the entry close; slot cap not modelled.
+                <div className="xl:border-l xl:border-white/[0.05] xl:pl-2">
+                  <div className="qr-label pb-1" title="Realized P&L per exit year · % of assigned capital (simple sum, fixed capital base)">Yearly (%)</div>
+                  <YearlyReturns
+                    yearly={(data.yearly_returns || {}).paper}
+                    emptyNote="No realized yearly returns yet"
+                  />
                 </div>
               </div>
-            ) : (
-              <div className="overflow-x-auto max-h-[520px] overflow-auto">
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-slate-900 z-10">
-                    <tr className="border-b border-white/[0.06]">
-                      <th className="qr-label text-left py-1 px-2">Ticker</th>
-                      <th className="qr-label text-left py-1 px-2">Signal</th>
-                      <th className="qr-label text-right py-1 px-2">Strength</th>
-                      <th className="qr-label text-right py-1 px-2">Price</th>
-                      <th className="qr-label text-right py-1 px-2">As of</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.04]">
-                    {activeSignals.map((s, i) => (
-                      <tr key={`${s.ticker}-${i}`} className="qr-tr-hover">
-                        <td className="py-1 px-2 text-white text-[11px] font-mono w-24">{s.ticker}</td>
-                        <td className="py-1 px-2 text-white text-[10px] font-bold">{s.signal}</td>
-                        <td className="py-1 px-2 qr-num text-slate-300 text-right">{s.strength != null ? Number(s.strength).toFixed(2) : '—'}</td>
-                        <td className="py-1 px-2 qr-num text-slate-300 text-right">{fmt(s.price)}</td>
-                        <td className="py-1 px-2 qr-num text-slate-500 text-right text-[10px]">{s.ts ? fmtAge(s.ts) : '—'}</td>
-                      </tr>
-                    ))}
-                    {!activeSignals.length && (
-                      <tr><td colSpan={5} className="py-6 text-center text-slate-600 text-[11px]">No current BUY signals from the engine (consumption.strategies_signals_current)</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )
-          )}
+            </div>
+
+            <BookLedgerPanel
+              label="Paper ledger"
+              source="gold.paper_trades_synthetic"
+              payload={paperPayload}
+              loading={bookLoading}
+              isPaper
+              activeSignals={activeSignals}
+              watchSignals={watchSignals}
+              assignedCapital={data.assigned_capital}
+              skipMap={skipMap}
+              skipsCount={(data.paper_skips || []).length}
+            />
+          </div>
         </div>
+
+        {/* LIVE / UAT evidence strip — below the parallel columns. These books
+            are not part of the SIM/PAPER mirror. */}
+        {(uatHas || liveHas) && (
+          <div className="qr-surface px-3 py-1.5 flex items-center gap-x-4 gap-y-1 flex-wrap text-[10px] text-slate-500">
+            {(liveM.total_trades || 0) > 0 && (
+              <span title="gold.trade_executions">
+                <span className="qr-label mr-1">LIVE</span>
+                <span className="qr-num text-slate-300">{liveM.total_trades} exec</span>
+                {liveM.win_rate != null && <> · WR <span className="qr-num text-slate-300">{(liveM.win_rate * 100).toFixed(1)}%</span></>}
+                {liveM.total_pnl != null && <> · P&L <span className={`qr-num font-bold ${pnlCl(liveM.total_pnl)}`}>{liveM.total_pnl >= 0 ? '+' : ''}{fmtK(liveM.total_pnl)}</span></>}
+                {liveM.last_trade_at && <> · last {fmtAge(liveM.last_trade_at)}</>}
+              </span>
+            )}
+            {uatHas && (
+              <span title="IBKR broker rehearsal · gold.paper_uat_fills — fills carry no per-fill P&L">
+                <span className="qr-label mr-1">UAT</span>
+                {(uatM.total_fills || 0) > 0
+                  ? <><span className="qr-num text-slate-300">{uatM.total_fills} fills</span>{uatM.last_trade_at && <> · last {fmtAge(uatM.last_trade_at)}</>} · WR/P&L pending round-trip ledger</>
+                  : <>no strategy fills yet · UAT live 2026-08-24</>}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Live equity curve — full width below the mirror, only when the
+            live book has real executions. */}
+        {liveHas && (liveM.total_trades || 0) > 0 && (
+          <div className="qr-surface overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-white/[0.05] flex items-center justify-between gap-2">
+              <span className="qr-label" title="gold.trade_executions · cumulative realized P&L by execution date">Equity · Live · realized cum P&L · last {livePayload?.window_days ?? data.window_days}d</span>
+              <span className={`qr-num text-[11px] font-bold ${liveM.total_pnl != null ? pnlCl(liveM.total_pnl) : 'text-slate-500'}`}>{liveM.total_pnl != null ? `${liveM.total_pnl >= 0 ? '+' : ''}${fmtK(liveM.total_pnl)}` : '—'}</span>
+            </div>
+            <div className="p-2">
+              {livePayload == null ? (
+                <div className="flex items-center gap-2 py-4 justify-center text-slate-500 text-[11px]">
+                  <div className={`w-3 h-3 border-2 border-slate-700 border-t-blue-500 rounded-full ${bookLoading ? 'animate-spin' : ''}`} />
+                  Loading live curve…
+                </div>
+              ) : (
+                <EquityCurve points={livePayload.equity_curve} />
+              )}
+              <div className="text-[9px] text-slate-600 mt-0.5">Cumulative realized P&L by execution date · hover points for values</div>
+            </div>
+          </div>
+        )}
 
         {/* Live ledger — only when the live book has real executions or the
             strategy is deployed LIVE. Same panel anatomy as the paper ledger. */}
