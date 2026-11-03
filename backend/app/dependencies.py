@@ -8,6 +8,17 @@ logger = logging.getLogger(__name__)
 
 
 def get_db():
+    """Yield a request-scoped session; always closed (=> rolled back) on exit.
+
+    Cancel-on-abort (t_7213b685): FastAPI sync routes run in a threadpool, so
+    a client disconnect does NOT interrupt the in-flight query — the route
+    keeps running and this generator's finally only fires at completion. The
+    effective bound on a query outliving its client is therefore the
+    per-connection `statement_timeout` (8s) set on connect in
+    app/db/session.py, plus `idle_in_transaction_session_timeout` for
+    connections orphaned mid-transaction. Do not raise those values without
+    revisiting the frontend's 10s abort budget.
+    """
     db = None
     try:
         db = SessionLocal()
@@ -23,6 +34,7 @@ def get_db():
         raise
     finally:
         if db is not None:
+            db.rollback()  # no-op if clean; guarantees no open tx lingers
             db.close()
 
 

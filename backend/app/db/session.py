@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY, DECIMAL
+from sqlalchemy import create_engine, event, Column, Integer, String, Float, DateTime, JSON, Text, ForeignKey, Boolean, ARRAY, DECIMAL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
@@ -73,6 +73,32 @@ else:
         creator=get_connection,
         **engine_kwargs,
     )
+
+# --- Runaway-query guardrails (incident t_96e90169, 2026-11-03) -----------
+# Client aborts do NOT cancel server-side queries for sync (threadpool)
+# routes — the request keeps running to completion and the PG backend keeps
+# executing. The DB itself must therefore bound statement runtime:
+#   * statement_timeout 8s sits under the frontend's 10s abort, so a runaway
+#     query errors fast (SQLSTATE 57014) instead of accumulating into a
+#     pile-up that saturates RDS.
+#   * idle_in_transaction_session_timeout reclaims connections whose client
+#     vanished mid-transaction.
+# Applied on every new DBAPI connection (covers both the password DSN path
+# and the IAM `creator` path above). A session that legitimately needs a
+# longer budget can override locally with `SET statement_timeout = ...`.
+DB_STATEMENT_TIMEOUT_MS = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "8000"))
+DB_IDLE_TX_TIMEOUT_MS = int(os.getenv("DB_IDLE_TX_TIMEOUT_MS", "30000"))
+
+@event.listens_for(engine, "connect")
+def _set_session_timeouts(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"SET statement_timeout = {DB_STATEMENT_TIMEOUT_MS}")
+        cursor.execute(
+            f"SET idle_in_transaction_session_timeout = {DB_IDLE_TX_TIMEOUT_MS}"
+        )
+    finally:
+        cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

@@ -542,6 +542,58 @@ def system_health():
     }
 
 
+# bar_quality aggregate cache (t_7213b685): gold.v_us_equity_bar_quality is a
+# MATERIALIZED VIEW refreshed twice daily (qr_etl.bar_quality_mv_refresh), and
+# this endpoint is polled every few seconds by the frontend — caching the
+# aggregate removes per-poll DB work entirely. Pre-matview, each uncached call
+# was a 100s+ parallel seq scan of gold.daily_ohlcv (incident t_96e90169).
+_BAR_QUALITY_TTL_S = float(os.getenv("BAR_QUALITY_CACHE_TTL_S", "120"))
+_bar_quality_cache: dict = {"expires": 0.0, "data": None}
+
+
+def _bar_quality_aggregate(db: Session):
+    now = time.monotonic()
+    if now < _bar_quality_cache["expires"]:
+        return _bar_quality_cache["data"]
+
+    bq_rows = safe_query(db, """
+        SELECT
+            MAX(date)            AS latest_suspect_date,
+            COUNT(*)             AS total_rows,
+            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30) AS recent_30d_rows,
+            COUNT(DISTINCT offending_ticker) AS distinct_tickers,
+            ARRAY_AGG(DISTINCT offending_ticker)
+                FILTER (WHERE date >= CURRENT_DATE - 30) AS recent_30d_tickers,
+            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30
+                             AND layer = 'gold.daily_ohlcv') AS recent_30d_gold_rows,
+            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30
+                             AND layer = 'bronze.yf_suspect_bars') AS recent_30d_quarantined_rows
+        FROM gold.v_us_equity_bar_quality
+    """, label="system_bar_quality")
+    bar_quality = None
+    if bq_rows:
+        b = bq_rows[0]
+        recent = int(b.recent_30d_rows or 0)
+        bar_quality = {
+            # YELLOW when unresolved suspects exist in the last 30d — a
+            # warning signal, not a hard failure (self-heal is possible).
+            "quality": "YELLOW" if recent > 0 else "GREEN",
+            "latest_suspect_date": b.latest_suspect_date.isoformat() if b.latest_suspect_date else None,
+            "total_rows": int(b.total_rows or 0),
+            "recent_30d_rows": recent,
+            "distinct_tickers": int(b.distinct_tickers or 0),
+            "recent_30d_tickers": sorted(b.recent_30d_tickers) if b.recent_30d_tickers else [],
+            "recent_30d_gold_rows": int(b.recent_30d_gold_rows or 0),
+            "recent_30d_quarantined_rows": int(b.recent_30d_quarantined_rows or 0),
+        }
+
+    # Cache failures (None) for a short time too — a flapping DB must not be
+    # re-hit on every poll — but only for 15s so recovery shows quickly.
+    _bar_quality_cache["data"] = bar_quality
+    _bar_quality_cache["expires"] = now + (_BAR_QUALITY_TTL_S if bar_quality else 15.0)
+    return bar_quality
+
+
 @app.get("/api/system/freshness")
 def system_freshness(db: Session = Depends(get_db)):
     """Per-source data freshness registry (gold.v_source_freshness, qr_etl-owned).
@@ -587,36 +639,7 @@ def system_freshness(db: Session = Depends(get_db)):
             "last_error": r.last_error,
         } for r in rows]
 
-    bq_rows = safe_query(db, """
-        SELECT
-            MAX(date)            AS latest_suspect_date,
-            COUNT(*)             AS total_rows,
-            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30) AS recent_30d_rows,
-            COUNT(DISTINCT offending_ticker) AS distinct_tickers,
-            ARRAY_AGG(DISTINCT offending_ticker)
-                FILTER (WHERE date >= CURRENT_DATE - 30) AS recent_30d_tickers,
-            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30
-                             AND layer = 'gold.daily_ohlcv') AS recent_30d_gold_rows,
-            COUNT(*) FILTER (WHERE date >= CURRENT_DATE - 30
-                             AND layer = 'bronze.yf_suspect_bars') AS recent_30d_quarantined_rows
-        FROM gold.v_us_equity_bar_quality
-    """, label="system_bar_quality")
-    bar_quality = None
-    if bq_rows:
-        b = bq_rows[0]
-        recent = int(b.recent_30d_rows or 0)
-        bar_quality = {
-            # YELLOW when unresolved suspects exist in the last 30d — a
-            # warning signal, not a hard failure (self-heal is possible).
-            "quality": "YELLOW" if recent > 0 else "GREEN",
-            "latest_suspect_date": b.latest_suspect_date.isoformat() if b.latest_suspect_date else None,
-            "total_rows": int(b.total_rows or 0),
-            "recent_30d_rows": recent,
-            "distinct_tickers": int(b.distinct_tickers or 0),
-            "recent_30d_tickers": sorted(b.recent_30d_tickers) if b.recent_30d_tickers else [],
-            "recent_30d_gold_rows": int(b.recent_30d_gold_rows or 0),
-            "recent_30d_quarantined_rows": int(b.recent_30d_quarantined_rows or 0),
-        }
+    bar_quality = _bar_quality_aggregate(db)
 
     return {
         "sources": sources,
