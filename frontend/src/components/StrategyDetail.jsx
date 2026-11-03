@@ -18,7 +18,7 @@ const addDaysISO = (d, n) => {
 // stays readable without a chart library. Cumulative realized P&L by exit
 // date — days without exits are carried flat by the line, never interpolated
 // into fake data points.
-const EquityCurve = ({ points, height = 72 }) => {
+const EquityCurve = ({ points, height = 88 }) => {
   if (!points?.length) {
     return <div className="text-[10px] text-slate-600 text-center py-4">No closed trades in this window · curve appears after the first exit</div>;
   }
@@ -81,14 +81,14 @@ const MonthlyHeatmap = ({ rows }) => {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full">
+      <table className="w-full table-fixed">
         <thead>
           <tr>
-            <th className="qr-label text-left pl-1 py-1 w-10">YR</th>
+            <th className="qr-label text-left pl-1 py-1 w-8">YR</th>
             {months.map((m, i) => (
               <th key={i} className="qr-label text-center py-1">{m}</th>
             ))}
-            <th className="qr-label text-right pr-1 py-1 w-10">YTD</th>
+            <th className="qr-label text-right pr-1 py-1 w-9">YTD</th>
           </tr>
         </thead>
         <tbody>
@@ -202,10 +202,10 @@ const fmtDollar = (v) => {
 // with the reason in the tooltip, never a fabricated zero.
 const CmpRow = ({ label, tip, simText, simCl, simTip, paperText, paperCl, paperTip, deltaText, deltaCl, deltaTip }) => (
   <tr className="border-t border-white/[0.04]">
-    <td className="py-1.5 px-3 text-[10px] text-slate-400 whitespace-nowrap" title={tip}>{label}</td>
-    <td className={`py-1.5 px-3 qr-num text-[12px] font-bold whitespace-nowrap ${simText == null ? 'text-slate-600' : simCl || 'text-slate-200'}`} title={simTip}>{simText ?? '—'}</td>
-    <td className={`py-1.5 px-3 qr-num text-[12px] font-bold whitespace-nowrap ${paperText == null ? 'text-slate-600' : paperCl || 'text-slate-200'}`} title={paperTip}>{paperText ?? '—'}</td>
-    <td className={`py-1.5 px-3 qr-num text-[11px] whitespace-nowrap ${deltaText == null ? 'text-slate-600' : deltaCl || 'text-slate-300'}`} title={deltaTip}>{deltaText ?? '—'}</td>
+    <td className="py-1.5 px-2 sm:px-3 text-[10px] text-slate-400 whitespace-nowrap" title={tip}>{label}</td>
+    <td className={`py-1.5 px-2 sm:px-3 qr-num text-[12px] font-bold whitespace-nowrap ${simText == null ? 'text-slate-600' : simCl || 'text-slate-200'}`} title={simTip}>{simText ?? '—'}</td>
+    <td className={`py-1.5 px-2 sm:px-3 qr-num text-[12px] font-bold whitespace-nowrap ${paperText == null ? 'text-slate-600' : paperCl || 'text-slate-200'}`} title={paperTip}>{paperText ?? '—'}</td>
+    <td className={`py-1.5 px-2 sm:px-3 qr-num text-[11px] whitespace-nowrap ${deltaText == null ? 'text-slate-600' : deltaCl || 'text-slate-300'}`} title={deltaTip}>{deltaText ?? '—'}</td>
   </tr>
 );
 
@@ -831,13 +831,13 @@ export const StrategyDetail = ({ strategyId, onBack }) => {
             <span className="text-[9px] text-slate-600">side by side — never aggregated; Δ = Paper − SIM where comparable</span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[460px]">
+            <table className="w-full min-w-[320px] table-fixed">
               <thead>
                 <tr className="border-b border-white/[0.06]">
-                  <th className="qr-label text-left py-1.5 px-3">Metric</th>
-                  <th className="qr-label text-right py-1.5 px-3" title="OOS backtest baseline · gold.strategy_backtest_runs (fractions → %)">SIM · Backtest</th>
-                  <th className="qr-label text-right py-1.5 px-3" title="Synthetic paper ledger · gold.paper_trades_synthetic closed round-trips">Paper</th>
-                  <th className="qr-label text-right py-1.5 px-3" title="Paper − SIM, only where directly comparable">Δ</th>
+                  <th className="qr-label text-left py-1.5 px-2 sm:px-3">Metric</th>
+                  <th className="qr-label text-right py-1.5 px-2 sm:px-3 w-[86px] sm:w-[128px]" title="OOS backtest baseline · gold.strategy_backtest_runs (fractions → %)">SIM · Backtest</th>
+                  <th className="qr-label text-right py-1.5 px-2 sm:px-3 w-[86px] sm:w-[128px]" title="Synthetic paper ledger · gold.paper_trades_synthetic closed round-trips">Paper</th>
+                  <th className="qr-label text-right py-1.5 px-2 sm:px-3 w-[72px] sm:w-[96px]" title="Paper − SIM, only where directly comparable">Δ</th>
                 </tr>
               </thead>
               <tbody>
