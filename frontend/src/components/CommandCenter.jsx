@@ -80,8 +80,8 @@ const LinkBtn = ({ children, onClick }) => (
 
 const Panel = ({ title, action, children, className = '' }) => (
   <div className={`qr-surface overflow-hidden ${className}`}>
-    <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.05]">
-      <span className="qr-label flex items-center gap-2">{title}</span>
+    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.05]">
+      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-300 flex items-center gap-2">{title}</span>
       {action}
     </div>
     {children}
@@ -91,7 +91,7 @@ const Panel = ({ title, action, children, className = '' }) => (
 // Honest no-data state: an environment that lacks supported data says so
 // explicitly — another environment's data is never relabeled into the gap.
 const NoData = ({ children }) => (
-  <div className="px-3 py-2 text-[11px] text-slate-600">{children}</div>
+  <div className="px-3 py-2.5 text-[12px] text-slate-500">{children}</div>
 );
 
 // Small as-of tag sourced from the payload's own timestamp.
@@ -270,10 +270,10 @@ function MarketTicker() {
 // KPI row — compact tiles, per-environment values.
 // ---------------------------------------------------------------------------
 const Kpi = ({ label, value, valueCl = 'text-white', sub, tip }) => (
-  <div className="qr-surface px-2.5 py-2 flex flex-col justify-center min-w-0" title={tip}>
-    <div className="qr-label truncate">{label}</div>
-    <div className={`font-mono text-[15px] font-bold leading-tight mt-0.5 truncate ${valueCl}`}>{value}</div>
-    {sub != null && <div className="text-[9px] text-slate-500 leading-tight mt-0.5 truncate">{sub}</div>}
+  <div className="qr-surface px-3 py-2.5 flex flex-col justify-center min-w-0" title={tip}>
+    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 truncate">{label}</div>
+    <div className={`font-mono text-[22px] font-bold leading-tight mt-1 truncate ${valueCl}`}>{value}</div>
+    {sub != null && <div className="text-[10px] text-slate-500 leading-tight mt-1 truncate">{sub}</div>}
   </div>
 );
 
@@ -346,12 +346,15 @@ function EquityCurve({ data, color, height = 240, emptyLabel = 'No history yet' 
 }
 
 // ---------------------------------------------------------------------------
-// Open Positions — one table for every environment. ENTRY DATE leftmost
-// (YYYY-MM-DD), then SYMBOL | STRATEGY | SIDE | QTY | ENTRY PRICE | CURRENT
-// PRICE | UNREALIZED P&L | MARKET VALUE | DAYS HELD. Rows are pre-normalized
-// per environment; unsupported fields arrive null and render an honest '—'
-// with a tooltip — never another environment's value.
+// Open Positions — the primary FULL-WIDTH section, directly under the KPI
+// row. ENTRY DATE leftmost (YYYY-MM-DD), then SYMBOL | STRATEGY | SIDE | QTY
+// | ENTRY PRICE | CURRENT PRICE | UNREALIZED P&L | MARKET VALUE | DAYS HELD.
+// No trapped scroll box: the first POSITIONS_PAGE rows render inline and a
+// Show More control reveals the rest — every position stays accessible.
+// Unsupported fields render an honest '—' with a tooltip.
 // ---------------------------------------------------------------------------
+const POSITIONS_PAGE = 25;
+
 const POSITIONS_HEAD = [
   { k: 'entry', label: 'Entry date', align: 'left' },
   { k: 'symbol', label: 'Symbol', align: 'left' },
@@ -365,202 +368,238 @@ const POSITIONS_HEAD = [
   { k: 'days', label: 'Days held', align: 'right' },
 ];
 
-const OpenPositions = ({ env, rows, count, asOf, headTip, note, emptyText, navigateToTab }) => (
-  <Panel title={`Open Positions · ${ENV_META[env].badge}`} action={
-    <span className="flex items-center gap-2">
-      <span className="text-[9px] text-slate-600" title={headTip}>{count != null ? `${count} open` : ''}{note ? ` · ${note}` : ''}</span>
-      <AsOf ts={asOf} />
-      <LinkBtn onClick={() => navigateToTab('execution')}>Execution →</LinkBtn>
-    </span>
-  }>
-    {rows == null ? (
-      <NoData>Loading…</NoData>
-    ) : rows.length > 0 ? (
-      <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
-        <table className="w-full min-w-[860px]">
-          <thead className="sticky top-0 bg-[#10141f]">
-            <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
-              {POSITIONS_HEAD.map(h => (
-                <th key={h.k} className={`${h.align === 'right' ? 'text-right' : 'text-left'} ${h.k === 'entry' ? 'px-3' : 'px-2'} py-1 ${h.k === 'days' ? 'px-3' : ''}`}
-                  title={h.k === 'entry' || h.k === 'days' ? 'Absolute entry date (YYYY-MM-DD), newest first where the environment serves entry dates' : undefined}>
-                  {h.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p, i) => (
-              <tr key={p.key || `${p.symbol}-${i}`} className="border-t border-white/[0.05] text-[11px]">
-                <td className="px-3 py-1.5 font-mono text-slate-300 whitespace-nowrap" title={p.entryTip || undefined}>
-                  {p.entryDate ?? '—'}
-                </td>
-                <td className="px-2 py-1.5 font-mono font-bold text-white whitespace-nowrap">
-                  {p.symbol}
-                  {p.ccy && <span className="text-[9px] font-normal text-slate-500 ml-1">{p.ccy}</span>}
-                </td>
-                <td className="px-2 py-1.5 text-[10px] text-slate-400 max-w-[150px] truncate" title={p.strategyTip || p.strategy || undefined}>
-                  {p.strategy ?? '—'}
-                </td>
-                <td className="px-2 py-1.5 font-mono font-bold text-slate-300">{p.side ?? '—'}</td>
-                <td className="px-2 py-1.5 text-right font-mono text-slate-200">{p.qty != null ? Math.abs(p.qty).toLocaleString() : '—'}</td>
-                <td className="px-2 py-1.5 text-right font-mono text-slate-300">{p.entryPx != null ? p.entryPx.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
-                <td className="px-2 py-1.5 text-right font-mono text-slate-300" title={p.curTip || undefined}>
-                  {p.curPx != null ? p.curPx.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
-                </td>
-                <td className={`px-2 py-1.5 text-right font-mono font-bold whitespace-nowrap ${p.unreal != null ? pnlCl(p.unreal) : 'text-slate-600'}`}>
-                  {p.unreal != null ? `${p.unreal >= 0 ? '+' : ''}${fmtK(p.unreal)}` : '—'}
-                </td>
-                <td className="px-2 py-1.5 text-right font-mono text-slate-300">{p.mv != null ? fmtK(p.mv) : '—'}</td>
-                <td className="px-3 py-1.5 text-right font-mono text-[10px] text-slate-500" title={p.entryTip || undefined}>
-                  {p.days != null ? p.days : '—'}
-                </td>
+const OpenPositions = ({ env, rows, count, asOf, headTip, note, emptyText, navigateToTab }) => {
+  const [showAll, setShowAll] = useState(false);
+  const visible = rows == null ? null : (showAll ? rows : rows.slice(0, POSITIONS_PAGE));
+  const hidden = rows != null ? rows.length - (visible?.length ?? 0) : 0;
+  return (
+    <Panel title={`Open Positions · ${ENV_META[env].badge}`} action={
+      <span className="flex items-center gap-3">
+        <span className="text-[10px] text-slate-500" title={headTip}>{count != null ? `${count} open` : ''}{note ? ` · ${note}` : ''}</span>
+        <AsOf ts={asOf} />
+        <LinkBtn onClick={() => navigateToTab('execution')}>Execution →</LinkBtn>
+      </span>
+    }>
+      {rows == null ? (
+        <NoData>Loading…</NoData>
+      ) : rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[960px]">
+            <thead className="bg-white/[0.02]">
+              <tr className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                {POSITIONS_HEAD.map(h => (
+                  <th key={h.k} className={`${h.align === 'right' ? 'text-right' : 'text-left'} ${h.k === 'entry' ? 'px-3' : 'px-2'} py-2 ${h.k === 'days' ? 'px-3' : ''}`}
+                    title={h.k === 'entry' || h.k === 'days' ? 'Absolute entry date (YYYY-MM-DD), newest first where the environment serves entry dates' : undefined}>
+                    {h.label}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    ) : (
-      <NoData>{emptyText}</NoData>
-    )}
-  </Panel>
-);
+            </thead>
+            <tbody>
+              {visible.map((p, i) => (
+                <tr key={p.key || `${p.symbol}-${i}`} className="border-t border-white/[0.05] text-[13px] leading-snug">
+                  <td className="px-3 py-2 font-mono text-slate-300 whitespace-nowrap" title={p.entryTip || undefined}>
+                    {p.entryDate ?? '—'}
+                  </td>
+                  <td className="px-2 py-2 font-mono font-bold text-white whitespace-nowrap">
+                    {p.symbol}
+                    {p.ccy && <span className="text-[10px] font-normal text-slate-500 ml-1">{p.ccy}</span>}
+                  </td>
+                  <td className="px-2 py-2 text-[12px] text-slate-400 max-w-[240px] truncate" title={p.strategyTip || p.strategy || undefined}>
+                    {p.strategy ?? '—'}
+                  </td>
+                  <td className="px-2 py-2 font-mono font-bold text-slate-300">{p.side ?? '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-200">{p.qty != null ? Math.abs(p.qty).toLocaleString() : '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-300">{p.entryPx != null ? p.entryPx.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-300" title={p.curTip || undefined}>
+                    {p.curPx != null ? p.curPx.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
+                  </td>
+                  <td className={`px-2 py-2 text-right font-mono font-bold whitespace-nowrap ${p.unreal != null ? pnlCl(p.unreal) : 'text-slate-600'}`}>
+                    {p.unreal != null ? `${p.unreal >= 0 ? '+' : ''}${fmtK(p.unreal)}` : '—'}
+                  </td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-300">{p.mv != null ? fmtK(p.mv) : '—'}</td>
+                  <td className="px-3 py-2 text-right font-mono text-[12px] text-slate-500" title={p.entryTip || undefined}>
+                    {p.days != null ? p.days : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {hidden > 0 && (
+            <button onClick={() => setShowAll(true)}
+              className="w-full px-3 py-2 text-[12px] font-semibold text-blue-400 hover:text-blue-300 text-center border-t border-white/[0.05]">
+              Show all {rows.length} positions ({hidden} more) ↓
+            </button>
+          )}
+          {showAll && rows.length > POSITIONS_PAGE && (
+            <button onClick={() => setShowAll(false)}
+              className="w-full px-3 py-2 text-[12px] font-semibold text-slate-500 hover:text-slate-300 text-center border-t border-white/[0.05]">
+              Show first {POSITIONS_PAGE} ↑
+            </button>
+          )}
+        </div>
+      ) : (
+        <NoData>{emptyText}</NoData>
+      )}
+    </Panel>
+  );
+};
 
 // ---------------------------------------------------------------------------
-// Working Orders — ORDER DATE leftmost where supported.
+// Working Orders — ORDER DATE leftmost where supported. Card height follows
+// content; empty/unsupported renders a one-line strip, never a big empty box.
 // ---------------------------------------------------------------------------
-const WorkingOrders = ({ env, rows, asOf, headTip, emptyText, unsupportedText, navigateToTab }) => (
-  <Panel title={`Working Orders · ${ENV_META[env].badge}`} action={
-    <span className="flex items-center gap-2">
-      <span className="text-[9px] text-slate-600" title={headTip}>{rows != null ? `${rows.length} working` : ''}</span>
-      <AsOf ts={asOf} />
-      <LinkBtn onClick={() => navigateToTab('execution')}>Orders →</LinkBtn>
-    </span>
-  }>
-    {unsupportedText ? (
-      <NoData>{unsupportedText}</NoData>
-    ) : rows == null ? (
-      <NoData>Loading…</NoData>
-    ) : rows.length > 0 ? (
-      <div className="max-h-[220px] overflow-y-auto overflow-x-auto">
-        <table className="w-full min-w-[560px]">
-          <thead className="sticky top-0 bg-[#10141f]">
-            <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
-              <th className="text-left px-3 py-1" title="Absolute order date (YYYY-MM-DD), newest first where served">Order date</th>
-              <th className="text-left px-2 py-1">Ticker</th>
-              <th className="text-left px-2 py-1">Side</th>
-              <th className="text-right px-2 py-1">Qty</th>
-              <th className="text-right px-2 py-1">Limit / type</th>
-              <th className="text-left px-2 py-1">Strategy</th>
-              <th className="text-left px-3 py-1">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((o, i) => (
-              <tr key={o.key || `${o.ticker}-${i}`} className="border-t border-white/[0.05] text-[11px]">
-                <td className="px-3 py-1 font-mono text-slate-300 whitespace-nowrap" title={o.orderTs ? tsTip(o.orderTs) : o.orderTip || undefined}>
-                  {o.orderDate ?? '—'}
-                </td>
-                <td className="px-2 py-1 font-mono font-bold text-white">{o.ticker}</td>
-                <td className={`px-2 py-1 font-mono font-bold ${o.side === 'BUY' ? 'text-emerald-400' : o.side === 'SELL' || o.side === 'CLOSE' ? 'text-rose-400' : 'text-slate-400'}`}>{o.side ?? '—'}</td>
-                <td className="px-2 py-1 text-right font-mono text-slate-200">{o.qty != null ? o.qty.toLocaleString() : '—'}</td>
-                <td className="px-2 py-1 text-right font-mono text-slate-300">{o.limitOrType ?? '—'}</td>
-                <td className="px-2 py-1 text-[10px] text-slate-400 max-w-[140px] truncate" title={o.strategy || undefined}>{o.strategy ?? '—'}</td>
-                <td className="px-3 py-1"><span className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300">{o.status ?? '—'}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    ) : (
-      <NoData>{emptyText}</NoData>
-    )}
-  </Panel>
+const InlineNote = ({ title, children }) => (
+  <div className="qr-surface px-3 py-2 flex items-baseline gap-2 flex-wrap">
+    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex-none">{title}</span>
+    <span className="text-[12px] text-slate-500">{children}</span>
+  </div>
 );
+
+const WorkingOrders = ({ env, rows, asOf, headTip, emptyText, unsupportedText, navigateToTab }) => {
+  if (unsupportedText) {
+    return <InlineNote title={`Working Orders · ${ENV_META[env].badge}`}>{unsupportedText}</InlineNote>;
+  }
+  if (rows != null && rows.length === 0) {
+    return <InlineNote title={`Working Orders · ${ENV_META[env].badge}`}>{emptyText}</InlineNote>;
+  }
+  return (
+    <Panel title={`Working Orders · ${ENV_META[env].badge}`} action={
+      <span className="flex items-center gap-3">
+        <span className="text-[10px] text-slate-500" title={headTip}>{rows != null ? `${rows.length} working` : ''}</span>
+        <AsOf ts={asOf} />
+        <LinkBtn onClick={() => navigateToTab('execution')}>Orders →</LinkBtn>
+      </span>
+    }>
+      {rows == null ? (
+        <NoData>Loading…</NoData>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px]">
+            <thead className="bg-white/[0.02]">
+              <tr className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-2" title="Absolute order date (YYYY-MM-DD), newest first where served">Order date</th>
+                <th className="text-left px-2 py-2">Ticker</th>
+                <th className="text-left px-2 py-2">Side</th>
+                <th className="text-right px-2 py-2">Qty</th>
+                <th className="text-right px-2 py-2">Limit / type</th>
+                <th className="text-left px-2 py-2">Strategy</th>
+                <th className="text-left px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((o, i) => (
+                <tr key={o.key || `${o.ticker}-${i}`} className="border-t border-white/[0.05] text-[13px] leading-snug">
+                  <td className="px-3 py-2 font-mono text-slate-300 whitespace-nowrap" title={o.orderTs ? tsTip(o.orderTs) : o.orderTip || undefined}>
+                    {o.orderDate ?? '—'}
+                  </td>
+                  <td className="px-2 py-2 font-mono font-bold text-white">{o.ticker}</td>
+                  <td className={`px-2 py-2 font-mono font-bold ${o.side === 'BUY' ? 'text-emerald-400' : o.side === 'SELL' || o.side === 'CLOSE' ? 'text-rose-400' : 'text-slate-400'}`}>{o.side ?? '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-200">{o.qty != null ? o.qty.toLocaleString() : '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-300">{o.limitOrType ?? '—'}</td>
+                  <td className="px-2 py-2 text-[12px] text-slate-400 max-w-[180px] truncate" title={o.strategy || undefined}>{o.strategy ?? '—'}</td>
+                  <td className="px-3 py-2"><span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300">{o.status ?? '—'}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Recent Fills — FILL DATE leftmost, then TICKER | STRATEGY | SIDE | QTY |
-// PRICE | REALIZED P&L where supported. Newest first.
+// PRICE | REALIZED P&L where supported. Newest first. Card height follows
+// content; empty renders a one-line strip.
 // ---------------------------------------------------------------------------
-const RecentFills = ({ env, rows, asOf, headTip, emptyText }) => (
-  <Panel title={`Recent Fills · ${ENV_META[env].badge}`} action={
-    <span className="flex items-center gap-2">
-      <span className="text-[9px] text-slate-600" title={headTip}>{rows != null ? `${rows.length} shown` : ''}</span>
-      <AsOf ts={asOf} />
-    </span>
-  }>
-    {rows == null ? (
-      <NoData>Loading…</NoData>
-    ) : rows.length > 0 ? (
-      <div className="max-h-[220px] overflow-y-auto overflow-x-auto">
-        <table className="w-full min-w-[640px]">
-          <thead className="sticky top-0 bg-[#10141f]">
-            <tr className="text-[8px] font-semibold text-slate-500 uppercase tracking-wide">
-              <th className="text-left px-3 py-1" title="Absolute fill date (YYYY-MM-DD), newest first; exact UTC timestamp in row tooltip">Fill date</th>
-              <th className="text-left px-2 py-1">Ticker</th>
-              <th className="text-left px-2 py-1">Strategy</th>
-              <th className="text-left px-2 py-1">Side</th>
-              <th className="text-right px-2 py-1">Qty</th>
-              <th className="text-right px-2 py-1">Price</th>
-              <th className="text-right px-3 py-1">Realized P&L</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t, i) => (
-              <tr key={t.key || `${t.fillTs}-${t.ticker}-${i}`} className="border-t border-white/[0.05] text-[11px]" title={t.fillTs ? `filled ${tsTip(t.fillTs)}` : undefined}>
-                <td className="px-3 py-1 font-mono text-slate-300 whitespace-nowrap">{t.fillDate ?? '—'}</td>
-                <td className="px-2 py-1 font-mono font-bold text-white">{t.ticker}</td>
-                <td className="px-2 py-1 text-[10px] text-slate-400 max-w-[140px] truncate" title={t.strategyTip || t.strategy || undefined}>{t.strategy ?? '—'}</td>
-                <td className={`px-2 py-1 font-mono font-bold ${t.side === 'BUY' || t.side === 'LONG' ? 'text-emerald-400' : t.side === 'SELL' || t.side === 'SHORT' ? 'text-rose-400' : 'text-slate-400'}`}>{t.side ?? '—'}</td>
-                <td className="px-2 py-1 text-right font-mono text-slate-200">{t.qty != null ? t.qty.toLocaleString() : '—'}</td>
-                <td className="px-2 py-1 text-right font-mono text-slate-300">{t.price != null ? t.price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
-                <td className={`px-3 py-1 text-right font-mono font-bold whitespace-nowrap ${t.pnl != null ? pnlCl(t.pnl) : 'text-slate-600'}`}
-                  title={t.pnl == null ? (t.pnlTip || undefined) : undefined}>
-                  {t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}${fmtK(t.pnl)}` : '—'}
-                </td>
+const RecentFills = ({ env, rows, asOf, headTip, emptyText }) => {
+  if (rows != null && rows.length === 0) {
+    return <InlineNote title={`Recent Fills · ${ENV_META[env].badge}`}>{emptyText}</InlineNote>;
+  }
+  return (
+    <Panel title={`Recent Fills · ${ENV_META[env].badge}`} action={
+      <span className="flex items-center gap-3">
+        <span className="text-[10px] text-slate-500" title={headTip}>{rows != null ? `${rows.length} shown` : ''}</span>
+        <AsOf ts={asOf} />
+      </span>
+    }>
+      {rows == null ? (
+        <NoData>Loading…</NoData>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px]">
+            <thead className="bg-white/[0.02]">
+              <tr className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="text-left px-3 py-2" title="Absolute fill date (YYYY-MM-DD), newest first; exact UTC timestamp in row tooltip">Fill date</th>
+                <th className="text-left px-2 py-2">Ticker</th>
+                <th className="text-left px-2 py-2">Strategy</th>
+                <th className="text-left px-2 py-2">Side</th>
+                <th className="text-right px-2 py-2">Qty</th>
+                <th className="text-right px-2 py-2">Price</th>
+                <th className="text-right px-3 py-2">Realized P&L</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    ) : (
-      <NoData>{emptyText}</NoData>
-    )}
-  </Panel>
-);
+            </thead>
+            <tbody>
+              {rows.map((t, i) => (
+                <tr key={t.key || `${t.fillTs}-${t.ticker}-${i}`} className="border-t border-white/[0.05] text-[13px] leading-snug" title={t.fillTs ? `filled ${tsTip(t.fillTs)}` : undefined}>
+                  <td className="px-3 py-2 font-mono text-slate-300 whitespace-nowrap">{t.fillDate ?? '—'}</td>
+                  <td className="px-2 py-2 font-mono font-bold text-white">{t.ticker}</td>
+                  <td className="px-2 py-2 text-[12px] text-slate-400 max-w-[200px] truncate" title={t.strategyTip || t.strategy || undefined}>{t.strategy ?? '—'}</td>
+                  <td className={`px-2 py-2 font-mono font-bold ${t.side === 'BUY' || t.side === 'LONG' ? 'text-emerald-400' : t.side === 'SELL' || t.side === 'SHORT' ? 'text-rose-400' : 'text-slate-400'}`}>{t.side ?? '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-200">{t.qty != null ? t.qty.toLocaleString() : '—'}</td>
+                  <td className="px-2 py-2 text-right font-mono text-slate-300">{t.price != null ? t.price.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+                  <td className={`px-3 py-2 text-right font-mono font-bold whitespace-nowrap ${t.pnl != null ? pnlCl(t.pnl) : 'text-slate-600'}`}
+                    title={t.pnl == null ? (t.pnlTip || undefined) : undefined}>
+                    {t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}${fmtK(t.pnl)}` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Action Required — environment-scoped alerts only. HALT is a global platform
 // control and shows in every environment; book-specific items come only from
-// the selected environment's own feeds.
+// the selected environment's own feeds. Full-width compact strip: one line
+// when clear (no empty card), compact rows only when genuine alerts exist.
 // ---------------------------------------------------------------------------
 const SEV_DOT = { critical: 'bg-rose-400', warning: 'bg-slate-400', info: 'bg-slate-600' };
 
-const ActionRequired = ({ env, items, emptyText, navigateToTab }) => (
-  <Panel title={`Action Required · ${ENV_META[env].badge}`} action={
-    items.length > 0
-      ? <span className="text-[9px] text-slate-500">{items.filter(i => i.sev === 'critical').length} critical · {items.filter(i => i.sev === 'warning').length} warning</span>
-      : null
-  }>
-    {items.length === 0 ? (
-      <NoData>{emptyText}</NoData>
-    ) : (
-      <div className="divide-y divide-white/[0.05] max-h-[260px] overflow-y-auto">
+const ActionRequired = ({ env, items, emptyText, navigateToTab }) => {
+  if (items.length === 0) {
+    return (
+      <div className="qr-surface px-3 py-2 flex items-baseline gap-2 flex-wrap">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400 flex-none">Action Required · {ENV_META[env].badge}</span>
+        <span className="text-[12px] text-slate-500">{emptyText}</span>
+      </div>
+    );
+  }
+  return (
+    <Panel title={`Action Required · ${ENV_META[env].badge}`} action={
+      <span className="text-[10px] text-slate-500">{items.filter(i => i.sev === 'critical').length} critical · {items.filter(i => i.sev === 'warning').length} warning</span>
+    }>
+      <div className="divide-y divide-white/[0.05]">
         {items.map((it, i) => (
           <button key={`${it.id}-${i}`} onClick={() => it.target ? navigateToTab(it.target) : undefined}
-            className="w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-white/[0.03]"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-white/[0.03]"
             title={it.tip || it.impact || it.title}>
-            <span className={`w-1.5 h-1.5 rounded-full mt-1 flex-none ${SEV_DOT[it.sev] || SEV_DOT.info}`} />
-            <span className="flex-1 min-w-0">
-              <span className="block text-[11px] font-bold text-slate-100 truncate">{it.title}</span>
-              {it.impact && <span className="block text-[9px] text-slate-500 truncate">{it.impact}</span>}
-            </span>
-            {it.date && <span className="flex-none font-mono text-[9px] text-slate-500 mt-0.5" title={it.dateTip || undefined}>{it.date}</span>}
+            <span className={`w-1.5 h-1.5 rounded-full flex-none ${SEV_DOT[it.sev] || SEV_DOT.info}`} />
+            <span className="text-[13px] font-bold text-slate-100 whitespace-nowrap">{it.title}</span>
+            {it.impact && <span className="text-[11px] text-slate-500 truncate flex-1 min-w-0">{it.impact}</span>}
+            {it.date && <span className="flex-none font-mono text-[10px] text-slate-500" title={it.dateTip || undefined}>{it.date}</span>}
           </button>
         ))}
       </div>
-    )}
-  </Panel>
-);
+    </Panel>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Top Opportunities — SIM/PAPER only (the signal universe drives those two
@@ -597,23 +636,23 @@ const Opportunities = ({ env, picks, positions, orders, navigateToTab }) => {
           return (
             <div key={`${p.market}-${p.ticker}`} className="flex items-center gap-2 px-3 py-1.5"
               title={`${p.reason || ''}${p.signalDate ? ` · signal ${tsTip(p.signalDate)}` : ''}${p.price != null ? ` · px ${fmtK(p.price)}` : ''}${p.changePct != null ? ` · 1d ${fmtPct(p.changePct)}` : ''}`}>
-              <span className="font-mono text-[9px] text-slate-600 w-3 flex-none">#{i + 1}</span>
-              <div className="flex-none w-[86px] min-w-0">
-                <div className="font-mono text-[12px] font-black text-white leading-tight truncate">{p.ticker}</div>
-                <div className="text-[8px] text-slate-500 truncate">{p.name || MARKET_LABEL[p.market] || p.market}</div>
+              <span className="font-mono text-[10px] text-slate-600 w-4 flex-none">#{i + 1}</span>
+              <div className="flex-none w-[96px] min-w-0">
+                <div className="font-mono text-[13px] font-black text-white leading-tight truncate">{p.ticker}</div>
+                <div className="text-[9px] text-slate-500 truncate">{p.name || MARKET_LABEL[p.market] || p.market}</div>
               </div>
               <div className="flex-none w-[64px]">
                 <div className="flex items-baseline gap-1" title={SCORE_TIP}>
-                  <span className="font-mono text-[12px] font-bold text-slate-100">{p.potential != null ? p.potential.toFixed(0) : '—'}</span>
-                  <span className="text-[8px] text-slate-500">/100</span>
+                  <span className="font-mono text-[13px] font-bold text-slate-100">{p.potential != null ? p.potential.toFixed(0) : '—'}</span>
+                  <span className="text-[9px] text-slate-500">/100</span>
                 </div>
                 <div className="h-0.5 mt-0.5 rounded bg-white/[0.06] overflow-hidden">
                   <div className="h-full bg-slate-300" style={{ width: `${Math.max(0, Math.min(100, p.potential ?? 0))}%` }} />
                 </div>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-bold text-slate-200 truncate">{p.strategyName || '—'}</div>
-                <div className="text-[8px] text-slate-500 truncate">{p.direction || 'BUY'}{p.signalDate ? ` · ${fmtDate(p.signalDate)}` : ''}</div>
+                <div className="text-[11px] font-bold text-slate-200 truncate">{p.strategyName || '—'}</div>
+                <div className="text-[9px] text-slate-500 truncate">{p.direction || 'BUY'}{p.signalDate ? ` · ${fmtDate(p.signalDate)}` : ''}</div>
               </div>
               <span className="flex-none flex items-center gap-1">
                 {isHeld && <span className="qr-chip qr-chip-slate" title="Already held in this environment's book">held</span>}
@@ -1122,66 +1161,89 @@ const EnvBook = ({ env, limits, navigateToTab }) => {
   })();
 
   const alertsEmpty = isSim
-    ? 'No SIM-scoped alert feed — the SIM book is virtual; only the global HALT applies.'
-    : isPaper ? 'No action required — halt clear, no paper-book risk breaches'
-    : isUat ? 'No action required — halt clear, UAT session connected'
-    : 'No action required — halt clear, no live-book alerts';
+    ? 'none — the SIM book is virtual; only the global HALT applies.'
+    : isPaper ? 'none — halt clear, no paper-book risk breaches.'
+    : isUat ? 'none — halt clear, UAT session connected.'
+    : 'none — halt clear, no live-book alerts.';
+
+  // Orders + fills: side by side only when BOTH panels carry rows; otherwise
+  // each follows its own content height (compact one-liners when empty).
+  const hasOrders = Array.isArray(orderRows) && orderRows.length > 0;
+  const hasFills = Array.isArray(fillRows) && fillRows.length > 0;
+
+  const ordersNode = (
+    <WorkingOrders env={env}
+      rows={orders == null ? null : orders.unsupported ? [] : orderRows}
+      unsupportedText={orders?.unsupported ? 'Not supported for SIM — synthetic fills execute at signal; the SIM ledger records closed trades only.' : null}
+      asOf={orders?.as_of}
+      headTip={isUat ? 'ib.openTrades() on the UAT session — unfilled/cancellable orders; no submission timestamps served' : `Order book — /api/command/order-book (source=${env})`}
+      emptyText={`No working orders in the ${ENV_META[env].badge} book.`}
+      navigateToTab={navigateToTab} />
+  );
+  const fillsNode = (
+    <RecentFills env={env} rows={fillRows} asOf={fills?.as_of}
+      headTip={
+        isSim ? 'Closed SIM trades — gold.paper_trades_synthetic × registry SIMULATION, newest exit first'
+        : isPaper ? 'Closed paper trades — gold.paper_trades_synthetic × registry PAPER, newest exit first'
+        : isUat ? 'UAT blotter — gold.manual_orders book=uat. Fills, not round-trips; per-fill P&L is not served.'
+        : 'Live fills — gold.trade_executions ∪ gold.manual_orders book=live, newest first'
+      }
+      emptyText={`No fills in the ${ENV_META[env].badge} book.`} />
+  );
 
   return (
     <>
-      {/* KPI row */}
+      {/* 1 — KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         {kpis.map((k) => <Kpi key={k.label} {...k} />)}
       </div>
 
-      {/* Operational grid: chart + positions (left, ~65%) · alerts + opportunities (right, ~35%) */}
+      {/* 2 — Open Positions: the primary operational table, FULL WIDTH,
+              directly under the KPIs. Never trapped in a side column. */}
+      <OpenPositions env={env} rows={posRows}
+        count={posRows ? posRows.length : null}
+        asOf={positions?.as_of}
+        headTip={
+          isSim ? 'SIM book — consumption.portfolio_positions_current. Entry date leftmost (YYYY-MM-DD), newest first.'
+          : isPaper ? 'Paper book — /api/agents/paper/open-positions. Entry date leftmost (YYYY-MM-DD), newest first. Market value = qty × last px (native ccy).'
+          : isUat ? 'Live IBKR UAT paper-account portfolio (ib.portfolio()). Entry price = IBKR average cost. No entry dates served — rows keep gateway order.'
+          : 'Live book — /api/positions/live (ibkr_snapshot). No entry dates served — rows keep snapshot order.'
+        }
+        note={isUat || isLive ? 'no entry dates served' : null}
+        emptyText={
+          isSim ? 'SIM book flat — 0 open positions'
+          : isPaper ? 'No open positions in the paper book'
+          : isUat ? (positions && positions.connected === false
+              ? 'UAT session disconnected — positions unavailable (PENDING). Reconnect from Execution ▸ UAT.'
+              : `UAT book flat — 0 open positions at the gateway${positions?.as_of ? ` (as of ${tsTip(positions.as_of)})` : ''}`)
+          : 'Live book flat — 0 open positions in the snapshot'
+        }
+        navigateToTab={navigateToTab} />
+
+      {/* 3 — Action Required: compact full-width strip (one line when clear) */}
+      <ActionRequired env={env} items={actionItems} emptyText={alertsEmpty} navigateToTab={navigateToTab} />
+
+      {/* 4 — Chart + opportunities, 65/35 */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,65fr)_minmax(0,35fr)] gap-2.5">
-        <div className="space-y-2.5 min-w-0">
-          {chartPanel}
-          <OpenPositions env={env} rows={posRows}
-            count={posRows ? posRows.length : null}
-            asOf={positions?.as_of}
-            headTip={
-              isSim ? 'SIM book — consumption.portfolio_positions_current. Entry date leftmost (YYYY-MM-DD), newest first.'
-              : isPaper ? 'Paper book — /api/agents/paper/open-positions. Entry date leftmost (YYYY-MM-DD), newest first. Market value = qty × last px (native ccy).'
-              : isUat ? 'Live IBKR UAT paper-account portfolio (ib.portfolio()). Entry price = IBKR average cost. No entry dates served — rows keep gateway order.'
-              : 'Live book — /api/positions/live (ibkr_snapshot). No entry dates served — rows keep snapshot order.'
-            }
-            note={isUat || isLive ? 'no entry dates served' : null}
-            emptyText={
-              isSim ? 'SIM book flat — 0 open positions'
-              : isPaper ? 'No open positions in the paper book'
-              : isUat ? (positions && positions.connected === false
-                  ? 'UAT session disconnected — positions unavailable (PENDING). Reconnect from Execution ▸ UAT.'
-                  : `UAT book flat — 0 open positions at the gateway${positions?.as_of ? ` (as of ${tsTip(positions.as_of)})` : ''}`)
-              : 'Live book flat — 0 open positions in the snapshot'
-            }
-            navigateToTab={navigateToTab} />
-        </div>
-        <div className="space-y-2.5 min-w-0">
-          <ActionRequired env={env} items={actionItems} emptyText={alertsEmpty} navigateToTab={navigateToTab} />
+        <div className="min-w-0">{chartPanel}</div>
+        <div className="min-w-0">
           <Opportunities env={env} picks={oppPicks} positions={posRows || []} orders={Array.isArray(orderRows) ? orderRows : []} navigateToTab={navigateToTab} />
         </div>
       </div>
 
-      {/* Working orders + recent fills, compact side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-        <WorkingOrders env={env}
-          rows={orders == null ? null : orders.unsupported ? null : orderRows}
-          unsupportedText={orders?.unsupported ? 'No working-order book exists for SIM — synthetic fills execute at signal. Nothing is hidden: the SIM ledger records closed trades only.' : null}
-          asOf={orders?.as_of}
-          headTip={isUat ? 'ib.openTrades() on the UAT session — unfilled/cancellable orders; no submission timestamps served' : `Order book — /api/command/order-book (source=${env})`}
-          emptyText={isUat ? 'No working orders on the UAT session' : `No working orders in the ${ENV_META[env].badge} book`}
-          navigateToTab={navigateToTab} />
-        <RecentFills env={env} rows={fillRows} asOf={fills?.as_of}
-          headTip={
-            isSim ? 'Closed SIM trades — gold.paper_trades_synthetic × registry SIMULATION, newest exit first'
-            : isPaper ? 'Closed paper trades — gold.paper_trades_synthetic × registry PAPER, newest exit first'
-            : isUat ? 'UAT blotter — gold.manual_orders book=uat. Fills, not round-trips; per-fill P&L is not served.'
-            : 'Live fills — gold.trade_executions ∪ gold.manual_orders book=live, newest first'
-          }
-          emptyText={`No fills in the ${ENV_META[env].badge} book`} />
-      </div>
+      {/* 5 — Working orders + recent fills: side by side only when both have
+              data; otherwise full-width content-height panels/one-liners */}
+      {hasOrders && hasFills ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 items-start">
+          {ordersNode}
+          {fillsNode}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {ordersNode}
+          {fillsNode}
+        </div>
+      )}
     </>
   );
 };
