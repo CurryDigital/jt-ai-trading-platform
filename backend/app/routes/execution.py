@@ -200,17 +200,57 @@ def reset_simulation(db: Session = Depends(get_db)):
 
 @router.get("/trades")
 def get_execution_trades(book: str = "live", limit: int = 50, db: Session = Depends(get_db)):
-    """Recent fills for the Live/Paper trade log — algo executions + manual orders."""
+    """Recent fills for ONE execution book — books are never mixed.
+
+    Canonical ledgers:
+      live  -> gold.trade_executions (algo) + gold.manual_orders book=live
+      uat   -> gold.manual_orders book=uat/paper_uat (UAT blotter)
+      sim   -> gold.paper_trades_synthetic x registry SIMULATION (closed trades)
+      paper -> gold.paper_trades_synthetic x registry PAPER      (closed trades)
+    SIM/PAPER rows carry strategy_id + realized pnl/pnl_pct + entry leg so the
+    Command page can render FILL DATE / STRATEGY / REALIZED P&L honestly.
+    """
     # Legacy alias: pre-rename clients and existing gold.manual_orders rows use
     # 'paper_uat'; canonical book value is now 'uat'.
     if book == "paper_uat":
         book = "uat"
+
+    if book in ("sim", "paper"):
+        exec_mode = "SIMULATION" if book == "sim" else "PAPER"
+        rows = safe_query(db, f"""
+            SELECT t.exit_date AS ts, t.direction AS side, t.ticker,
+                   t.n_shares AS qty, t.exit_price AS price,
+                   t.entry_price, t.entry_date, t.pnl, t.pnl_pct, t.strategy_id
+            FROM gold.paper_trades_synthetic t
+            JOIN gold.strategy_registry r
+              ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+            WHERE t.status = 'closed' AND t.exit_date IS NOT NULL
+              AND (t.ticker IS NULL OR t.ticker != 'CASH')
+            {_NS_EXCL}
+            ORDER BY t.exit_date DESC, t.id DESC LIMIT :limit
+        """, {"limit": limit}, label=f"execution_trades_{book}")
+        data = [{
+            "t": r.ts.isoformat() if r.ts else None,
+            "side": (r.side or "").upper() or None,
+            "ticker": r.ticker,
+            "qty": float(r.qty) if r.qty is not None else None,
+            "price": float(r.price) if r.price is not None else None,
+            "entry_price": float(r.entry_price) if r.entry_price is not None else None,
+            "entry_date": r.entry_date.isoformat() if r.entry_date else None,
+            "pnl": float(r.pnl) if r.pnl is not None else None,
+            "pnl_pct": float(r.pnl_pct) if r.pnl_pct is not None else None,
+            "strategy_id": r.strategy_id,
+            "source": "ledger",
+        } for r in rows]
+        return {"data": data, "as_of": _now_iso() if data else None}
+
     book_variants = ("uat", "paper_uat") if book == "uat" else (book,)
-    # Alias as "ts" (not "t") — SQLAlchemy 2.0's Row conflicts with a column literally named "t".
+    # Algo executions are the LIVE ledger (gold.trade_executions) — they belong
+    # to the live book only, never unioned into sim/paper/uat.
     rows = safe_query(db, """
-        SELECT executed_at AS ts, side, ticker, quantity AS qty, price, 'algo' AS source
+        SELECT executed_at AS ts, side, ticker, quantity AS qty, price, pnl, 'algo' AS source
         FROM gold.trade_executions ORDER BY executed_at DESC LIMIT :limit
-    """, {"limit": limit}, label="execution_trades_algo")
+    """, {"limit": limit}, label="execution_trades_algo") if book == "live" else []
     manual_rows = safe_query(db, """
         SELECT created_at AS ts, side, ticker, qty, entry_price AS price, 'manual' AS source
         FROM gold.manual_orders WHERE book = ANY(:books) ORDER BY created_at DESC LIMIT :limit
@@ -220,7 +260,9 @@ def get_execution_trades(book: str = "live", limit: int = 50, db: Session = Depe
     data = [{
         "t": r.ts.isoformat() if r.ts else None, "side": r.side, "ticker": r.ticker,
         "qty": float(r.qty) if r.qty is not None else None,
-        "price": float(r.price) if r.price is not None else None, "source": r.source,
+        "price": float(r.price) if r.price is not None else None,
+        "pnl": float(r.pnl) if getattr(r, "pnl", None) is not None else None,
+        "source": r.source,
     } for r in combined[:limit]]
     return {"data": data, "as_of": _now_iso() if data else None}
 
