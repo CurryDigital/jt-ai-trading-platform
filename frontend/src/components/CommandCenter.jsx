@@ -854,11 +854,11 @@ const MarketContext = ({ fc, chg }) => {
 // ---------------------------------------------------------------------------
 const NO_ENTRY_TIPS = {
   uat: 'Not served: the IBKR portfolio payload (/api/ib/tws/uat/positions) has no entry timestamp — a UAT positions ledger with entry dates is a backend/ETL gap.',
-  live: 'Not served: /api/positions/live (ibkr_snapshot) has no entry timestamp.',
+  live: 'No attribution for this row — ledger-fallback position or no matching fills in the DUP825942 fills ledger (gold.paper_uat_fills, horizon 2026-08-25).',
 };
 const NO_STRAT_TIPS = {
   uat: 'Not served: the IBKR portfolio payload has no strategy attribution — the UAT fills ledger is per-fill and cannot be uniquely mapped to an aggregated position.',
-  live: 'Not served: the live IBKR position snapshot has no strategy attribution.',
+  live: 'Manual/untagged fill — no strategy attribution across the open lots (never fabricated).',
 };
 
 // Unified position row: { key, entryDate, entryTip, symbol, ccy, strategy,
@@ -909,14 +909,18 @@ function normPositions(env, raw, stratNames) {
   // live
   return (raw || []).map((p, i) => ({
     key: `live-${p.id ?? p.ticker}-${i}`,
-    entryDate: null, entryTip: NO_ENTRY_TIPS.live,
+    entryDate: fmtDate(p.entry_date),
+    entryTip: p.entry_date
+      ? `entry ${fmtDate(p.entry_date)}${p.qty_reconciled === false ? ' · unreconciled ledger' : ''}`
+      : NO_ENTRY_TIPS.live,
     symbol: p.ticker, ccy: null,
-    strategy: null, strategyTip: NO_STRAT_TIPS.live,
+    strategy: p.strategy_id ? (stratNames[p.strategy_id] || p.strategy_name || p.strategy_id) : null,
+    strategyTip: p.strategy_id ? null : NO_STRAT_TIPS.live,
     side: (p.side || '').toUpperCase() || null,
     qty: p.quantity, entryPx: p.avg_entry, curPx: p.current_price,
     unreal: p.unrealized_pnl,
     mv: (p.quantity != null && p.current_price != null) ? p.quantity * p.current_price : null,
-    days: null,
+    days: daysHeld(p.entry_date),
   }));
 }
 
@@ -1341,9 +1345,9 @@ const EnvBook = ({ env, limits, onDataAsOf, navigateToTab }) => {
           isSim ? 'SIM book — consumption.portfolio_positions_current. Entry date leftmost (YYYY-MM-DD), newest first.'
           : isPaper ? 'Paper book — /api/agents/paper/open-positions. Entry date leftmost (YYYY-MM-DD), newest first. Market value = qty × last px (native ccy).'
           : isUat ? 'Live IBKR UAT paper-account portfolio (ib.portfolio()). Entry price = IBKR average cost. No entry dates served — rows keep gateway order.'
-          : 'Live book — /api/positions/live (ibkr_snapshot). No entry dates served — rows keep snapshot order.'
+          : 'Live book — /api/positions/live (ibkr_snapshot). Entry = earliest FIFO open lot from the DUP825942 fills ledger (gold.paper_uat_fills), as-of the snapshot row.'
         }
-        note={isUat || isLive ? 'no entry dates served' : null}
+        note={isUat ? 'no entry dates served' : null}
         emptyText={
           isSim ? 'SIM book flat — 0 open positions'
           : isPaper ? 'No open positions in the paper book'

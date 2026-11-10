@@ -408,6 +408,13 @@ def _net_ledger_positions(db):
             "unrealized_pnl": round((current_price - b["avg"]) * b["net"], 2),
             "as_of": b["last_ts"].isoformat() if b["last_ts"] else None,
             "source": "ledger",
+            # No attribution for ledger-fallback rows — explicit NULLs.
+            "entry_date": None,
+            "entry_ts": None,
+            "strategy_id": None,
+            "strategy_name": None,
+            "qty_reconciled": None,
+            "tagged_open_pct": None,
         })
     return out
 
@@ -426,7 +433,7 @@ def get_live_positions(db: Session = Depends(get_db)):
 
     try:
         rows = db.execute(text("""
-            SELECT id, ticker, side, quantity, avg_cost, market_price,
+            SELECT id, account, ticker, side, quantity, avg_cost, market_price,
                    unrealized_pnl, fetched_at
             FROM gold.ibkr_positions_live
             WHERE quantity <> 0
@@ -436,11 +443,26 @@ def get_live_positions(db: Session = Depends(get_db)):
         db.rollback()
         rows = []
 
+    # FIFO open-lot attribution (entry date / strategy) per snapshot row.
+    # Queried separately so a missing view degrades to NULL fields instead of
+    # dropping the snapshot positions. NULL passthrough — never default.
+    attr = {}
+    try:
+        for a in db.execute(text("""
+            SELECT account, ticker, entry_date, entry_ts, strategy_id,
+                   strategy_name, qty_reconciled, tagged_open_pct
+            FROM gold.v_live_position_attribution
+        """)).fetchall():
+            attr[(a.account, a.ticker)] = a
+    except Exception:
+        db.rollback()
+
     seen = set()
     for r in rows:
         seen.add(r.ticker)
         if snapshot_ts is None or (r.fetched_at and r.fetched_at > snapshot_ts):
             snapshot_ts = r.fetched_at
+        a = attr.get((r.account, r.ticker))
         positions.append({
             "id": r.id,
             "ticker": r.ticker,
@@ -451,6 +473,12 @@ def get_live_positions(db: Session = Depends(get_db)):
             "unrealized_pnl": float(r.unrealized_pnl or 0),
             "as_of": r.fetched_at.isoformat() if r.fetched_at else None,
             "source": "ibkr_snapshot",
+            "entry_date": a.entry_date.isoformat() if a and a.entry_date else None,
+            "entry_ts": a.entry_ts.isoformat() if a and a.entry_ts else None,
+            "strategy_id": a.strategy_id if a else None,
+            "strategy_name": a.strategy_name if a else None,
+            "qty_reconciled": a.qty_reconciled if a else None,
+            "tagged_open_pct": float(a.tagged_open_pct) if a and a.tagged_open_pct is not None else None,
         })
 
     # Ledger fallback for tickers missing from the broker snapshot
