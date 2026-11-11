@@ -1,0 +1,48 @@
+{
+  "us_stk_net_share_reduction_01": {
+    "label": "No historical backtest — forward research simulation",
+    "evidence_class": "FORWARD_RESEARCH",
+    "admission_verdict": "ADMIT_TO_FORWARD_RESEARCH_SIM",
+    "admission_date": "2026-11-10",
+    "mission": "EQ-NEXT-1 workstream B",
+    "frozen_spec": {
+      "path": "/home/ubuntu/.hermes/profiles/qr_research/workspace/eq_next1_2026-11-10/spec_us_stk_net_share_reduction_01.md",
+      "sha256": "9398c97e66e70ef602912ee0a9443576a26bdb2292a4902b13b3df07851763c9",
+      "frozen_at_utc": "2026-11-10T14:37:20Z",
+      "freeze_manifest": "/home/ubuntu/.hermes/profiles/qr_research/workspace/eq_next1_2026-11-10/freeze_manifest.json"
+    },
+    "evaluation_windows": {
+      "accrual_start": "2026-11-10",
+      "decision_cadence": "monthly — last US trading session, decision at close",
+      "fill_convention": "next session raw OPEN, whole shares, cash residual, 0% cash yield",
+      "first_signal_date": "2026-11-27",
+      "first_fill_date": "2026-11-30",
+      "promotion_minima": ">=20 months AND >=20 monthly batches AND >=40 closed position episodes"
+    },
+    "cost_ledger": {
+      "cost_cases_bps_round_trip": [3, 10, 25],
+      "application": "per leg (half-spread each side), parallel equity sleeves per cost case; realized next-open slippage logged contemporaneously vs decision close",
+      "estimated_annual_round_trips": 0.8,
+      "economic_gate_10bps": "PASS — drag 0.08%/yr, required gross edge >= 0.24%/yr (3x rule)",
+      "research_notional_per_sleeve_usd": 1000000,
+      "notional_note": "$1M research notional per sleeve, disclosed — the $32k paper NAV cannot hold ~92 whole-share names; research-only sleeve"
+    },
+    "comparators": [
+      "top-quintile net-issuance portfolio (identical construction)",
+      "eligible-universe equal-weight benchmark"
+    ],
+    "evidence_links": {
+      "final_package": "/home/ubuntu/.hermes/profiles/qr_research/workspace/eq_next1_2026-11-10/EQ_NEXT1_final_package.md",
+      "forward_sim_dir": "/home/ubuntu/.hermes/profiles/qr_research/workspace/eq_next1_2026-11-10/forward_sim/",
+      "split_validation": "/home/ubuntu/.hermes/profiles/qr_research/workspace/eq_next1_2026-11-10/probe8c_final_validation.json",
+      "turnover_evidence": "/home/ubuntu/.hermes/profiles/qr_research/workspace/eq_next1_2026-11-10/probe7b_turnover.json",
+      "monthly_signal_engine": "~/.hermes/profiles/qr_research/scripts/nsr_monthly_signal.py (cron f08c884e92f8, days 1-5 13:00Z)",
+      "daily_marker": "~/.hermes/profiles/qr_research/scripts/nsr_daily_mark.py (cron d594ed102a2c, 12:30Z)"
+    },
+    "display_policy": {
+      "metrics_until_episodes_close": "—",
+      "excluded_from": ["OOS rankings", "backtest rankings", "Paper", "Core", "Watch", "UAT", "Live"],
+      "registry_status": "sim"
+    }
+  }
+}
