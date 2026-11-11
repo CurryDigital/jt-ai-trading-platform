@@ -3,6 +3,36 @@ import sys
 
 BASE_URL = "http://localhost:8000"
 
+def test_strategy_pnl_aggregate_reconciliation():
+    """Command v7.1: the authoritative per-strategy aggregate must reconcile
+    EXACTLY with the book-level stats, for any book size (the old
+    /trades?limit=500 page aggregation silently under-reported books with
+    more than 500 closed trades)."""
+    print("--- TESTING /api/execution/strategy-pnl RECONCILIATION ---")
+    for book in ("sim", "paper"):
+        res = requests.get(f"{BASE_URL}/api/execution/strategy-pnl?book={book}", timeout=15)
+        assert res.status_code == 200, f"{book}: status {res.status_code}"
+        agg = res.json()
+        ov = requests.get(f"{BASE_URL}/api/execution/book-overview?book={book}", timeout=15).json()
+        stats = ov.get("stats", {})
+        # Per-strategy sum ties to the served totals and to book-overview.
+        ssum = round(sum(s["cum_pnl"] or 0 for s in agg["strategies"]), 2)
+        assert agg["total_cum_pnl"] == ssum, f"{book}: total_cum_pnl != Σ strategies"
+        if stats.get("cum_pnl") is not None:
+            assert agg["total_cum_pnl"] == stats["cum_pnl"], \
+                f"{book}: aggregate {agg['total_cum_pnl']} != book cum_pnl {stats['cum_pnl']}"
+        assert agg["total_closed"] == stats.get("closed_trades"), \
+            f"{book}: total_closed {agg['total_closed']} != closed_trades {stats.get('closed_trades')}"
+        # Full-ledger coverage: every strategy row is served (no LIMIT).
+        assert len(agg["strategies"]) >= 1 or stats.get("closed_trades", 0) == 0
+        print(f"[PASS] {book}: {len(agg['strategies'])} strategies, Σ={agg['total_cum_pnl']} == stats.cum_pnl, closed={agg['total_closed']}")
+    # UAT/LIVE have no per-strategy round-trip ledger — honest 400.
+    for book in ("uat", "live"):
+        res = requests.get(f"{BASE_URL}/api/execution/strategy-pnl?book={book}", timeout=15)
+        assert res.status_code == 400, f"{book}: expected 400, got {res.status_code}"
+    print("[PASS] uat/live correctly refused (no per-strategy round-trip ledger)")
+
+
 def test_strategy_evaluation_trades_expansion():
     print("--- TESTING STRATEGY TRADES ROUND-TRIP EXPANSION ---")
     sid = "HK_Quality_BlueChips"

@@ -442,6 +442,64 @@ def _book_overview_sim_paper(db, exec_mode):
     }
 
 
+# =============================================================================
+# Strategy P&L aggregate (Command v7.1): authoritative per-strategy realized
+# P&L over the FULL closed ledger — SQL GROUP BY with no row limit. Exists so
+# the Command page never aggregates a truncated /trades?limit=N page (the old
+# limit=500 correctness hazard: any book exceeding 500 closed trades silently
+# under-reported per-strategy realized P&L). Totals are returned alongside so
+# the UI can reconcile Σ per-strategy against book-overview stats.cum_pnl.
+# SIM/PAPER only — UAT/LIVE have no per-strategy round-trip ledger.
+# =============================================================================
+@router.get("/strategy-pnl")
+def get_strategy_pnl(book: str = "paper", db: Session = Depends(get_db)):
+    if book == "paper_uat":
+        book = "uat"
+    if book not in ("sim", "paper"):
+        raise HTTPException(
+            status_code=400,
+            detail="strategy-pnl is served for sim|paper only — UAT/LIVE have no per-strategy round-trip ledger",
+        )
+    exec_mode = "SIMULATION" if book == "sim" else "PAPER"
+    rows = safe_query(db, f"""
+        SELECT t.strategy_id, r.name,
+               COUNT(*) AS closed,
+               COUNT(*) FILTER (WHERE t.pnl > 0) AS wins,
+               SUM(t.pnl) AS cum_pnl,
+               SUM(t.pnl) FILTER (
+                   WHERE t.exit_date >= date_trunc('year', now())::date
+               ) AS ytd_pnl
+        FROM gold.paper_trades_synthetic t
+        JOIN gold.strategy_registry r
+          ON r.strategy_id = t.strategy_id AND r.execution_mode = '{exec_mode}'
+        WHERE t.status = 'closed' AND (t.ticker IS NULL OR t.ticker != 'CASH')
+        {_NS_EXCL}
+        GROUP BY t.strategy_id, r.name
+        ORDER BY SUM(t.pnl) DESC NULLS LAST
+    """, label=f"strategy_pnl_{exec_mode}")
+
+    strategies = [{
+        "strategy_id": r.strategy_id,
+        "name": r.name or r.strategy_id,
+        "closed_trades": int(r.closed or 0),
+        "win_rate": round(int(r.wins or 0) / int(r.closed) * 100, 1) if r.closed else None,
+        "cum_pnl": round(float(r.cum_pnl), 2) if r.cum_pnl is not None else None,
+        "ytd_pnl": round(float(r.ytd_pnl), 2) if r.ytd_pnl is not None else None,
+    } for r in rows]
+
+    return {
+        "book": book,
+        "as_of": _now_iso(),
+        "strategies": strategies,
+        # Reconciliation anchors — must tie to book-overview stats exactly
+        # (identical ledger, filters, and non-strategy exclusion).
+        "total_closed": sum(s["closed_trades"] for s in strategies),
+        "total_cum_pnl": round(
+            sum(s["cum_pnl"] for s in strategies if s["cum_pnl"] is not None), 2
+        ) if any(s["cum_pnl"] is not None for s in strategies) else None,
+    }
+
+
 def _book_overview_uat(db):
     """UAT book: broker-rehearsal fills only (gold.paper_uat_fills has no
     per-fill pnl — they are fills, not round-trips). Strategy ranking is by

@@ -355,6 +355,46 @@ function RealMetrics({ s, mode }) {
     );
   }
 
+  // FORWARD_RESEARCH (FRONTEND SIM PUBLICATION RULE, operator directive
+  // 2026-11-11): forward-only research sims are admitted with NO historical
+  // backtest (none permitted by the frozen spec) and published to the Sim view
+  // immediately. Every metric stays "—" until forward episodes close; the
+  // frozen-spec hash, cost ledger, and evaluation windows are shown instead.
+  // Never ranked, never promoted from this card.
+  const fwd = mode === 'sim' && s._api?.evidence_class === 'FORWARD_RESEARCH'
+    ? (s._api?.forward_research || {}) : null;
+  if (fwd) {
+    const specSha = fwd.frozen_spec?.sha256 ? `${fwd.frozen_spec.sha256.slice(0, 12)}…` : '—';
+    const ev = fwd.evaluation_windows || {};
+    const cl = fwd.cost_ledger || {};
+    const evTip = [
+      fwd.frozen_spec?.path ? `spec: ${fwd.frozen_spec.path}` : null,
+      fwd.frozen_spec?.sha256 ? `sha256: ${fwd.frozen_spec.sha256}` : null,
+      fwd.frozen_spec?.freeze_manifest ? `freeze manifest: ${fwd.frozen_spec.freeze_manifest}` : null,
+      fwd.evidence_links?.final_package ? `package: ${fwd.evidence_links.final_package}` : null,
+      fwd.evidence_links?.forward_sim_dir ? `forward sim: ${fwd.evidence_links.forward_sim_dir}` : null,
+    ].filter(Boolean).join('\n');
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '8px 8px', padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)' }}>
+        <Metric label="Return" value="—" big tip="No historical backtest exists for this strategy (forward-only by frozen design). Populates when forward episodes close." />
+        <Metric label="Sharpe" value="—" big tip="No backtest — forward accrual only" />
+        <Metric label="Win rate" value="—" big tip="No backtest — forward accrual only" />
+        <Metric label="Max DD" value="—" tip="No backtest — forward accrual only" />
+        <Metric label="Episodes (fwd)" value="—" tip={ev.promotion_minima ? `Promotion minima: ${ev.promotion_minima}` : undefined} />
+        <Metric label="Conviction" value={conviction != null ? Number(conviction).toFixed(1) : '—'} />
+        <div style={{ gridColumn: '1 / -1', fontSize: 8, color: 'var(--text-muted)', lineHeight: 1.45 }} title={evTip}>
+          {fwd.label || 'No historical backtest — forward research simulation'}
+          {ev.accrual_start && <> · accruing since {ev.accrual_start}</>}
+          {ev.decision_cadence && <> · {ev.decision_cadence}</>}
+          {ev.first_signal_date && <> · first signal {ev.first_signal_date}</>}
+          {cl.cost_cases_bps_round_trip && <> · cost ledgers {cl.cost_cases_bps_round_trip.join('/')}&nbsp;bps RT</>}
+          {cl.economic_gate_10bps && <> · {cl.economic_gate_10bps}</>}
+          {specSha !== '—' && <> · spec sha256 <span style={{ fontFamily: 'var(--font-mono)' }}>{specSha}</span></>}
+        </div>
+      </div>
+    );
+  }
+
   // Sim (backtest/OOS) block. returns_oos semantics differ per strategy (CAGR
   // on some runs, total return on others) and win-rate / trade-count bases
   // differ per strategy too (per month/day vs per leg/rebalance event) —
@@ -573,6 +613,11 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Chip color={hz.color}>{hz.label}</Chip>
         <Chip color={s.tier === 'T1' ? 'emerald' : s.tier === 'T2' ? 'amber' : 'slate'}>{s.tier}</Chip>
+        {s._api?.evidence_class === 'FORWARD_RESEARCH' && (
+          <span title="Forward-only research simulation — no historical backtest exists; metrics accrue from forward episodes. Not Paper/Core/Watch/UAT/Live; excluded from OOS/backtest rankings.">
+            <Chip color="blue">FWD RESEARCH</Chip>
+          </span>
+        )}
         {viewMode === 'paper' && s._api?.paper_tier && (
           <span title={s._api.paper_tier_blocker || undefined} style={{ cursor: s._api.paper_tier_blocker ? 'help' : undefined }}>
             <Chip color={s._api.paper_tier === 'CORE' ? 'emerald' : 'slate'}>{s._api.paper_tier}</Chip>
@@ -591,10 +636,10 @@ function StrategyCard({ s, onOpen, onAction, showLadder, viewMode = 'sim' }) {
 
       <div style={{ padding: '7px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }} title={barsTip}>{barsLabel}</span>
-        <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} oosStart={viewMode === 'sim' ? oosStart : null} oosEnd={viewMode === 'sim' ? oosEnd : null} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → UAT' : undefined} />
+        <YearlyBars yearly={barsData} normalize={barsNormalize} openBar={openBar} oosStart={viewMode === 'sim' ? oosStart : null} oosEnd={viewMode === 'sim' ? oosEnd : null} emptyLabel={viewMode === 'paper' ? 'No closed paper trades yet' : viewMode === 'live' ? 'No live returns yet' : viewMode === 'uat' ? 'Book lives at the IBKR UAT session — see Execution → UAT' : (viewMode === 'sim' && s._api?.evidence_class === 'FORWARD_RESEARCH' ? 'No historical backtest — forward research simulation' : undefined)} />
       </div>
 
-      {showLadder && !halted && (
+      {showLadder && !halted && s._api?.evidence_class !== 'FORWARD_RESEARCH' && (
         <div style={{ display: 'flex', gap: 6, marginTop: 1 }}>
           {next && (
             <Button variant={next === 'LIVE_TRADING' ? 'danger' : 'primary'} size="sm" style={{ flex: 1, justifyContent: 'center' }}
@@ -693,7 +738,7 @@ export function StrategyPerformanceGrid({ book, error, hzn, setHzn, onOpen, onAc
   //    closed cost-true trades; ranked on closed net (realized) P&L. Open
   //    (unrealized) gains never win a headline. "—" when nothing qualifies.
   const simBest = perfMode === 'sim'
-    ? [...src].filter((s) => s.returns != null).sort((a, b) => b.returns - a.returns)[0]
+    ? [...src].filter((s) => s.returns != null && s._api?.evidence_class !== 'FORWARD_RESEARCH').sort((a, b) => b.returns - a.returns)[0]
     : null;
   const validated = [...src].filter((s) => s._api?.paper_tier === 'CORE' && (s.paperTrades ?? 0) >= 20 && s._api?.paper_pnl_realized != null)
     .sort((a, b) => Number(b._api.paper_pnl_realized) - Number(a._api.paper_pnl_realized));

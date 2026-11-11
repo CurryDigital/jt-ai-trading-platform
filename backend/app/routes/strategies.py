@@ -35,6 +35,27 @@ def _coerce_number(v):
 router = APIRouter(prefix="/api", tags=["strategies"])
 
 
+# FRONTEND SIM PUBLICATION RULE (operator directive 2026-11-11): strategies
+# registered with evidence_class='FORWARD_RESEARCH' are forward-only research
+# sims — admitted without a historical backtest (none permitted by the frozen
+# spec) and published to the Sim view immediately, metrics "—" until forward
+# episodes close. Frozen-spec / cost-ledger / evaluation-window evidence is
+# served verbatim from this operator-curated file (never fabricated).
+def _load_forward_research_evidence():
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        p = _Path(__file__).resolve().parent.parent / "forward_research_evidence.json"
+        with p.open() as f:
+            return _json.load(f)
+    except Exception as e:
+        logger.error(f"forward_research_evidence load error: {e}")
+        return {}
+
+
+_FORWARD_RESEARCH_EVIDENCE = _load_forward_research_evidence()
+
+
 
 @router.get("/quant/templates")
 def get_strategy_templates_quant():
@@ -155,7 +176,7 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                    r.conviction_score, r.description,
                    r.assigned_capital, r.in_market_capital, r.signal_logic, r.exit_logic,
                    r.priority, r.approved_at, r.retirement_reason, res.status as research_status,
-                   r.paper_tier, r.paper_tier_blocker
+                   r.paper_tier, r.paper_tier_blocker, r.evidence_class
             FROM gold.strategy_registry r
             JOIN gold.strategy_research res ON res.strategy_id = r.strategy_id
             WHERE r.status != 'DEPRECATED'
@@ -621,6 +642,12 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
             trade_count = oos.get('trade_count_oos') if oos.get('trade_count_oos') is not None else (
                 int(r_trade_count) if r_trade_count is not None else 0
             )
+            # Forward-research SIM rows (FRONTEND SIM PUBLICATION RULE,
+            # 2026-11-11) have no backtest by design — a coerced 0 would read
+            # as "zero trades measured"; ship None so the UI renders "—"
+            # until forward episodes close.
+            if getattr(row, 'evidence_class', None) == 'FORWARD_RESEARCH' and not oos:
+                trade_count = None
             sharpe = oos.get('sharpe_oos') if oos.get('sharpe_oos') is not None else (
                 float(r_sharpe) if r_sharpe is not None else None
             )
@@ -743,6 +770,14 @@ def get_researcher_strategies(asset_class: str = None, priority: str = None, sta
                 # with the operator's reason text. PENDING books are stored as
                 # status='paused' with a 'PENDING —' reason prefix.
                 "retirement_reason": getattr(row, 'retirement_reason', None),
+                # FRONTEND SIM PUBLICATION RULE (2026-11-11): forward-research
+                # evidence class + the frozen-spec / cost-ledger / evaluation
+                # evidence block for the Sim view. NULL for standard rows.
+                "evidence_class": getattr(row, 'evidence_class', None),
+                "forward_research": (
+                    _FORWARD_RESEARCH_EVIDENCE.get(sid)
+                    if getattr(row, 'evidence_class', None) == 'FORWARD_RESEARCH' else None
+                ),
                 # Skip detail behind the 'N unfilled' badge (t_070590de).
                 "paper_skips": paper_skips.get(sid, []),
                 "paper_skip_count": paper_skip_counts.get(sid, 0),
