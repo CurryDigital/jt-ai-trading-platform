@@ -45,7 +45,7 @@ export const ExposurePanel = ({ env, stats, alloc, dd, util, conc }) => (
         <div className="text-[11px] uppercase tracking-wider text-slate-400 mb-1.5">Risk utilization · capital caps</div>
         <div className="space-y-1">
           {util.map(u => (
-            <div key={u.strategy_id} className="flex items-center gap-2 text-[12px]" title="gold.risk_limits per-strategy capital cap — /api/execution/limits">
+            <div key={u.strategy_id} className="flex items-center gap-2 text-[12px]" title="Per-strategy capital cap and current utilization">
               <span className="flex-1 text-slate-400 truncate">{u.name}</span>
               <span className="font-mono text-slate-300">{u.used_pct != null ? `${u.used_pct.toFixed(1)}%` : '—'} used</span>
               <span className="font-mono text-slate-500">of {u.capital_cap_pct}%</span>

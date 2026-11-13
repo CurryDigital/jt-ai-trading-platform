@@ -98,7 +98,7 @@ export const StrategyPanel = ({ env, rows, stratPnl, bookCumPnl, riskBy, defCcy,
           </span>
         )}
         <span className="text-[11px] text-slate-500" title={stratPnl != null
-          ? "Open count / market value / unrealized: aggregated from the open positions below. Realized: authoritative per-strategy aggregate over the FULL closed ledger (/api/execution/strategy-pnl — no row cap). Contribution: strategy unrealized ÷ book unrealized (percentage only when the book total is a meaningful positive base)."
+          ? "Open count, market value, and unrealized P&L are aggregated from the positions below. Realized P&L uses the full closed ledger. Contribution is strategy unrealized P&L ÷ book unrealized P&L, shown only when the book total is a meaningful positive base."
           : "Open count / market value / unrealized: aggregated from the open positions below. Contribution: strategy unrealized ÷ book unrealized (percentage only when the book total is a meaningful positive base)."}>open rows ⓘ</span>
         <LinkBtn onClick={() => navigateToTab('strategies')}>Strategies →</LinkBtn>
       </span>

@@ -44,7 +44,7 @@ const RegimeRegion = ({ region, fc, chg }) => {
           {regime ?? '—'}
         </span>
         <span className="font-mono text-[11px] text-slate-400"
-          title={region === 'US' ? 'HMM posterior probability of the current regime (gold.regime_label)' : 'No regime posterior for HK — the HMM is US-scope (SPY/VIX features)'}>
+          title={region === 'US' ? 'HMM posterior probability of the current regime' : 'No regime posterior for HK — the HMM is US-scope (SPY/VIX features)'}>
           P {fmtConf(chg?.confidence)}
         </span>
         <span className="text-[11px] font-mono text-slate-400 truncate" title={chg?.source || ''}>{changeLine ?? '—'}</span>
@@ -54,7 +54,7 @@ const RegimeRegion = ({ region, fc, chg }) => {
           {days.map((d, i) => (
             <div key={d.date || i}
               className={`rounded px-1 py-1 text-center ${RISK_CELL(d.risk_on)}`}
-              title={`${d.date ?? ''} · ${d.risk_on != null ? `${d.risk_on.toFixed(1)}%` : '—'} risk-on — momentum_nowcast (consumption.macro_regime_7d)${allSame ? ' · flat carry-forward nowcast' : ''}`}>
+              title={`${d.date ?? ''} · ${d.risk_on != null ? `${d.risk_on.toFixed(1)}%` : '—'} risk-on — 7-day momentum nowcast${allSame ? ' · flat carry-forward nowcast' : ''}`}>
               <div className="text-[9px] font-mono opacity-80">
                 {d.date ? new Date(d.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'narrow' }) : '·'}
               </div>
@@ -111,7 +111,7 @@ export const MarketContext = ({ fc, chg }) => {
         <RegimeRegion region="HK" fc={fc?.HK} chg={chg?.HK} />
       </div>
       <div className="px-4 py-1.5 text-[11px] text-slate-500 border-t border-white/[0.05]"
-        title="Environment-agnostic market data. Indices: /api/markets/overview. Regime: consumption.market_sentiment (canonical) + HMM posterior from gold.regime_label (US, SPY/VIX features). 7-day strip: momentum_nowcast (consumption.macro_regime_7d). Legend: ≥60% risk-on = emerald · ≤40% = rose · else neutral.">
+        title="Market context is shared across environments. Regime probability uses US SPY/VIX features; the 7-day strip uses a momentum nowcast. Legend: ≥60% risk-on = emerald · ≤40% = rose · else neutral.">
         environment-agnostic · HMM daily + 7d nowcast
       </div>
     </div>

@@ -13,7 +13,7 @@ export const Opportunities = ({ env, picks, positions, orders, navigateToTab }) 
   if (env === 'uat' || env === 'live') {
     return (
       <NoData>
-        No signal attribution for the {ENV_META[env].badge} book — the signal universe (consumption.signal_setups) is not mapped to this environment. SIM and PAPER show their signal-driven candidates.
+        No signal attribution is available for the {ENV_META[env].badge} book. SIM and PAPER show their signal-driven candidates.
       </NoData>
     );
   }

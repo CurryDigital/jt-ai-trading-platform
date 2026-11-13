@@ -14,8 +14,8 @@ export const SEV_DOT = { critical: 'bg-rose-400', warning: 'bg-slate-400', info:
 export const SEV_TAG = { critical: 'text-rose-300 border-rose-500/40', warning: 'text-slate-300 border-white/[0.15]' };
 
 export const NO_ENTRY_TIPS = {
-  uat: 'Not served: the IBKR portfolio payload (/api/ib/tws/uat/positions) has no entry timestamp — a UAT positions ledger with entry dates is a backend/ETL gap.',
-  live: 'No attribution for this row — ledger-fallback position or no matching fills in the DUP825942 fills ledger (gold.paper_uat_fills, horizon 2026-08-25).',
+  uat: 'Entry dates are unavailable for UAT gateway positions; no entry timestamp is inferred.',
+  live: 'No entry attribution is available for this ledger-fallback position; no matching open-lot fill was found.',
 };
 export const NO_STRAT_TIPS = {
   uat: 'Not served: the IBKR portfolio payload has no strategy attribution — the UAT fills ledger is per-fill and cannot be uniquely mapped to an aggregated position.',
@@ -23,7 +23,7 @@ export const NO_STRAT_TIPS = {
 };
 export const NO_FILL_PNL_TIP = 'Per-fill realized P&L is not served for this environment (fills blotter, not round-trips).';
 export const NO_FILL_STRAT_TIP = 'This fills blotter has no strategy attribution.';
-export const NO_ORDER_DATE_TIP = 'Not served: ib.openTrades() on the UAT session carries no order submission timestamp.';
+export const NO_ORDER_DATE_TIP = 'The UAT gateway does not provide an order submission timestamp.';
 
 export const POSITIONS_PAGE = 16;
 
@@ -49,7 +49,7 @@ export const SORTS = {
 
 export const MARKET_LABEL = { US: 'US Equity', HK: 'HK Equity', CRYPTO: 'Crypto', FX: 'FX', METAL: 'Metals' };
 
-export const SCORE_TIP = 'Engine conviction score (consumption.signal_setups.potential, 0–100). '
+export const SCORE_TIP = 'Engine conviction score (0–100). '
   + 'The signal pipeline publishes no formula or component breakdown for this field — '
   + 'treat it as a heuristic ranking, not a decomposable model output.';
 

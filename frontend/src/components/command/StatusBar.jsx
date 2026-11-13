@@ -39,7 +39,7 @@ export const SessionItem = ({ env, sess }) => {
       : null;
     const bad = s?.last_run_status && s.last_run_status !== 'ok';
     return (
-      <StatusItem label="Last run" tip="Latest paper pipeline run — /api/agents/paper/system-status">
+      <StatusItem label="Last run" tip="Latest paper strategy run">
         <span className={`font-mono text-[12px] ${bad ? 'text-rose-300' : 'text-slate-300'}`}>{s == null ? '—' : (run || '—')}</span>
       </StatusItem>
     );
@@ -48,7 +48,7 @@ export const SessionItem = ({ env, sess }) => {
     const s = sess?.env === 'uat' ? sess.res : null;
     const connected = s?.is_connected === true;
     return (
-      <StatusItem label="Session" tip={s ? `${s.message || ''} · ${s.host || ''}:${s.port || ''} client ${s.client_id ?? '—'}` : 'UAT session status unavailable'}>
+      <StatusItem label="Session" tip={s ? `IBKR UAT paper gateway ${connected ? 'connected' : 'disconnected'}` : 'UAT session status unavailable'}>
         <span className={`w-2 h-2 rounded-full ${s == null ? 'bg-slate-600' : connected ? 'bg-emerald-400' : 'bg-rose-400'}`} />
         <span className="font-mono text-[12px] text-slate-300">{s == null ? '—' : connected ? 'connected' : 'down'}</span>
       </StatusItem>
@@ -100,7 +100,7 @@ export const StatusBar = ({ env, onEnv, limits, sess, dataAsOf }) => {
           <EnvToggle env={env} onChange={onEnv} />
         </span>
         <StatusDivider />
-        <StatusItem label="HALT" tip={halted ? 'Global halt is ACTIVE — gold.risk_limits.global_halt (applies to every environment)' : 'No global halt — gold.risk_limits.global_halt = false'}>
+        <StatusItem label="HALT" tip={halted ? 'Global halt is ACTIVE and applies to every environment' : 'No global halt is active'}>
           <span className={`font-mono text-[12px] font-bold ${halted ? 'text-rose-300' : 'text-slate-300'}`}>
             {limits == null ? '—' : halted ? 'HALTED' : 'off'}
           </span>
