@@ -218,7 +218,7 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
         label: 'Max drawdown',
         value: fmtKCcy(dd, overview?.equity_curve_currency || 'HKD'),
         sub: 'equity · last 30 sessions',
-        tip: 'Peak-to-trough of the live account equity curve (consumption.account_equity_curve, last 30 sessions) — a genuine equity series, frontend-derived from the displayed window.',
+        tip: 'Peak-to-trough of the live account equity curve over the last 30 sessions, calculated from the displayed window.',
       };
     }
     return null;
@@ -236,7 +236,7 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
       const acct = isPaper ? paperAcct : null;
       const unreal = isPaper ? acct?.open_pnl : simUnreal;
       return {
-        footnote: `Cumulative realized P&L, ${ENV_META[env].badge} book ledger (USD) — /api/execution/book-overview. Curve: daily cumulative realized, year to date.`,
+        footnote: `Cumulative realized P&L, ${ENV_META[env].badge} book ledger (USD) · daily cumulative realized, year to date.`,
         curve, curveNote: 'YTD · realized · USD',
         curveEmpty: bookOv == null ? 'Loading book…' : `No realized P&L this year in the ${ENV_META[env].badge} book`,
         focal: {
@@ -248,7 +248,7 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
         focalSub: st ? `YTD ${st.ytd_pnl != null ? sK(st.ytd_pnl) : '—'} · ${st.closed_trades ?? 0} closed · WR ${st.win_rate ?? '—'}%` : null,
         secondaries: [
           { label: 'Today · realized · USD', tip: "Realized P&L from today's exits (USD)", value: st?.today ? sK(st.today.pnl) : '—', valueCl: st?.today ? pnlCl(st.today.pnl) : 'text-slate-600', sub: st?.today ? `${st.today.trades} exit${st.today.trades === 1 ? '' : 's'}` : 'no exits today' },
-          { label: 'Unrealized · open · USD', tip: isPaper ? 'Open P&L, paper book (consumption.account_summary)' : 'Sum of unrealized P&L over open SIM positions (USD)', value: unreal != null ? sK(unreal) : '—', valueCl: unreal != null ? pnlCl(unreal) : 'text-slate-600', sub: posRows ? `over ${posRows.length} open` : null },
+          { label: 'Unrealized · open · USD', tip: isPaper ? 'Open P&L across the paper book' : 'Sum of unrealized P&L over open SIM positions (USD)', value: unreal != null ? sK(unreal) : '—', valueCl: unreal != null ? pnlCl(unreal) : 'text-slate-600', sub: posRows ? `over ${posRows.length} open` : null },
           { label: 'Open positions', tip: `Open positions in the ${ENV_META[env].badge} book`, value: posRows ? posRows.length : '—', sub: `${ENV_META[env].badge} book` },
         ],
       };
@@ -256,9 +256,9 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
     if (isUat) {
       const ccy = a?.net_liquidation_currency || a?.currency;
       return {
-        footnote: 'UAT paper account — /api/ib/tws/uat/account (live gateway). No UAT round-trip P&L ledger exists (gold.paper_uat_fills is fills-only), so there is no honest curve or realized figure.',
+        footnote: 'UAT uses an IBKR paper account with real order routing and paper money. Fills are recorded individually; round-trip P&L and a realized curve are not yet available.',
         curve: null, curveNote: 'account snapshot',
-        curveEmpty: 'No UAT round-trip P&L ledger exists — fills-only blotter; no honest curve to draw (backend/ETL gap, not hidden data).',
+        curveEmpty: 'No UAT round-trip P&L ledger is available yet. The fills-only blotter remains visible; no realized curve is inferred.',
         focal: {
           label: `Net liquidation${ccy ? ` · ${ccy}` : ''}`,
           tip: 'UAT paper account net liquidation (live gateway)',
@@ -277,7 +277,7 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
     }
     // live
     return {
-      footnote: 'Live account — /api/command/overview account.books.live. Curve: account equity, last 30 sessions (consumption.account_equity_curve, HKD).',
+      footnote: 'Live account equity curve · last 30 sessions · HKD.',
       curve, curveNote: `30 sessions · equity${overview?.equity_curve_currency ? ` · ${overview.equity_curve_currency}` : ''}`,
       curveEmpty: overview == null ? 'Loading account…' : 'No live equity history served',
       focal: {
@@ -307,9 +307,9 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
     if (isPaper) {
       const cash = paperAcct?.equity != null && paperAcct?.cash_pct != null ? paperAcct.equity * paperAcct.cash_pct / 100 : null;
       return [
-        { label: 'Gross exposure', tip: 'Gross exposure as % of paper-book equity (consumption.account_summary)', value: paperAcct?.gross_exp_pct != null ? `${paperAcct.gross_exp_pct.toFixed(1)}%` : '—', sub: paperAcct?.net_exp_pct != null ? `net ${paperAcct.net_exp_pct.toFixed(1)}%` : null },
+        { label: 'Gross exposure', tip: 'Gross exposure as % of paper-book equity', value: paperAcct?.gross_exp_pct != null ? `${paperAcct.gross_exp_pct.toFixed(1)}%` : '—', sub: paperAcct?.net_exp_pct != null ? `net ${paperAcct.net_exp_pct.toFixed(1)}%` : null },
         { label: 'Equity · USD', value: paperAcct?.equity != null ? fmtKCcy(paperAcct.equity, paperAcct.currency || 'USD') : '—', sub: 'paper book' },
-        { label: 'Estimated cash · USD', tip: 'ESTIMATE — derived as equity × cash_pct (consumption.account_summary fields); no separate paper cash ledger is served', value: cash != null ? fmtK(cash) : '—', sub: paperAcct?.cash_pct != null ? `${paperAcct.cash_pct.toFixed(1)}% of equity` : null },
+        { label: 'Estimated cash · USD', tip: 'ESTIMATE — equity × reported cash percentage; no separate paper cash ledger is available', value: cash != null ? fmtK(cash) : '—', sub: paperAcct?.cash_pct != null ? `${paperAcct.cash_pct.toFixed(1)}% of equity` : null },
       ];
     }
     if (isUat) {
@@ -322,7 +322,7 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
     }
     // live
     return [
-      { label: 'Gross exposure', tip: 'Gross exposure as % of live equity (backend field; see qr_etl ticket for the gross-vs-attention inconsistency)', value: liveAcct?.gross_exp_pct != null ? `${liveAcct.gross_exp_pct.toFixed(1)}%` : '—', sub: liveAcct?.net_exp_pct != null ? `net ${liveAcct.net_exp_pct.toFixed(1)}%` : null },
+      { label: 'Gross exposure', tip: 'Reported gross exposure as % of live equity', value: liveAcct?.gross_exp_pct != null ? `${liveAcct.gross_exp_pct.toFixed(1)}%` : '—', sub: liveAcct?.net_exp_pct != null ? `net ${liveAcct.net_exp_pct.toFixed(1)}%` : null },
       { label: 'Cash · HKD', tip: 'Live account cash, HKD leg (never summed with the USD leg)', value: liveAcct?.cash_hkd != null ? fmtKCcy(liveAcct.cash_hkd, 'HKD') : '—' },
       { label: 'Cash · USD', tip: 'Live account cash, USD leg', value: liveAcct?.cash_usd != null ? fmtKCcy(liveAcct.cash_usd, 'USD') : '—', sub: liveAcct?.cash_pct != null ? `cash ${liveAcct.cash_pct.toFixed(1)}% of equity` : null },
     ];
@@ -387,7 +387,7 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
       f.push({
         label: 'Blotter fills',
         value: `${pnlMode.fills ?? 0} · today ${pnlMode.fills_today ?? 0}`,
-        tip: 'UAT fills blotter totals (/api/command/pnl-by-mode) — fills, not round-trips',
+        tip: 'UAT fills blotter totals — fills, not round-trips',
         target: 'execution',
       });
     }
@@ -485,10 +485,10 @@ export const EnvBook = ({ env, limits, stratNames, onDataAsOf, regimeFc, regimeC
         count={posRows ? posRows.length : null}
         asOf={positions?.as_of}
         headTip={
-          isSim ? 'SIM book — consumption.portfolio_positions_current. Entry date leftmost (YYYY-MM-DD), newest first.'
-          : isPaper ? 'Paper book — /api/agents/paper/open-positions. Entry date leftmost (YYYY-MM-DD), newest first. Market value = qty × last px (native ccy).'
-          : isUat ? 'Live IBKR UAT paper-account portfolio (ib.portfolio()). Entry price = IBKR average cost. No entry dates served — rows keep gateway order.'
-          : 'Live book — /api/positions/live (ibkr_snapshot). Entry = earliest FIFO open lot from the DUP825942 fills ledger (gold.paper_uat_fills), as-of the snapshot row.'
+          isSim ? 'SIM book · entry date leftmost (YYYY-MM-DD), newest first.'
+          : isPaper ? 'Paper book · entry date leftmost (YYYY-MM-DD), newest first · market value = qty × last price (native currency).'
+          : isUat ? 'Live IBKR UAT paper-account portfolio · entry price = IBKR average cost · entry dates unavailable, so rows keep gateway order.'
+          : 'Live book · entry = earliest FIFO open lot from the fills ledger, as of the position snapshot.'
         }
         note={isUat ? 'no entry dates served' : null}
         emptyText={
